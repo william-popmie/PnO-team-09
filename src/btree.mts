@@ -40,7 +40,7 @@ export function isFull(node: InteriorNode): boolean {
  *
  * If the node's children are themselves interior nodes, this function calls itself recursively on the appropriate child.
  * Then, it replaces the child by the recursive call's result (after splitting it if it is overfull).
- * 
+ *
  * @param {InteriorNode} node - The interior node to insert into.
  * @param {string} value - The value to insert.
  * @returns {InteriorNode} - The updated interior node.
@@ -61,16 +61,14 @@ function insertIntoSubtree(node: InteriorNode, value: string): InteriorNode {
   if (isLeaf(child)) {
     const newLeaf: LeafNode[] = [child, value].sort();
     if (newLeaf.length === 2) {
-      node.splice(childIdx, 1, newLeaf[0], newLeaf[0], newLeaf[1]); 
-
-    } else if (newLeaf.length === 3){
+      node.splice(childIdx, 1, newLeaf[0], newLeaf[0], newLeaf[1]);
+    } else if (newLeaf.length === 3) {
       node.splice(childIdx, 1, ...newLeaf);
-    }
-     else {
+    } else {
       node[childIdx] = newLeaf;
     }
   } else {
-    const updatedChild = insertIntoSubtree(child, value); 
+    const updatedChild = insertIntoSubtree(child, value);
     node[childIdx] = updatedChild;
 
     if (isFull(updatedChild)) {
@@ -88,25 +86,25 @@ function insertIntoSubtree(node: InteriorNode, value: string): InteriorNode {
 
 /**
  * If the tree is an interior node, calls insertIntoSubtree on it. Then, if the result is overfull, it splits it into multiple nodes.
- * 
+ *
  * @param {Tree} tree - The tree to insert into.
  * @param {string} value - The value to insert.
  * @returns {Tree} - The updated tree.
  */
 function insert(tree: Tree, value: string): Tree {
   if (tree === null) {
-      return value;
-    }
+    return value;
+  }
 
   if (isLeaf(tree)) {
-  const leaves = [tree, value].sort();
-  if (leaves.length <= 2) return [leaves[0], leaves[0], leaves[1]]; // simple 2-element leaf
-  // split leaf
-  const left: LeafNode[] = [leaves[0], leaves[0]];
-  const right: LeafNode[] = [leaves[2], leaves[2]];
-  const middle = leaves[1];
-  return [left, middle, right];
-}
+    const leaves = [tree, value].sort();
+    if (leaves.length <= 2) return [leaves[0], leaves[0], leaves[1]]; // simple 2-element leaf
+    // split leaf
+    const left: LeafNode[] = [leaves[0], leaves[0]];
+    const right: LeafNode[] = [leaves[2], leaves[2]];
+    const middle = leaves[1];
+    return [left, middle, right];
+  }
 
   const updatedRoot = insertIntoSubtree(tree, value);
 
@@ -132,17 +130,176 @@ function insert(tree: Tree, value: string): Tree {
  * - otherwise, the successor has size 3. The successor's first child is split off and added to the end of the child.
  */
 function deleteFromSubtree(node: InteriorNode, value: string): InteriorNode {
-  console.log(`deleteFromSubtree called with value=${value} and node=${JSON.stringify(node)}`);
-  throw new Error('Not yet implemented');
+  const newNode: InteriorNode = [];
+
+  // recurse into children, remove matching leaf children
+  for (let i = 0; i < node.length; i += 2) {
+    const child = node[i];
+    const sep = node[i + 1] as string | undefined;
+
+    if (Array.isArray(child)) {
+      const updatedChild = deleteFromSubtree(child, value);
+      // keep interior nodes (even if length === 1) so parent can decide how to merge/inline
+      if (updatedChild.length > 0) newNode.push(updatedChild);
+    } else {
+      // leaf
+      if (child !== value) {
+        newNode.push(child);
+      } else {
+        // drop this leaf (and its following separator) by continuing
+        continue;
+      }
+    }
+
+    if (sep !== undefined) newNode.push(sep);
+  }
+
+  // ensure node ends with a child (odd length)
+  if (newNode.length % 2 === 0) newNode.pop();
+  if (newNode.length === 0) return newNode;
+
+  // helpers
+  const toArray = (n: Node): InteriorNode => (Array.isArray(n) ? n : [n]);
+
+  type Part = { child: Node; sep?: string };
+  const parts: Part[] = [];
+  for (let i = 0; i < newNode.length; i += 2) {
+    parts.push({ child: newNode[i], sep: newNode[i + 1] as string | undefined });
+  }
+
+  // compact adjacent interior <-> leaf by moving parent separator into interior when safe
+  for (let i = 0; i < parts.length - 1; i++) {
+    const cur = parts[i];
+    const nxt = parts[i + 1];
+
+    // interior followed by leaf -> try append leaf into interior (move cur.sep inside)
+    if (Array.isArray(cur.child) && typeof nxt.child === 'string') {
+      const merged: InteriorNode = [...cur.child];
+      if (cur.sep !== undefined) merged.push(cur.sep);
+      merged.push(nxt.child);
+      if (merged.length <= 5) {
+        cur.child = merged;
+        cur.sep = nxt.sep;
+        parts.splice(i + 1, 1);
+        i--;
+        continue;
+      }
+    }
+
+    // leaf followed by interior -> try prepend leaf into interior
+    if (typeof cur.child === 'string' && Array.isArray(nxt.child)) {
+      const merged: InteriorNode = [cur.child];
+      if (cur.sep !== undefined) merged.push(cur.sep);
+      merged.push(...nxt.child);
+      if (merged.length <= 5) {
+        cur.child = merged;
+        cur.sep = nxt.sep;
+        parts.splice(i + 1, 1);
+        i--;
+        continue;
+      }
+    }
+  }
+
+  // fix underfull interior children (length === 1): borrow or merge with predecessor/successor
+  for (let k = 0; k < parts.length; k++) {
+    const part = parts[k];
+    if (!Array.isArray(part.child)) continue;
+    if (part.child.length !== 1) continue; // only handle underfull interior child
+
+    // try predecessor
+    if (k > 0 && Array.isArray(parts[k - 1].child)) {
+      const pred = parts[k - 1].child;
+
+      // pred has 2 children -> merge pred + predSep + part
+      if (pred.length === 3) {
+        const predSep = parts[k - 1].sep;
+        const merged: InteriorNode = [...pred];
+        if (predSep !== undefined) merged.push(predSep);
+        merged.push(...toArray(part.child));
+        parts[k - 1].child = merged;
+        parts[k - 1].sep = part.sep;
+        parts.splice(k, 1);
+        k--;
+        continue;
+      }
+
+      // pred has 3 children -> borrow last child from pred
+      if (pred.length === 5) {
+        const s2 = pred[pred.length - 2] as string;
+        const c2 = pred[pred.length - 1];
+        const newPred = pred.slice(0, pred.length - 2);
+        const parentSep = parts[k - 1].sep;
+        const childArr = toArray(part.child);
+        const c2Arr = toArray(c2);
+        const newChild: InteriorNode = [...c2Arr];
+        if (parentSep !== undefined) newChild.push(parentSep);
+        newChild.push(...childArr);
+        parts[k - 1].child = newPred;
+        parts[k - 1].sep = s2;
+        parts[k].child = newChild;
+        continue;
+      }
+    }
+
+    // try successor
+    if (k + 1 < parts.length && Array.isArray(parts[k + 1].child)) {
+      const succ = parts[k + 1].child;
+
+      // succ has 2 children -> merge part + part.sep + succ
+      if (succ.length === 3) {
+        const merged: InteriorNode = [...toArray(part.child)];
+        if (part.sep !== undefined) merged.push(part.sep);
+        merged.push(...succ);
+        parts[k].child = merged;
+        parts[k].sep = parts[k + 1].sep;
+        parts.splice(k + 1, 1);
+        k--;
+        continue;
+      }
+
+      // succ has 3 children -> borrow first child from succ
+      if (succ.length === 5) {
+        const s0 = succ[1] as string;
+        const c0 = succ[0];
+        const newSucc = succ.slice(2);
+        const parentSep = part.sep;
+        const childArr = toArray(part.child);
+        const c0Arr = toArray(c0);
+        const newChild: InteriorNode = [...childArr];
+        if (parentSep !== undefined) newChild.push(parentSep);
+        newChild.push(...c0Arr);
+        parts[k].child = newChild;
+        parts[k].sep = s0;
+        parts[k + 1].child = newSucc;
+        continue;
+      }
+    }
+  }
+
+  // reconstruct final node array from parts
+  const finalNode: InteriorNode = [];
+  for (const { child, sep } of parts) {
+    finalNode.push(child);
+    if (sep !== undefined) finalNode.push(sep);
+  }
+  if (finalNode.length % 2 === 0) finalNode.pop();
+
+  return finalNode;
 }
 
-/**
- * If the tree is an interior node, calls deleteFromSubtree on it. Then, if the result is underfull,
- * it uses the sole child node as the new root node.
- */
 function delete_(tree: Tree, value: string): Tree {
-  console.log(`delete called with value=${value} and tree=${JSON.stringify(tree)}`);
-  throw new Error('Not yet implemented');
+  // deletion on leaf root
+  if (tree === null) return null;
+  if (!Array.isArray(tree)) {
+    return tree === value ? null : tree;
+  }
+
+  // interior root
+  const newTree = deleteFromSubtree(tree, value);
+  if (newTree.length === 0) return null;
+  if (newTree.length === 1) return newTree[0];
+  return newTree;
 }
 
 process.nextTick(() => {

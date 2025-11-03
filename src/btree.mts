@@ -12,10 +12,9 @@ we provide, we often use "B-tree" and "B+-tree" interchangeably. Both are perfec
 children per interior node.
 
 */
-
 type LeafNode = string;
 /**
- * An interior node is an array of odd length, where the elements at even indices are either string values (i.e. leaf nodes)
+ * An interior node is an array of odd length, where the elements at even indices are either string (i.e. leaf nodes)
  * or child interior nodes, and each element at odd index i is a string value v such that the values in the subtree rooted
  * at index i - 1 are not greater than v, and the values in the subtree rooted at index i + 1 are greater than v.
  *
@@ -28,23 +27,98 @@ type Node = LeafNode | InteriorNode;
  */
 type Tree = Node | null;
 
+export function isLeaf(node: Node): node is LeafNode {
+  return typeof node === 'string';
+}
+
+export function isFull(node: InteriorNode): boolean {
+  return node.length > 5;
+}
+
 /**
  * Returns an updated version of the interior node, which may be overfull (more than 3 children/5 elements).
  *
  * If the node's children are themselves interior nodes, this function calls itself recursively on the appropriate child.
  * Then, it replaces the child by the recursive call's result (after splitting it if it is overfull).
+ * 
+ * @param {InteriorNode} node - The interior node to insert into.
+ * @param {string} value - The value to insert.
+ * @returns {InteriorNode} - The updated interior node.
  */
 function insertIntoSubtree(node: InteriorNode, value: string): InteriorNode {
-  console.log(`insertIntoSubtree called with value=${value} and node=${JSON.stringify(node)}`);
-  throw new Error('Not yet implemented');
+  let idx = 0;
+  while (idx < node.length) {
+    if (idx % 2 === 1 && value < (node[idx] as string)) {
+      break;
+    }
+    idx++;
+  }
+
+  const childIdx = idx % 2 === 0 ? idx : Math.max(idx - 1, 0);
+
+  const child = node[childIdx];
+
+  if (isLeaf(child)) {
+    const newLeaf: LeafNode[] = [child, value].sort();
+    if (newLeaf.length === 2) {
+      node.splice(childIdx, 1, newLeaf[0], newLeaf[0], newLeaf[1]); 
+
+    } else if (newLeaf.length === 3){
+      node.splice(childIdx, 1, ...newLeaf);
+    }
+     else {
+      node[childIdx] = newLeaf;
+    }
+  } else {
+    const updatedChild = insertIntoSubtree(child, value); 
+    node[childIdx] = updatedChild;
+
+    if (isFull(updatedChild)) {
+      const mid = Math.floor(updatedChild.length / 2);
+      const left = updatedChild.slice(0, mid);
+      const right = updatedChild.slice(mid + 1);
+      const midValue = updatedChild[mid];
+
+      node.splice(childIdx, 1, left, midValue, right);
+    }
+  }
+
+  return node;
 }
 
 /**
  * If the tree is an interior node, calls insertIntoSubtree on it. Then, if the result is overfull, it splits it into multiple nodes.
+ * 
+ * @param {Tree} tree - The tree to insert into.
+ * @param {string} value - The value to insert.
+ * @returns {Tree} - The updated tree.
  */
 function insert(tree: Tree, value: string): Tree {
-  console.log(`insert called with value=${value} and tree=${JSON.stringify(tree)}`);
-  throw new Error('Not yet implemented');
+  if (tree === null) {
+      return value;
+    }
+
+  if (isLeaf(tree)) {
+  const leaves = [tree, value].sort();
+  if (leaves.length <= 2) return [leaves[0], leaves[0], leaves[1]]; // simple 2-element leaf
+  // split leaf
+  const left: LeafNode[] = [leaves[0], leaves[0]];
+  const right: LeafNode[] = [leaves[2], leaves[2]];
+  const middle = leaves[1];
+  return [left, middle, right];
+}
+
+  const updatedRoot = insertIntoSubtree(tree, value);
+
+  if (isFull(updatedRoot)) {
+    const mid = Math.floor(updatedRoot.length / 2);
+    const left = updatedRoot.slice(0, mid);
+    const right = updatedRoot.slice(mid + 1);
+    const midValue = updatedRoot[mid];
+    return [left, midValue, right];
+  }
+
+  return updatedRoot;
 }
 
 /**

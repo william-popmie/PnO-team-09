@@ -35,6 +35,7 @@ type Tree = Node | null;
  * Then, it replaces the child by the recursive call's result (after splitting it if it is overfull).
  */
 function insertIntoSubtree(node: InteriorNode, value: string): InteriorNode {
+  console.log(`insertIntoSubtree called with value=${value} and node=${JSON.stringify(node)}`);
   throw new Error('Not yet implemented');
 }
 
@@ -42,6 +43,7 @@ function insertIntoSubtree(node: InteriorNode, value: string): InteriorNode {
  * If the tree is an interior node, calls insertIntoSubtree on it. Then, if the result is overfull, it splits it into multiple nodes.
  */
 function insert(tree: Tree, value: string): Tree {
+  console.log(`insert called with value=${value} and tree=${JSON.stringify(tree)}`);
   throw new Error('Not yet implemented');
 }
 
@@ -56,6 +58,7 @@ function insert(tree: Tree, value: string): Tree {
  * - otherwise, the successor has size 3. The successor's first child is split off and added to the end of the child.
  */
 function deleteFromSubtree(node: InteriorNode, value: string): InteriorNode {
+  console.log(`deleteFromSubtree called with value=${value} and node=${JSON.stringify(node)}`);
   throw new Error('Not yet implemented');
 }
 
@@ -64,6 +67,7 @@ function deleteFromSubtree(node: InteriorNode, value: string): InteriorNode {
  * it uses the sole child node as the new root node.
  */
 function delete_(tree: Tree, value: string): Tree {
+  console.log(`delete called with value=${value} and tree=${JSON.stringify(tree)}`);
   throw new Error('Not yet implemented');
 }
 
@@ -118,4 +122,8 @@ process.nextTick(() => {
     'sweet',
     ['world', 'world', 'zzz'],
   ]);
+  if (Array.isArray(tree)) {
+    insertIntoSubtree(tree, 'zzz');
+    deleteFromSubtree(tree, 'hello');
+  }
 });

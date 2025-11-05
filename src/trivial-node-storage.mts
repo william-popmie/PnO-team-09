@@ -108,6 +108,12 @@ export class TrivialLeafNode<KeysType, ValuesType>
   keys: KeysType[] = [];
   values: ValuesType[] = [];
 
+  nextLeaf: TrivialLeafNode<KeysType, ValuesType> | null = null;
+
+  constructor(storage: TrivialNodeStorage<KeysType, ValuesType>) {
+    super(storage);
+  }
+
   getCursorBeforeFirst(): TrivialLeafCursor<KeysType, ValuesType> {
     return new TrivialLeafCursor(this);
   }
@@ -120,7 +126,25 @@ export class TrivialLeafNode<KeysType, ValuesType>
   }
 
   async getNextLeaf(): Promise<TrivialLeafNode<KeysType, ValuesType> | null> {
-    return Promise.resolve(null);
+    return Promise.resolve(this.nextLeaf);
+  }
+
+  override canMergeWithNext(
+    _key: KeysType,
+    _nextNode: TrivialLeafNode<KeysType, ValuesType> | TrivialInternalNode<KeysType, ValuesType>,
+  ): boolean {
+    return this.keys.length + (_nextNode.isLeaf ? _nextNode.keys.length : 0) <= Number.MAX_SAFE_INTEGER;
+  }
+
+  override mergeWithNext(
+    _key: KeysType,
+    nextNode: TrivialLeafNode<KeysType, ValuesType> | TrivialInternalNode<KeysType, ValuesType>,
+  ): void {
+    if (nextNode.isLeaf) {
+      this.keys.push(...nextNode.keys);
+      this.values.push(...nextNode.values);
+      this.nextLeaf = nextNode.nextLeaf;
+    }
   }
 }
 
@@ -201,6 +225,23 @@ export class TrivialInternalNode<KeysType, ValuesType>
     previousNode.children.push(firstChild);
     previousNode.keys.push(separatorKey);
     return Promise.resolve(firstKey);
+  }
+
+  override canMergeWithNext(
+    _key: KeysType,
+    _nextNode: TrivialLeafNode<KeysType, ValuesType> | TrivialInternalNode<KeysType, ValuesType>,
+  ): boolean {
+    return this.keys.length + (_nextNode.isLeaf ? 0 : _nextNode.keys.length) <= Number.MAX_SAFE_INTEGER;
+  }
+
+  override mergeWithNext(
+    _key: KeysType,
+    nextNode: TrivialLeafNode<KeysType, ValuesType> | TrivialInternalNode<KeysType, ValuesType>,
+  ): void {
+    if (!nextNode.isLeaf) {
+      this.keys.push(...nextNode.keys);
+      this.children.push(...nextNode.children);
+    }
   }
 }
 

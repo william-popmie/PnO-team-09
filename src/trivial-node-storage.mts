@@ -10,6 +10,12 @@ import type {
   ChildCursor,
 } from './node-storage.mts';
 
+/**
+ * TrivialNodeStorage is a simple in-memory implementation of the NodeStorage interface.
+ *
+ * @template KeysType - The type of keys used in the nodes.
+ * @template ValuesType - The type of values stored in the leaf nodes.
+ */
 export class TrivialNodeStorage<KeysType, ValuesType>
   implements
     NodeStorage<KeysType, ValuesType, TrivialLeafNode<KeysType, ValuesType>, TrivialInternalNode<KeysType, ValuesType>>
@@ -46,6 +52,12 @@ export class TrivialNodeStorage<KeysType, ValuesType>
   }
 }
 
+/**
+ * TrivialNodeBase is the base class for nodes in the TrivialNodeStorage implementation.
+ *
+ * @template KeysType - The type of keys used in the nodes.
+ * @template ValuesType - The type of values stored in the leaf nodes.
+ */
 export abstract class TrivialNodeBase<KeysType, ValuesType>
   implements
     NodeBaseStorage<
@@ -76,6 +88,12 @@ export abstract class TrivialNodeBase<KeysType, ValuesType>
   ): void {}
 }
 
+/**
+ * TrivialLeafNode is the implementation of a leaf node in the TrivialNodeStorage.
+ *
+ * @template KeysType - The type of keys used in the nodes.
+ * @template ValuesType - The type of values stored in the leaf nodes.
+ */
 export class TrivialLeafNode<KeysType, ValuesType>
   extends TrivialNodeBase<KeysType, ValuesType>
   implements
@@ -106,6 +124,12 @@ export class TrivialLeafNode<KeysType, ValuesType>
   }
 }
 
+/**
+ * TrivialInternalNode is the implementation of an internal node in the TrivialNodeStorage.
+ *
+ * @template KeysType - The type of keys used in the nodes.
+ * @template ValuesType - The type of values stored in the leaf nodes.
+ */
 export class TrivialInternalNode<KeysType, ValuesType>
   extends TrivialNodeBase<KeysType, ValuesType>
   implements
@@ -180,6 +204,12 @@ export class TrivialInternalNode<KeysType, ValuesType>
   }
 }
 
+/**
+ * TrivialLeafCursor is the implementation of a cursor for leaf nodes in the TrivialNodeStorage.
+ *
+ * @template KeysType - The type of keys used in the nodes.
+ * @template ValuesType - The type of values stored in the leaf nodes.
+ */
 export class TrivialLeafCursor<KeysType, ValuesType>
   implements
     LeafCursor<KeysType, ValuesType, TrivialLeafNode<KeysType, ValuesType>, TrivialInternalNode<KeysType, ValuesType>>
@@ -228,6 +258,12 @@ export class TrivialLeafCursor<KeysType, ValuesType>
   }
 }
 
+/**
+ * TrivialChildCursor is the implementation of a cursor for child nodes in internal nodes of the TrivialNodeStorage.
+ *
+ * @template KeysType - The type of keys used in the nodes.
+ * @template ValuesType - The type of values stored in the leaf nodes.
+ */
 export class TrivialChildCursor<KeysType, ValuesType>
   implements
     ChildCursor<KeysType, ValuesType, TrivialLeafNode<KeysType, ValuesType>, TrivialInternalNode<KeysType, ValuesType>>

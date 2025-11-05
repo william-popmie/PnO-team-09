@@ -1,6 +1,16 @@
 // @author Mathias Bouhon Keulen
 // @date 2025-11-05
 
+/**
+ * NodeStorage defines the abstraction for storage and management of nodes in a tree structure.
+ * this can be implemented for various storage backends, such as in-memory, file-based, or database storage.
+ * It provides methods for creating and managing leaf and internal nodes, as well as for comparing keys and determining key sizes.
+ *
+ * @template KeysType - The type of keys used in the nodes.
+ * @template ValuesType - The type of values stored in the leaf nodes.
+ * @template LeafNodeStorageType - The type of leaf node storage, extending LeafNodeStorage interface.
+ * @template InternalNodeStorageType - The type of internal node storage, extending InternalNodeStorage interface.
+ */
 export interface NodeStorage<
   KeysType,
   ValuesType,
@@ -28,6 +38,15 @@ export interface NodeStorage<
   ): Promise<InternalNodeStorageType>;
 }
 
+/**
+ * NodeBaseStorage defines the base interface for nodes in a tree structure.
+ * It provides methods for merging nodes and checking if merging is possible.
+ *
+ * @template KeysType - The type of keys used in the nodes.
+ * @template ValuesType - The type of values stored in the leaf nodes.
+ * @template LeafNodeStorageType - The type of leaf node storage, extending LeafNodeStorage interface.
+ * @template InternalNodeStorageType - The type of internal node storage, extending InternalNodeStorage interface.
+ */
 export interface NodeBaseStorage<
   KeysType,
   ValuesType,
@@ -44,6 +63,15 @@ export interface NodeBaseStorage<
   mergeWithNext(key: KeysType, nextNode: LeafNodeStorageType | InternalNodeStorageType): void;
 }
 
+/**
+ * LeafNodeStorage defines the interface for leaf nodes in a tree structure.
+ * It extends NodeBaseStorage and provides methods for cursor management and leaf node traversal.
+ *
+ * @template KeysType - The type of keys used in the nodes.
+ * @template ValuesType - The type of values stored in the leaf nodes.
+ * @template leafNodeStorageType - The type of leaf node storage, extending LeafNodeStorage interface.
+ * @template InternalNodeStorageType - The type of internal node storage, extending InternalNodeStorage interface.
+ */
 export interface LeafNodeStorage<
   KeysType,
   ValuesType,
@@ -70,6 +98,15 @@ export interface LeafNodeStorage<
   getNextLeaf(): Promise<LeafNodeStorage<KeysType, ValuesType, leafNodeStorageType, InternalNodeStorageType> | null>;
 }
 
+/**
+ * InternalNodeStorage defines the interface for internal nodes in a tree structure.
+ * It extends NodeBaseStorage and provides methods for cursor management and child node traversal.
+ *
+ * @template KeysType - The type of keys used in the nodes.
+ * @template ValuesType - The type of values stored in the leaf nodes.
+ * @template leafNodeStorageType - The type of leaf node storage, extending LeafNodeStorage interface.
+ * @template InternalNodeStorageType - The type of internal node storage, extending InternalNodeStorage interface.
+ */
 export interface InternalNodeStorage<
   KeysType,
   ValuesType,
@@ -97,6 +134,15 @@ export interface InternalNodeStorage<
   moveFirstChildTo(previousNode: InternalNodeStorageType, separatorKey: KeysType): Promise<KeysType>;
 }
 
+/**
+ * LeafCursor defines the interface for cursors that navigate through leaf nodes in a tree structure.
+ * It provides methods for moving the cursor, accessing key-value pairs, and modifying the leaf node.
+ *
+ * @template KeysType - The type of keys used in the nodes.
+ * @template ValuesType - The type of values stored in the leaf nodes.
+ * @template leafNodeStorageType - The type of leaf node storage, extending LeafNodeStorage interface.
+ * @template InternalNodeStorageType - The type of internal node storage, extending InternalNodeStorage interface.
+ */
 export interface LeafCursor<
   KeysType,
   ValuesType,
@@ -118,6 +164,15 @@ export interface LeafCursor<
   removeKeyValuePairAfter(): Promise<void>;
 }
 
+/**
+ * ChildCursor defines the interface for cursors that navigate through child nodes in an internal node of a tree structure.
+ * It provides methods for moving the cursor, accessing child nodes, and modifying the internal node.
+ *
+ * @template KeysType - The type of keys used in the nodes.
+ * @template ValuesType - The type of values stored in the leaf nodes.
+ * @template leafNodeStorageType - The type of leaf node storage, extending LeafNodeStorage interface.
+ * @template InternalNodeStorageType - The type of internal node storage, extending InternalNodeStorage interface.
+ */
 export interface ChildCursor<
   KeysType,
   ValuesType,

@@ -1,3 +1,6 @@
+// @author Mathias Bouhon Keulen, Frederick Hillen
+// @date 2025-11-03
+
 import assert from 'node:assert';
 
 /*

@@ -186,13 +186,15 @@ export class TrivialInternalNode<KeysType, ValuesType>
     key: KeysType,
   ): Promise<{ cursor: TrivialChildCursor<KeysType, ValuesType>; isAtKey: boolean }> {
     let index = 0;
-    while (index < this.keys.length && this.storage.compareKeys(this.keys[index], key) >= 0) {
+    while (index < this.keys.length && this.storage.compareKeys(key, this.keys[index]) >= 0) {
       index++;
     }
 
     const cursor = new TrivialChildCursor<KeysType, ValuesType>(this);
     cursor.setPosition(index);
-    return Promise.resolve({ cursor, isAtKey: index < this.keys.length });
+
+    const isAtKey = index > 0 && this.storage.compareKeys(key, this.keys[index - 1]) === 0;
+    return Promise.resolve({ cursor, isAtKey });
   }
 
   isUnderfull(): boolean {
@@ -236,11 +238,11 @@ export class TrivialInternalNode<KeysType, ValuesType>
   }
 
   override mergeWithNext(
-    _key: KeysType,
+    key: KeysType,
     nextNode: TrivialLeafNode<KeysType, ValuesType> | TrivialInternalNode<KeysType, ValuesType>,
   ): void {
     if (!nextNode.isLeaf) {
-      this.keys.push(...nextNode.keys);
+      this.keys.push(key, ...nextNode.keys);
       this.children.push(...nextNode.children);
     }
   }

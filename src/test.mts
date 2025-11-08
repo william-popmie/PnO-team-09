@@ -17,14 +17,17 @@ async function testBPlusTree() {
 
   await tree.init();
 
-  const keysToInsert = [10, 20, 5, 15, 25];
+  const keysToInsert = [
+    10, 20, 5, 15, 25, 30, 3, 8, 12, 18, 22, 28, 35, 1, 4, 6, 7, 9, 11, 13, 14, 16, 17, 19, 21, 23, 24, 26, 27, 29, 31,
+    32, 33, 34,
+  ];
   console.log('\n=== INSERTION PHASE ===');
 
   for (const key of keysToInsert) {
     console.log(`\n--- Inserting ${key} ---`);
     await tree.insert(key, `value-${key}`);
     console.log('Tree after insertion:');
-    tree.printTree();
+    tree.ascii();
   }
 
   console.log('\n=== SEARCH PHASE ===');
@@ -40,14 +43,14 @@ async function testBPlusTree() {
     console.log(`\n--- Deleting ${key} ---`);
     await tree.delete(key);
     console.log('Tree after deletion:');
-    tree.printTree();
+    tree.ascii();
 
     const result = await tree.search(key);
     console.log(`Search ${key} after deletion:`, result);
   }
 
   console.log('\n=== FINAL TREE STRUCTURE ===');
-  tree.printTree();
+  tree.ascii();
 }
 
 await testBPlusTree();

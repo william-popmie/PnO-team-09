@@ -68,6 +68,132 @@ export class BPlusTree<
     }
   }
 
+  printTree(): void {
+    if (!this.root) {
+      console.log('<empty>');
+      return;
+    }
+
+    const q: (LeafNodeStorageType | InternalNodeStorageType)[] = [this.root];
+    while (q.length) {
+      const levelCount = q.length;
+      const parts: string[] = [];
+      for (let i = 0; i < levelCount; i++) {
+        const n = q.shift()!;
+        if (n.isLeaf) {
+          parts.push(`Leaf(${n.keys.map((k) => String(k)).join(',')})`);
+        } else {
+          const inNode = n;
+          parts.push(`Internal(keys:${inNode.keys.map((k) => String(k)).join(',')})`);
+          for (const c of inNode.children) q.push(c);
+        }
+      }
+      console.log(parts.join(' | '));
+    }
+  }
+
+  ascii(): void {
+    if (!this.root) {
+      console.log('<empty>');
+      return;
+    }
+
+    const nodeText = (n: LeafNodeStorageType | InternalNodeStorageType) =>
+      `[${n.keys.map((k) => String(k)).join(',')}]`;
+
+    function layout(node: LeafNodeStorageType | InternalNodeStorageType): {
+      lines: string[];
+      width: number;
+      middle: number;
+    } {
+      const text = nodeText(node);
+      const textWidth = Math.max(1, text.length);
+
+      if (node.isLeaf) {
+        return { lines: [text], width: textWidth, middle: Math.floor(textWidth / 2) };
+      }
+
+      const internal = node;
+      const childrenLayouts = internal.children.map((c) => layout(c));
+
+      const gap = 3;
+      const childrenWidth = childrenLayouts.reduce((s, cl) => s + cl.width, 0);
+      const totalChildrenWidth = childrenWidth + Math.max(0, childrenLayouts.length - 1) * gap;
+      let width = Math.max(textWidth, totalChildrenWidth);
+
+      let childStarts: number[] = [];
+      const computeChildStarts = () => {
+        childStarts = [];
+        let cur = Math.floor((width - totalChildrenWidth) / 2);
+        for (const cl of childrenLayouts) {
+          childStarts.push(cur);
+          cur += cl.width + gap;
+        }
+      };
+      computeChildStarts();
+
+      let parentMiddle: number;
+      if (childrenLayouts.length % 2 === 1) {
+        const midIndex = Math.floor(childrenLayouts.length / 2);
+        parentMiddle = childStarts[midIndex] + childrenLayouts[midIndex].middle;
+        const leftNeeded = Math.max(0, Math.floor(textWidth / 2) - parentMiddle);
+        const rightNeeded = Math.max(0, parentMiddle + Math.ceil(textWidth / 2) - (width - 1));
+        if (leftNeeded > 0 || rightNeeded > 0) {
+          width += leftNeeded + rightNeeded;
+          computeChildStarts();
+          parentMiddle = childStarts[midIndex] + childrenLayouts[midIndex].middle;
+        }
+      } else {
+        parentMiddle = Math.floor(width / 2);
+        const leftNeeded = Math.max(0, Math.floor(textWidth / 2) - parentMiddle);
+        const rightNeeded = Math.max(0, parentMiddle + Math.ceil(textWidth / 2) - (width - 1));
+        if (leftNeeded > 0 || rightNeeded > 0) {
+          width += leftNeeded + rightNeeded;
+          computeChildStarts();
+          parentMiddle = Math.floor(width / 2);
+        }
+      }
+
+      const parentStart = parentMiddle - Math.floor(text.length / 2);
+      const parentLine =
+        ' '.repeat(Math.max(0, parentStart)) + text + ' '.repeat(Math.max(0, width - parentStart - text.length));
+
+      const childMiddles = childrenLayouts.map((cl, i) => childStarts[i] + cl.middle);
+      const bridgeLeft = Math.min(...childMiddles);
+      const bridgeRight = Math.max(...childMiddles);
+
+      const bridgeRowArr = new Array(width).fill(' ');
+      for (let c = bridgeLeft; c <= bridgeRight; c++) bridgeRowArr[c] = '-';
+      bridgeRowArr[parentMiddle] = '|';
+
+      const dropRowArr = new Array(width).fill(' ');
+      for (const cm of childMiddles) dropRowArr[cm] = '|';
+
+      const connectorLines = [bridgeRowArr.join(''), dropRowArr.join('')];
+
+      const maxChildHeight = Math.max(...childrenLayouts.map((c) => c.lines.length));
+      const childLines: string[] = [];
+      for (let row = 0; row < maxChildHeight; row++) {
+        let line = '';
+        for (let i = 0; i < childrenLayouts.length; i++) {
+          const cl = childrenLayouts[i];
+          const clLine = cl.lines[row] ?? ' '.repeat(cl.width);
+          const needPad = childStarts[i] - line.length;
+          if (needPad > 0) line += ' '.repeat(needPad);
+          line += clLine;
+        }
+        if (line.length < width) line += ' '.repeat(width - line.length);
+        childLines.push(line);
+      }
+
+      const lines = [parentLine, ...connectorLines, ...childLines];
+      return { lines, width, middle: parentMiddle };
+    }
+
+    const picture = layout(this.root);
+    for (const l of picture.lines) console.log(l);
+  }
+
   private async handleUnderflow(node: LeafNodeStorageType | InternalNodeStorageType): Promise<void> {
     const parent = await this.findParent(node);
     if (!parent) {
@@ -143,30 +269,6 @@ export class BPlusTree<
 
     if (parent.keys.length < minKeys) {
       await this.handleUnderflow(parent);
-    }
-  }
-
-  printTree(): void {
-    if (!this.root) {
-      console.log('<empty>');
-      return;
-    }
-
-    const q: (LeafNodeStorageType | InternalNodeStorageType)[] = [this.root];
-    while (q.length) {
-      const levelCount = q.length;
-      const parts: string[] = [];
-      for (let i = 0; i < levelCount; i++) {
-        const n = q.shift()!;
-        if (n.isLeaf) {
-          parts.push(`Leaf(${n.keys.map((k) => String(k)).join(',')})`);
-        } else {
-          const inNode = n;
-          parts.push(`Internal(keys:${inNode.keys.map((k) => String(k)).join(',')})`);
-          for (const c of inNode.children) q.push(c);
-        }
-      }
-      console.log(parts.join(' | '));
     }
   }
 

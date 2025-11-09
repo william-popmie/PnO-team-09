@@ -3,6 +3,15 @@
 
 import type { NodeStorage, LeafNodeStorage, InternalNodeStorage } from './node-storage.mjs';
 
+/**
+ * A B+ tree implementation.
+ *
+ * @template KeysType - The type of the keys in the B+ tree.
+ * @template ValuesType - The type of the values in the B+ tree.
+ * @template LeafNodeStorageType - The type of the leaf node storage.
+ * @template InternalNodeStorageType - The type of the internal node storage.
+ *
+ */
 export class BPlusTree<
   KeysType,
   ValuesType,
@@ -18,16 +27,35 @@ export class BPlusTree<
   private readonly storage: NodeStorage<KeysType, ValuesType, LeafNodeStorageType, InternalNodeStorageType>;
   private readonly order: number;
 
+  /**
+   * Creates a new B+ tree.
+   *
+   * @param {NodeStorage} storage - The node storage to use.
+   * @param {number} order - The order of the B+ tree (maximum number of keys per node).
+   * @throws {Error} If the order is less than 1.
+   */
   constructor(storage: NodeStorage<KeysType, ValuesType, LeafNodeStorageType, InternalNodeStorageType>, order: number) {
     if (order < 1) throw new Error('order must be >= 1');
     this.storage = storage;
     this.order = order;
   }
 
+  /**
+   * Initializes the B+ tree.
+   *
+   * @returns {Promise<void>} A promise that resolves when the tree is initialized.
+   */
   async init(): Promise<void> {
     this.root = await this.storage.createTree();
   }
 
+  /**
+   * Inserts a key-value pair into the B+ tree.
+   *
+   * @param {KeysType} key - The key to insert.
+   * @param {ValuesType} value - The value to insert.
+   * @returns {Promise<void>} A promise that resolves when the insertion is complete.
+   */
   async insert(key: KeysType, value: ValuesType): Promise<void> {
     const leaf = await this.findLeaf(key);
     await this.insertInLeaf(leaf, key, value);
@@ -37,6 +65,12 @@ export class BPlusTree<
     }
   }
 
+  /**
+   * Searches for a key in the B+ tree and returns its associated value.
+   *
+   * @param {KeysType} key - The key to search for.
+   * @returns {Promise<ValuesType | null>} A promise that resolves to the value associated with the key, or null if not found.
+   */
   async search(key: KeysType): Promise<ValuesType | null> {
     const leaf = await this.findLeaf(key);
     const result = await leaf.getCursorBeforeKey(key);
@@ -47,6 +81,12 @@ export class BPlusTree<
     return pair ? pair.value : null;
   }
 
+  /**
+   * Deletes a key-value pair from the B+ tree.
+   *
+   * @param {KeysType} key - The key to delete.
+   * @returns {Promise<void>} A promise that resolves when the deletion is complete.
+   */
   async delete(key: KeysType): Promise<void> {
     const leaf = await this.findLeaf(key);
     const { cursor, isAtKey } = await leaf.getCursorBeforeKey(key);
@@ -68,6 +108,11 @@ export class BPlusTree<
     }
   }
 
+  /**
+   * Prints a simple text representation of the B+ tree to the console.
+   *
+   * @returns {void}
+   */
   printTree(): void {
     if (!this.root) {
       console.log('<empty>');
@@ -92,6 +137,11 @@ export class BPlusTree<
     }
   }
 
+  /**
+   * Prints an ASCII representation of the B+ tree to the console.
+   *
+   * @returns {void}
+   */
   ascii(): void {
     if (!this.root) {
       console.log('<empty>');
@@ -194,6 +244,11 @@ export class BPlusTree<
     for (const l of picture.lines) console.log(l);
   }
 
+  /**
+   * Returns an async generator that yields all key-value pairs in the B+ tree in order.
+   *
+   * @returns {AsyncGenerator<{ key: KeysType; value: ValuesType }, void, unknown>} An async generator yielding key-value pairs.
+   */
   public async *entries(): AsyncGenerator<{ key: KeysType; value: ValuesType }, void, unknown> {
     if (!this.root) return;
     let leaf = await this.getLeftmostLeaf();
@@ -209,24 +264,45 @@ export class BPlusTree<
     }
   }
 
+  /**
+   * Returns an async iterator that yields all key-value pairs in the B+ tree in order.
+   *
+   * @returns {AsyncGenerator<{ key: KeysType; value: ValuesType }, void, unknown>} An async generator yielding key-value pairs.
+   */
   public async *[Symbol.asyncIterator](): AsyncGenerator<{ key: KeysType; value: ValuesType }, void, unknown> {
     for await (const entry of this.entries()) {
       yield entry;
     }
   }
 
+  /**
+   * Returns an async generator that yields all keys in the B+ tree in order.
+   *
+   * @returns {AsyncGenerator<KeysType, void, unknown>} An async generator yielding keys.
+   */
   public async *keys(): AsyncGenerator<KeysType, void, unknown> {
     for await (const entry of this.entries()) {
       yield entry.key;
     }
   }
 
+  /**
+   * Returns an async generator that yields all values in the B+ tree in order.
+   *
+   * @returns {AsyncGenerator<ValuesType, void, unknown>} An async generator yielding values.
+   */
   public async *values(): AsyncGenerator<ValuesType, void, unknown> {
     for await (const entry of this.entries()) {
       yield entry.value;
     }
   }
 
+  /**
+   * Returns an async generator that yields all key-value pairs starting from the specified key.
+   *
+   * @param {KeysType} startKey - The key to start from.
+   * @returns {AsyncGenerator<{ key: KeysType; value: ValuesType }, void, unknown>} An async generator yielding key-value pairs.
+   */
   public async *entriesFrom(startKey: KeysType): AsyncGenerator<{ key: KeysType; value: ValuesType }, void, unknown> {
     if (!this.root) return;
     let leaf = await this.findLeaf(startKey);
@@ -252,6 +328,17 @@ export class BPlusTree<
     }
   }
 
+  /**
+   * Returns an async generator that yields all key-value pairs within the specified key range.
+   *
+   * @param {KeysType} startKey - The start key of the range.
+   * @param {KeysType} endKey - The end key of the range.
+   * @param {Object} [options] - Options for the range query.
+   * @param {boolean} [options.inclusiveStart=true] - Whether to include the start key.
+   * @param {boolean} [options.inclusiveEnd=false] - Whether to include the end key.
+   * @param {(a: KeysType, b: KeysType) => number} [options.comparator] - A custom comparator function for keys.
+   * @returns {AsyncGenerator<{ key: KeysType; value: ValuesType }, void, unknown>} An async generator yielding key-value pairs within the range.
+   */
   public async *range(
     startKey: KeysType,
     endKey: KeysType,
@@ -275,16 +362,33 @@ export class BPlusTree<
     }
   }
 
+  /**
+   * Executes a provided function once for each key-value pair in the B+ tree.
+   *
+   * @param {(key: KeysType, value: ValuesType) => void | Promise<void>} callback - The function to execute for each key-value pair.
+   * @returns {Promise<void>} A promise that resolves when all key-value pairs have been processed.
+   */
   public async forEach(callback: (key: KeysType, value: ValuesType) => void | Promise<void>): Promise<void> {
     for await (const { key, value } of this.entries()) {
       await callback(key, value);
     }
   }
 
+  /**
+   * Clears the B+ tree, removing all key-value pairs.
+   *
+   * @returns {Promise<void>} A promise that resolves when the tree is cleared.
+   */
   public async clear(): Promise<void> {
     this.root = await this.storage.createTree();
   }
 
+  /**
+   * Retrieves the leftmost leaf node of the B+ tree.
+   *
+   * @returns {Promise<LeafNodeStorageType>} A promise that resolves to the leftmost leaf node.
+   * @throws {Error} If the tree is not initialized.
+   */
   private async getLeftmostLeaf(): Promise<LeafNodeStorageType> {
     if (!this.root) throw new Error('Tree is not initialized');
     let node: LeafNodeStorageType | InternalNodeStorageType = this.root;
@@ -295,6 +399,13 @@ export class BPlusTree<
     return Promise.resolve(node);
   }
 
+  /**
+   * Handles underflow in a node by borrowing or merging with siblings.
+   *
+   * @param {LeafNodeStorageType | InternalNodeStorageType} node - The node that is underflowing.
+   * @returns {Promise<void>} A promise that resolves when the underflow is handled.
+   * @throws {Error} If the parent does not contain the node in its children.
+   */
   private async handleUnderflow(node: LeafNodeStorageType | InternalNodeStorageType): Promise<void> {
     const parent = await this.findParent(node);
     if (!parent) {
@@ -373,6 +484,13 @@ export class BPlusTree<
     }
   }
 
+  /**
+   * Finds the leaf node that should contain the specified key.
+   *
+   * @param {KeysType} key - The key to find the leaf for.
+   * @returns {Promise<LeafNodeStorageType>} A promise that resolves to the leaf node.
+   * @throws {Error} If the child node cannot be found while descending.
+   */
   private async findLeaf(key: KeysType): Promise<LeafNodeStorageType> {
     let node: LeafNodeStorageType | InternalNodeStorageType = this.root;
     while (!node.isLeaf) {
@@ -385,6 +503,12 @@ export class BPlusTree<
     return node;
   }
 
+  /**
+   * Finds the parent of a given node.
+   *
+   * @param {LeafNodeStorageType | InternalNodeStorageType} child - The child node whose parent is to be found.
+   * @returns {Promise<InternalNodeStorageType | null>} A promise that resolves to the parent node, or null if the child is the root.
+   */
   private async findParent(
     child: LeafNodeStorageType | InternalNodeStorageType,
   ): Promise<InternalNodeStorageType | null> {
@@ -393,6 +517,13 @@ export class BPlusTree<
     return this.findParentRecursive(this.root, child);
   }
 
+  /**
+   * Recursively finds the parent of a given child node starting from a specified node.
+   *
+   * @param {InternalNodeStorageType} node - The current node to search from.
+   * @param {LeafNodeStorageType | InternalNodeStorageType} child - The child node whose parent is to be found.
+   * @returns {Promise<InternalNodeStorageType | null>} A promise that resolves to the parent node, or null if not found.
+   */
   private async findParentRecursive(
     node: InternalNodeStorageType,
     child: LeafNodeStorageType | InternalNodeStorageType,
@@ -414,12 +545,26 @@ export class BPlusTree<
     return null;
   }
 
+  /**
+   * Inserts a key-value pair into a leaf node.
+   *
+   * @param {LeafNodeStorageType} leaf - The leaf node to insert into.
+   * @param {KeysType} key - The key to insert.
+   * @param {ValuesType} value - The value to insert.
+   * @returns {Promise<void>} A promise that resolves when the insertion is complete.
+   */
   private async insertInLeaf(leaf: LeafNodeStorageType, key: KeysType, value: ValuesType): Promise<void> {
     const result = await leaf.getCursorBeforeKey(key);
     const { cursor } = result;
     await cursor.insert(key, value);
   }
 
+  /**
+   * Splits a leaf node that has exceeded the maximum number of keys.
+   *
+   * @param {LeafNodeStorageType} leaf - The leaf node to split.
+   * @returns {Promise<void>} A promise that resolves when the split is complete.
+   */
   private async splitLeaf(leaf: LeafNodeStorageType): Promise<void> {
     const mid = Math.ceil(leaf.keys.length / 2);
     const newLeaf = this.storage.createLeaf();
@@ -434,6 +579,12 @@ export class BPlusTree<
     await this.insertInParent(leaf, promotedKey, newLeaf);
   }
 
+  /**
+   * Splits an internal node that has exceeded the maximum number of keys.
+   *
+   * @param {InternalNodeStorageType} internal - The internal node to split.
+   * @returns {Promise<void>} A promise that resolves when the split is complete.
+   */
   private async splitInternalNode(internal: InternalNodeStorageType): Promise<void> {
     const mid = Math.floor(internal.keys.length / 2);
     const promotedKey = internal.keys[mid];
@@ -452,6 +603,16 @@ export class BPlusTree<
     await this.insertInParent(internal, promotedKey, newInternal);
   }
 
+  /**
+   * Inserts a promoted key and new node into the parent of a given node.
+   *
+   * @param {LeafNodeStorageType | InternalNodeStorageType} node - The node whose parent will receive the promoted key and new node.
+   * @param {KeysType} promotedKey - The key to promote to the parent.
+   * @param {LeafNodeStorageType | InternalNodeStorageType} newNode - The new node to insert into the parent.
+   * @returns {Promise<void>} A promise that resolves when the insertion is complete.
+   * @throws {Error} If the parent node cannot be found.
+   * @throws {Error} If the parent does not contain the node as a child.
+   */
   private async insertInParent(
     node: LeafNodeStorageType | InternalNodeStorageType,
     promotedKey: KeysType,

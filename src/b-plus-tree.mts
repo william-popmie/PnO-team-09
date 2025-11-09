@@ -1,5 +1,5 @@
 // @author Mathias Bouhon Keulen
-// @date 2025-11-08
+// @date 2025-11-09
 
 import type { NodeStorage, LeafNodeStorage, InternalNodeStorage } from './node-storage.mjs';
 
@@ -192,6 +192,107 @@ export class BPlusTree<
 
     const picture = layout(this.root);
     for (const l of picture.lines) console.log(l);
+  }
+
+  public async *entries(): AsyncGenerator<{ key: KeysType; value: ValuesType }, void, unknown> {
+    if (!this.root) return;
+    let leaf = await this.getLeftmostLeaf();
+    while (leaf) {
+      for (let i = 0; i < leaf.keys.length; i++) {
+        yield { key: leaf.keys[i], value: leaf.values[i] };
+      }
+      if (leaf.nextLeaf) {
+        leaf = leaf.nextLeaf;
+      } else {
+        break;
+      }
+    }
+  }
+
+  public async *[Symbol.asyncIterator](): AsyncGenerator<{ key: KeysType; value: ValuesType }, void, unknown> {
+    for await (const entry of this.entries()) {
+      yield entry;
+    }
+  }
+
+  public async *keys(): AsyncGenerator<KeysType, void, unknown> {
+    for await (const entry of this.entries()) {
+      yield entry.key;
+    }
+  }
+
+  public async *values(): AsyncGenerator<ValuesType, void, unknown> {
+    for await (const entry of this.entries()) {
+      yield entry.value;
+    }
+  }
+
+  public async *entriesFrom(startKey: KeysType): AsyncGenerator<{ key: KeysType; value: ValuesType }, void, unknown> {
+    if (!this.root) return;
+    let leaf = await this.findLeaf(startKey);
+
+    const { cursor } = await leaf.getCursorBeforeKey(startKey);
+    const pair = cursor.getKeyValuePairAfter();
+
+    let startIdx = 0;
+    if (pair) {
+      const idx = leaf.keys.findIndex((k) => k === pair.key);
+      startIdx = idx >= 0 ? idx : 0;
+    } else {
+      startIdx = leaf.keys.length;
+    }
+
+    while (leaf) {
+      for (let i = startIdx; i < leaf.keys.length; i++) {
+        yield { key: leaf.keys[i], value: leaf.values[i] };
+      }
+      if (!leaf.nextLeaf) break;
+      leaf = leaf.nextLeaf;
+      startIdx = 0;
+    }
+  }
+
+  public async *range(
+    startKey: KeysType,
+    endKey: KeysType,
+    options?: { inclusiveStart?: boolean; inclusiveEnd?: boolean; comparator?: (a: KeysType, b: KeysType) => number },
+  ): AsyncGenerator<{ key: KeysType; value: ValuesType }, void, unknown> {
+    const inclusiveStart = options?.inclusiveStart ?? true;
+    const inclusiveEnd = options?.inclusiveEnd ?? false;
+    const comparator = options?.comparator ?? ((a: KeysType, b: KeysType) => (a < b ? -1 : a > b ? 1 : 0));
+
+    const startLeafGenerator = this.entriesFrom(startKey);
+    for await (const { key, value } of startLeafGenerator) {
+      const cmpStart = comparator(key, startKey);
+      if (!inclusiveStart && cmpStart === 0) {
+        continue;
+      }
+      const cmpEnd = comparator(key, endKey);
+      if (cmpEnd > 0 || (!inclusiveEnd && cmpEnd === 0)) {
+        break;
+      }
+      yield { key: key, value: value };
+    }
+  }
+
+  public async forEach(callback: (key: KeysType, value: ValuesType) => void | Promise<void>): Promise<void> {
+    for await (const { key, value } of this.entries()) {
+      await callback(key, value);
+    }
+  }
+
+  public async clear(): Promise<void> {
+    this.root = await this.storage.createTree();
+  }
+
+  private async getLeftmostLeaf(): Promise<LeafNodeStorageType> {
+    if (!this.root) throw new Error('Tree is not initialized');
+    let node: LeafNodeStorageType | InternalNodeStorageType = this.root;
+    while (!node.isLeaf) {
+      const internal = node;
+      node = internal.children[0];
+    }
+    return Promise.resolve(node);
   }
 
   private async handleUnderflow(node: LeafNodeStorageType | InternalNodeStorageType): Promise<void> {

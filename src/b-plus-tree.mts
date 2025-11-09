@@ -141,6 +141,12 @@ export class BPlusTree<
    * Prints an ASCII representation of the B+ tree to the console.
    *
    * @returns {void}
+   *
+   * @example
+   *         [15,20]
+   *    --------|-------
+   *    |       |      |
+   * [5,10]   [15]   [20]
    */
   ascii(): void {
     if (!this.root) {

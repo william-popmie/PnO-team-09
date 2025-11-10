@@ -1,5 +1,5 @@
-// @author Mathias Bouhon Keulen
-// @date 2025-11-09
+// @author Mathias Bouhon Keulen, Frederick Hillen
+// @date 2025-11-10
 
 import type { NodeStorage, LeafNodeStorage, InternalNodeStorage } from './node-storage.mjs';
 
@@ -319,16 +319,13 @@ export class BPlusTree<
     const cmp = (a: KeysType, b: KeysType): number => (a < b ? -1 : a > b ? 1 : 0);
 
     while (leaf) {
-      // find first index in this leaf with key >= startKey
       const startIdx = leaf.keys.findIndex((k) => cmp(k, startKey) >= 0);
 
-      // if none in this leaf, advance to next leaf
       if (startIdx === -1) {
         leaf = leaf.nextLeaf ?? null;
         continue;
       }
 
-      // yield from startIdx to end of this leaf, then continue with subsequent leaves
       for (let i = startIdx; i < leaf.keys.length; i++) {
         yield { key: leaf.keys[i], value: leaf.values[i] };
       }
@@ -567,6 +564,13 @@ export class BPlusTree<
     await cursor.insert(key, value);
   }
 
+  /**
+   * Attempt to redistribute keys from an overfull leaf into an adjacent sibling
+   * so we can avoid splitting the leaf. Returns true when redistribution happened.
+   *
+   * @param {LeafNodeStorageType} leaf - The leaf node to redistribute from.
+   * @returns {Promise<boolean>} A promise that resolves to true if redistribution occurred, false otherwise.
+   */
   private async tryRedistributeLeafBeforeSplit(leaf: LeafNodeStorageType): Promise<boolean> {
     const parent = await this.findParent(leaf);
     if (!parent) return false;
@@ -621,6 +625,9 @@ export class BPlusTree<
   /**
    * Attempt to redistribute children from an overfull internal node into an adjacent sibling
    * so we can avoid splitting the internal node. Returns true when redistribution happened.
+   *
+   * @param {InternalNodeStorageType} internal - The internal node to redistribute from.
+   * @returns {Promise<boolean>} A promise that resolves to true if redistribution occurred, false otherwise.
    */
   private async tryRedistributeInternalBeforeSplit(internal: InternalNodeStorageType): Promise<boolean> {
     const parent = await this.findParent(internal);

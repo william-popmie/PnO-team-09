@@ -61,7 +61,10 @@ export class BPlusTree<
     await this.insertInLeaf(leaf, key, value);
 
     if (leaf.keys.length > this.order) {
-      await this.splitLeaf(leaf);
+      const redistributed = await this.tryRedistributeLeafBeforeSplit(leaf);
+      if (!redistributed) {
+        await this.splitLeaf(leaf);
+      }
     }
   }
 
@@ -311,26 +314,25 @@ export class BPlusTree<
    */
   public async *entriesFrom(startKey: KeysType): AsyncGenerator<{ key: KeysType; value: ValuesType }, void, unknown> {
     if (!this.root) return;
-    let leaf = await this.findLeaf(startKey);
+    let leaf: LeafNodeStorageType | null = await this.findLeaf(startKey);
 
-    const { cursor } = await leaf.getCursorBeforeKey(startKey);
-    const pair = cursor.getKeyValuePairAfter();
-
-    let startIdx = 0;
-    if (pair) {
-      const idx = leaf.keys.findIndex((k) => k === pair.key);
-      startIdx = idx >= 0 ? idx : 0;
-    } else {
-      startIdx = leaf.keys.length;
-    }
+    const cmp = (a: KeysType, b: KeysType): number => (a < b ? -1 : a > b ? 1 : 0);
 
     while (leaf) {
+      // find first index in this leaf with key >= startKey
+      const startIdx = leaf.keys.findIndex((k) => cmp(k, startKey) >= 0);
+
+      // if none in this leaf, advance to next leaf
+      if (startIdx === -1) {
+        leaf = leaf.nextLeaf ?? null;
+        continue;
+      }
+
+      // yield from startIdx to end of this leaf, then continue with subsequent leaves
       for (let i = startIdx; i < leaf.keys.length; i++) {
         yield { key: leaf.keys[i], value: leaf.values[i] };
       }
-      if (!leaf.nextLeaf) break;
-      leaf = leaf.nextLeaf;
-      startIdx = 0;
+      leaf = leaf.nextLeaf ?? null;
     }
   }
 
@@ -565,6 +567,37 @@ export class BPlusTree<
     await cursor.insert(key, value);
   }
 
+  private async tryRedistributeLeafBeforeSplit(leaf: LeafNodeStorageType): Promise<boolean> {
+    const parent = await this.findParent(leaf);
+    if (!parent) return false;
+
+    const idx = parent.children.indexOf(leaf);
+    if (idx === -1) throw new Error('Parent does not contain leaf in children');
+
+    const left = idx > 0 ? (parent.children[idx - 1] as LeafNodeStorageType) : null;
+    const right = idx < parent.children.length - 1 ? (parent.children[idx + 1] as LeafNodeStorageType) : null;
+
+    if (left && left.keys.length < this.order) {
+      const movedKey = leaf.keys.shift() as KeysType;
+      const movedVal = leaf.values.shift() as ValuesType;
+      left.keys.push(movedKey);
+      left.values.push(movedVal);
+      parent.keys[idx - 1] = leaf.keys[0];
+      return true;
+    }
+
+    if (right && right.keys.length < this.order) {
+      const movedKey = leaf.keys.pop() as KeysType;
+      const movedVal = leaf.values.pop() as ValuesType;
+      right.keys.unshift(movedKey);
+      right.values.unshift(movedVal);
+      parent.keys[idx] = right.keys[0];
+      return true;
+    }
+
+    return false;
+  }
+
   /**
    * Splits a leaf node that has exceeded the maximum number of keys.
    *
@@ -586,12 +619,52 @@ export class BPlusTree<
   }
 
   /**
+   * Attempt to redistribute children from an overfull internal node into an adjacent sibling
+   * so we can avoid splitting the internal node. Returns true when redistribution happened.
+   */
+  private async tryRedistributeInternalBeforeSplit(internal: InternalNodeStorageType): Promise<boolean> {
+    const parent = await this.findParent(internal);
+    if (!parent) return false;
+
+    const idx = parent.children.indexOf(internal);
+    if (idx === -1) throw new Error('Parent does not contain internal node in children');
+
+    const left = idx > 0 ? (parent.children[idx - 1] as InternalNodeStorageType) : null;
+    const right = idx < parent.children.length - 1 ? (parent.children[idx + 1] as InternalNodeStorageType) : null;
+
+    if (left && left.keys.length < this.order) {
+      const sepFromParent = parent.keys[idx - 1];
+      const movedChild = internal.children.shift() as LeafNodeStorageType | InternalNodeStorageType;
+      const newParentSep = internal.keys.shift() as KeysType;
+      left.keys.push(sepFromParent);
+      left.children.push(movedChild);
+      parent.keys[idx - 1] = newParentSep;
+      return true;
+    }
+
+    if (right && right.keys.length < this.order) {
+      const sepFromParent = parent.keys[idx];
+      const movedChild = internal.children.pop() as LeafNodeStorageType | InternalNodeStorageType;
+      const newParentSep = internal.keys.pop() as KeysType;
+      right.keys.unshift(sepFromParent);
+      right.children.unshift(movedChild);
+      parent.keys[idx] = newParentSep;
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
    * Splits an internal node that has exceeded the maximum number of keys.
    *
    * @param {InternalNodeStorageType} internal - The internal node to split.
    * @returns {Promise<void>} A promise that resolves when the split is complete.
    */
   private async splitInternalNode(internal: InternalNodeStorageType): Promise<void> {
+    const redistributed = await this.tryRedistributeInternalBeforeSplit(internal);
+    if (redistributed) return;
+
     const mid = Math.floor(internal.keys.length / 2);
     const promotedKey = internal.keys[mid];
 

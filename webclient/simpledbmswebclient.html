@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SimpleDBMS Web Client</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+        }
+        .section {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        input, textarea, button {
+            margin: 5px 0;
+            padding: 8px;
+            font-size: 14px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            border-radius: 3px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #documentsView {
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            padding: 10px;
+            border-radius: 3px;
+            overflow-x: auto;
+            min-height: 100px;
+        }
+        #error {
+            color: red;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        label {
+            display: block;
+            margin-top: 10px;
+            font-weight: bold;
+        }
+        textarea {
+            width: 100%;
+            min-height: 80px;
+            font-family: monospace;
+        }
+        input {
+            width: 300px;
+        }
+    </style>
+</head>
+<body>
+    <h1>SimpleDBMS Web Client</h1>
+    
+    <div id="error"></div>
+
+    <div class="section">
+        <h2>View Collection</h2>
+        <label for="collectionInput">Collection Name:</label>
+        <input type="text" id="collectionInput">
+        <button id="loadButton">Load documents</button>
+        <pre id="documentsView"></pre>
+    </div>
+
+    <div class="section">
+        <h2>Insert Document</h2>
+        <label for="insertIdInput">Document ID:</label>
+        <input type="text" id="insertIdInput">
+        <label for="insertJsonInput">Document Fields (JSON):</label>
+        <textarea id="insertJsonInput" ></textarea>
+        <button id="insertButton">Insert document</button>
+    </div>
+
+    <div class="section">
+        <h2>Delete Document</h2>
+        <label for="deleteIdInput">Document ID:</label>
+        <input type="text" id="deleteIdInput">
+        <button id="deleteButton">Delete document</button>
+    </div>
+
+    <script type="module" src="webclient.js"></script>
+</body>
+</html>

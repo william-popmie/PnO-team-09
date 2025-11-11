@@ -1,6 +1,36 @@
 // @author Mathias Bouhon Keulen
 // @date 2025-11-11
 
+// =============================================================
+// FreeBlockFile — Block-Based File Manager with Free List
+// =============================================================
+//
+// This module implements a fixed-size block allocator on top of a file.
+// Blocks are either used or part of a free list chain. Block 0 is reserved
+// for metadata (header + free list head pointer).
+//
+// File Layout (each block = blockSize bytes):
+//
+// ┌────────────┬────────────────────────────┐
+// │ Block 0    │ Header Block               │
+// │            │ ┌────────────────────────┐ │
+// │            │ │ uint32 freeListHead    │ │ offset 0
+// │            │ │ uint32 headerLength    │ │ offset 4
+// │            │ │ client header bytes... │ │ offset 8+
+// │            │ └────────────────────────┘ │
+// ├────────────┼────────────────────────────┤
+// │ Block 1..n │ Data or free blocks        │
+// │            │ ┌────────────────────────┐ │
+// │            │ │ uint32 nextPtr         │ │ offset 0
+// │            │ │ payload bytes...       │ │ offset 4+
+// │            │ └────────────────────────┘ │
+// └────────────┴────────────────────────────┘
+//
+// Free blocks are linked via their first 4 bytes (nextPtr).
+// The file grows automatically when no free blocks remain.
+//
+// =============================================================
+
 import { type File } from './mockfile.mjs';
 
 /**
@@ -166,10 +196,10 @@ export class FreeBlockFile {
    * Allocate a number of blocks, reusing free blocks if available.
    *
    * @param {number} count - The number of blocks to allocate.
-   * @returns {Promise<number>} The block ID of the first allocated block.
+   * @returns {Promise<number | number[]>} The block IDs of the allocated blocks.
    * @throws {Error} If the count is not positive.
    */
-  async allocateBlocks(count: number): Promise<number> {
+  async allocateBlocks(count: number): Promise<number | number[]> {
     this.ensureOpened();
     if (count <= 0) throw new Error('count must be positive');
 
@@ -200,7 +230,11 @@ export class FreeBlockFile {
 
     this.stageHeaderBlock();
 
-    return allocated[0];
+    if (count === 1) {
+      return allocated[0];
+    }
+
+    return allocated;
   }
 
   /**
@@ -215,8 +249,10 @@ export class FreeBlockFile {
     lengthPrefix.writeBigUInt64LE(BigInt(data.length), 0);
     const full = Buffer.concat([lengthPrefix, data]);
     const needed = Math.ceil(full.length / this.payloadSize) || 1;
-    const firstBlock = await this.allocateBlocks(needed);
-    const blocks = await this.collectAllocatedChain(firstBlock, needed);
+
+    const blocksOrNumber = await this.allocateBlocks(needed);
+    const blocks = Array.isArray(blocksOrNumber) ? blocksOrNumber : [blocksOrNumber];
+    const firstBlock = blocks[0];
 
     for (let i = 0; i < blocks.length; i++) {
       const blockId = blocks[i];
@@ -295,6 +331,10 @@ export class FreeBlockFile {
     return buf;
   }
 
+  /**
+   * CURRENTLY UNUSED METHOD:
+   * Collect a chain of allocated blocks starting from the given block ID.
+   *
   private async collectAllocatedChain(firstBlock: number, count: number): Promise<number[]> {
     const ids: number[] = [firstBlock];
 
@@ -322,6 +362,7 @@ export class FreeBlockFile {
     }
     return ids;
   }
+  **/
 
   /**
    * Commit all staged writes to the underlying file, expanding the file if necessary and refreshing the cached header state.

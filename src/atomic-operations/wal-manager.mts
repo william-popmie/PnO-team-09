@@ -16,7 +16,10 @@ export class WALManagerImpl implements WALManager {
     this.walFile = walFile;
   }
 
-  public async logWrite(offset: number, data: Uint8Array): Promise<void> {}
+  public async logWrite(offset: number, data: Uint8Array): Promise<void> {
+    const buffer = Buffer.from(data);
+    await this.walFile.writev([buffer], offset);
+  }
 
   public async recover(): Promise<{ offset: number; data: Uint8Array }[]> {
     await this.walFile.stat();

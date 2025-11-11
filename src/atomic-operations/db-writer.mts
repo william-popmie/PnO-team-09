@@ -1,7 +1,6 @@
 // @author Frederick Hillen
 // @date 2025-11-11
 
-import type { File } from '../mockfile.mjs';
 import type { AtomicFile } from './atomic-file.mjs';
 
 export interface DBWriter {

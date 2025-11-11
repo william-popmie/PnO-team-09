@@ -3,6 +3,9 @@
 
 import { type File } from './mockfile.mjs';
 
+/**
+ * Test interface for atomic file operations used by FreeBlockFile.
+ */
 export interface AtomicFile {
   open(): Promise<void>;
   close(): Promise<void>;
@@ -10,20 +13,49 @@ export interface AtomicFile {
   sync?(): Promise<void>;
 }
 
+/**
+ * default block size used by FreeBlockFile if none is specified.
+ */
 export const DEFAULT_BLOCK_SIZE = 4096;
 
+/**
+ * Size in bytes of the "next block" pointer at the start of each block.
+ */
 export const NEXT_POINTER_SIZE = 4;
 
+/**
+ * Offset of the free list head pointer in block 0.
+ */
 export const FREE_LIST_HEAD_OFFSET = 0;
+
+/**
+ * Offset of the header length field in block 0.
+ */
 export const HEADER_LENGTH_OFFSET = FREE_LIST_HEAD_OFFSET + NEXT_POINTER_SIZE;
+
+/**
+ * Offset of the client header area in block 0.
+ */
 export const HEADER_CLIENT_AREA_OFFSET = HEADER_LENGTH_OFFSET + NEXT_POINTER_SIZE;
 
+/**
+ * Size in bytes of the length prefix for blobs.
+ */
 export const LENGTH_PREFIX_SIZE = 8;
 
+/**
+ * Constant indicating "no block".
+ */
 export const NO_BLOCK = 0;
 
+/**
+ * Minimum allowed block size for FreeBlockFile.
+ */
 export const MIN_BLOCK_SIZE = HEADER_CLIENT_AREA_OFFSET + 16;
 
+/**
+ * A file abstraction that manages fixed-size blocks with a free-list for reuse.
+ */
 export class FreeBlockFile {
   readonly blockSize: number;
   readonly payloadSize: number;
@@ -38,11 +70,17 @@ export class FreeBlockFile {
 
   private opened = false;
 
-  // Ensure the file has been opened before performing public operations.
   private ensureOpened(): void {
     if (!this.opened) throw new Error('FreeBlockFile is not open');
   }
 
+  /**
+   * Construct a FreeBlockFile instance.
+   * @param {File} file - The underlying file to use.
+   * @param {AtomicFile} atomicFile - The atomic file operations interface.
+   * @param {number} blockSize - The size of each block in bytes.
+   * @throws {Error} If the block size is smaller than the minimum allowed size.
+   */
   constructor(file: File, atomicFile: AtomicFile, blockSize = DEFAULT_BLOCK_SIZE) {
     if (blockSize < MIN_BLOCK_SIZE) {
       throw new Error(`blockSize too small; must be >= ${MIN_BLOCK_SIZE}`);
@@ -53,6 +91,9 @@ export class FreeBlockFile {
     this.payloadSize = blockSize - NEXT_POINTER_SIZE;
   }
 
+  /**
+   * Open the FreeBlockFile, initializing or loading the header and free list.
+   */
   async open(): Promise<void> {
     await this.file.open();
     if (this.atomicFile.open) await this.atomicFile.open();
@@ -79,16 +120,28 @@ export class FreeBlockFile {
     this.opened = true;
   }
 
+  /**
+   * Close the FreeBlockFile, flushing any pending changes.
+   */
   async close(): Promise<void> {
     if (this.atomicFile.close) await this.atomicFile.close();
     await this.file.close();
     this.opened = false;
   }
 
+  /**
+   * Read the header data from block 0.
+   */
   async readHeader(): Promise<Buffer> {
     return Promise.resolve(Buffer.from(this.cachedHeaderBuf));
   }
 
+  /**
+   * Write the header data to block 0.
+   *
+   * @param {Buffer} buf - The header data to write.
+   * @throws {Error} If the header data exceeds the maximum allowed size.
+   */
   async writeHeader(buf: Buffer): Promise<void> {
     await Promise.resolve();
     const maxClientHeader = this.blockSize - HEADER_CLIENT_AREA_OFFSET;
@@ -109,6 +162,13 @@ export class FreeBlockFile {
     this.stagedWrites.set(0, b);
   }
 
+  /**
+   * Allocate a number of blocks, reusing free blocks if available.
+   *
+   * @param {number} count - The number of blocks to allocate.
+   * @returns {Promise<number>} The block ID of the first allocated block.
+   * @throws {Error} If the count is not positive.
+   */
   async allocateBlocks(count: number): Promise<number> {
     this.ensureOpened();
     if (count <= 0) throw new Error('count must be positive');
@@ -143,6 +203,12 @@ export class FreeBlockFile {
     return allocated[0];
   }
 
+  /**
+   * Allocate blocks and write the given data as a blob.
+   *
+   * @param {Buffer} data - The data to write.
+   * @returns {Promise<number>} The block ID of the first block of the allocated blob.
+   */
   async allocateAndWrite(data: Buffer): Promise<number> {
     this.ensureOpened();
     const lengthPrefix = Buffer.alloc(LENGTH_PREFIX_SIZE);
@@ -166,6 +232,11 @@ export class FreeBlockFile {
     return firstBlock;
   }
 
+  /**
+   * Free a blob starting from the given block ID.
+   *
+   * @param {number} startBlockId - The block ID of the first block of the blob to free.
+   */
   async freeBlob(startBlockId: number): Promise<void> {
     this.ensureOpened();
     if (startBlockId === NO_BLOCK) return;
@@ -182,6 +253,12 @@ export class FreeBlockFile {
     this.stageHeaderBlock();
   }
 
+  /**
+   * Read a blob starting from the given block ID.
+   *
+   * @param {number} startBlockId - The block ID of the first block of the blob to read.
+   * @returns {Promise<Buffer>} The data read from the blob.
+   */
   async readBlob(startBlockId: number): Promise<Buffer> {
     this.ensureOpened();
     if (startBlockId === NO_BLOCK) return Buffer.alloc(0);
@@ -246,6 +323,9 @@ export class FreeBlockFile {
     return ids;
   }
 
+  /**
+   * Commit all staged writes to the underlying file, expanding the file if necessary and refreshing the cached header state.
+   */
   async commit(): Promise<void> {
     this.ensureOpened();
     if (this.stagedWrites.size === 0) return;
@@ -284,6 +364,13 @@ export class FreeBlockFile {
     }
   }
 
+  /**
+   * Stage a raw block for writing.
+   *
+   * @param {number} blockId - The block ID to stage.
+   * @param {Buffer} buf - The block data to write.
+   * @throws {Error} If the block data does not match the block size.
+   */
   async stageRawBlock(blockId: number, buf: Buffer): Promise<void> {
     this.ensureOpened();
     await Promise.resolve();
@@ -300,6 +387,9 @@ export class FreeBlockFile {
     }
   }
 
+  /**
+   * @returns {Promise<number>} The current head of the free list.
+   */
   async debug_getFreeListHead(): Promise<number> {
     return Promise.resolve(this.cachedFreeListHead);
   }

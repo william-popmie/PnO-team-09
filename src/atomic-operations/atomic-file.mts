@@ -1,5 +1,5 @@
-// @author Frederick Hillen
-// @date 2025-11-11
+// @author Frederick Hillen, Arwin Gorissen
+// @date 2025-11-12
 
 import type { File } from '../mockfile.mjs';
 import type { WALManager } from './wal-manager.mjs';
@@ -12,12 +12,15 @@ import type { WALManager } from './wal-manager.mjs';
  *
  * This is a minimal skeleton: real durability guarantees require WAL fsyncs,
  * checksums, and robust recovery handling.
+ *
+ * SEE db-writer.mts FOR SEQUENCE OF USE OF FUNCTIONS
  */
 export interface AtomicFile {
   begin(): void;
-  write(offset: number, data: Uint8Array): Promise<void>;
+  journalWrite(offset: number, data: Uint8Array): Promise<void>;
   read(offset: number, length: number): Promise<Uint8Array>;
-  commit(): Promise<void>;
+  journalCommit(): Promise<void>;
+  checkpoint(): Promise<void>;
   recover(): Promise<void>;
   abort(): Promise<void>;
 }
@@ -39,7 +42,10 @@ export class AtomicFileImpl implements AtomicFile {
     this.inTransaction = true;
   }
 
-  public async write(offset: number, data: Uint8Array): Promise<void> {
+  /**
+   * Writes to WAL
+   */
+  public async journalWrite(offset: number, data: Uint8Array): Promise<void> {
     if (!this.inTransaction) throw new Error('no active transaction');
     // 1) log to WAL (skeleton: WALManagerImpl keeps in-memory records)
     await this.wal.logWrite(offset, data);
@@ -55,31 +61,34 @@ export class AtomicFileImpl implements AtomicFile {
     return new Uint8Array(buf);
   }
 
-  public async commit(): Promise<void> {
+  /**
+   * Ensures that WAL is not dirty
+   */
+  public async journalCommit(): Promise<void> {
     if (!this.inTransaction) throw new Error('no active transaction');
 
-    // Apply staged writes to DB file in order. Real impl must ensure durability
-    // (fsync, ordering guarantees) before clearing WAL.
-    for (const w of this.pendingWrites) {
-      await this.dbFile.writev([Buffer.from(w.data)], w.offset);
-    }
-
-    // Clear WAL (skeleton)
-    await this.wal.clearLog();
+    // Dubbele sync() om CommitMarker durable te maken zonder atomiciteit te verliezen bij crash tijdens addCommitMarker()
+    await this.wal.sync();
+    await this.wal.addCommitMarker();
+    await this.wal.sync();
 
     this.pendingWrites.length = 0;
     this.inTransaction = false;
   }
 
-  public async recover(): Promise<void> {
-    // Ask WAL for pending records and apply them to DB file.
-    const records = await this.wal.recover();
-    for (const r of records) {
-      await this.dbFile.writev([Buffer.from(r.data)], r.offset);
-    }
+  /**
+   * Writes to database
+   */
+  public async checkpoint(): Promise<void> {
+    await this.wal.checkpoint();
+    await this.dbFile.sync();
+  }
 
-    // After replay, clear WAL
-    await this.wal.clearLog();
+  /**
+   * Checks for a crash and recovers committed data in WAL, run on startup.
+   */
+  public async recover(): Promise<void> {
+    await this.wal.recover();
   }
 
   public async abort(): Promise<void> {

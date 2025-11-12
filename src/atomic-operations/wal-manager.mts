@@ -44,7 +44,7 @@ export class WALManagerImpl implements WALManager {
     await this.walFile.read(buffer, { position: 0 });
 
     while (pos < walSize) {
-      const valid: { valid: boolean; nextPos: number } = await this.checkValidityWalData(walSize, buffer, pos);
+      const valid: { valid: boolean; nextPos: number } = this.checkValidityWalData(walSize, buffer, pos);
       if (!valid.valid) {
         return;
       }
@@ -66,11 +66,7 @@ export class WALManagerImpl implements WALManager {
     await this.clearLog();
   }
 
-  private async checkValidityWalData(
-    walSize: number,
-    buffer: Buffer,
-    pos: number,
-  ): Promise<{ valid: boolean; nextPos: number }> {
+  private checkValidityWalData(walSize: number, buffer: Buffer, pos: number): { valid: boolean; nextPos: number } {
     const marker: Buffer = Buffer.from('COMMIT\n');
     while (pos + 8 <= walSize) {
       const dataCommitLength: number = buffer.readUInt32LE(pos + 4);

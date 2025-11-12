@@ -2,7 +2,7 @@
 // @date 2025-11-09
 
 import { BPlusTree } from './b-plus-tree.mjs';
-import { TrivialNodeStorage, TrivialLeafNode, TrivialInternalNode } from './trivial-node-storage.mjs';
+import { TrivialNodeStorage, TrivialLeafNode, TrivialInternalNode } from './node-storage/trivial-node-storage.mjs';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

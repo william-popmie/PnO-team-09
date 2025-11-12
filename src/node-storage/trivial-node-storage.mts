@@ -8,7 +8,7 @@ import type {
   InternalNodeStorage,
   LeafCursor,
   ChildCursor,
-} from './node-storage.mts';
+} from './node-storage.mjs';
 
 /**
  * TrivialNodeStorage is a simple in-memory implementation of the NodeStorage interface.
@@ -33,15 +33,15 @@ export class TrivialNodeStorage<KeysType, ValuesType>
     return Promise.resolve(this.createLeaf());
   }
 
-  createLeaf(): TrivialLeafNode<KeysType, ValuesType> {
-    return new TrivialLeafNode(this);
+  async createLeaf(): Promise<TrivialLeafNode<KeysType, ValuesType>> {
+    return Promise.resolve(new TrivialLeafNode(this));
   }
 
-  createInternalNode(
+  async createInternalNode(
     children: (TrivialLeafNode<KeysType, ValuesType> | TrivialInternalNode<KeysType, ValuesType>)[],
     keys: KeysType[],
-  ): TrivialInternalNode<KeysType, ValuesType> {
-    return new TrivialInternalNode(this, children, keys);
+  ): Promise<TrivialInternalNode<KeysType, ValuesType>> {
+    return Promise.resolve(new TrivialInternalNode(this, children, keys));
   }
 
   async allocateInternalNodeStorage(

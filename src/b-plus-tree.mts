@@ -1,7 +1,7 @@
 // @author Mathias Bouhon Keulen, Frederick Hillen
 // @date 2025-11-10
 
-import type { NodeStorage, LeafNodeStorage, InternalNodeStorage } from './node-storage.mjs';
+import type { NodeStorage, LeafNodeStorage, InternalNodeStorage } from './node-storage/node-storage.mjs';
 
 /**
  * A B+ tree implementation.
@@ -101,7 +101,7 @@ export class BPlusTree<
 
     if (leaf === this.root) {
       if (leaf.keys.length === 0) {
-        this.root = this.storage.createLeaf();
+        this.root = await this.storage.createLeaf();
       }
       return;
     }
@@ -610,7 +610,7 @@ export class BPlusTree<
    */
   private async splitLeaf(leaf: LeafNodeStorageType): Promise<void> {
     const mid = Math.ceil(leaf.keys.length / 2);
-    const newLeaf = this.storage.createLeaf();
+    const newLeaf = await this.storage.createLeaf();
 
     newLeaf.keys = leaf.keys.splice(mid);
     newLeaf.values = leaf.values.splice(mid);
@@ -684,7 +684,7 @@ export class BPlusTree<
     internal.keys = leftKeys;
     internal.children = leftChildren;
 
-    const newInternal = this.storage.createInternalNode(rightChildren, rightKeys);
+    const newInternal = await this.storage.createInternalNode(rightChildren, rightKeys);
 
     await this.insertInParent(internal, promotedKey, newInternal);
   }
@@ -705,7 +705,7 @@ export class BPlusTree<
     newNode: LeafNodeStorageType | InternalNodeStorageType,
   ): Promise<void> {
     if (node === this.root) {
-      const newRoot = this.storage.createInternalNode([node, newNode], [promotedKey]);
+      const newRoot = await this.storage.createInternalNode([node, newNode], [promotedKey]);
       this.root = newRoot;
       return;
     }

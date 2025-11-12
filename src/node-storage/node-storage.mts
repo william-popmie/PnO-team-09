@@ -26,11 +26,11 @@ export interface NodeStorage<
   readonly keySize: (key: KeysType) => number;
   getMaxKeySize(): number;
   createTree(): Promise<LeafNodeStorageType>;
-  createLeaf(): LeafNodeStorageType;
+  createLeaf(): Promise<LeafNodeStorageType>;
   createInternalNode(
     children: (LeafNodeStorageType | InternalNodeStorageType)[],
     keys: KeysType[],
-  ): InternalNodeStorageType;
+  ): Promise<InternalNodeStorageType>;
 
   allocateInternalNodeStorage(
     children: (LeafNodeStorageType | InternalNodeStorageType)[],

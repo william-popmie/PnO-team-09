@@ -3,7 +3,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { BPlusTree } from './b-plus-tree.mjs';
-import { TrivialNodeStorage, TrivialLeafNode, TrivialInternalNode } from './trivial-node-storage.mjs';
+import { TrivialNodeStorage, TrivialLeafNode, TrivialInternalNode } from './node-storage/trivial-node-storage.mjs';
 
 /**
  * Collects all values from an async generator or async iterable into an array.

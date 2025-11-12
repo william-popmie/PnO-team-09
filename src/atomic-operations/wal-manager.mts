@@ -14,9 +14,40 @@ export interface WALManager {
   clearLog(): Promise<void>;
 }
 
+/* small async mutex used to serialize WAL file operations */
+class Mutex {
+  private locked = false;
+  private waiters: (() => void)[] = [];
+
+  async lock(): Promise<() => void> {
+    return new Promise((resolve) => {
+      const take = () => {
+        this.locked = true;
+        resolve(() => {
+          this.locked = false;
+          const next = this.waiters.shift();
+          if (next) next();
+        });
+      };
+      if (!this.locked) take();
+      else this.waiters.push(take);
+    });
+  }
+
+  async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
+    const unlock = await this.lock();
+    try {
+      return await fn();
+    } finally {
+      unlock();
+    }
+  }
+}
+
 export class WALManagerImpl implements WALManager {
   private walFile: File;
   private dbFile: File;
+  private mutex = new Mutex();
 
   public constructor(walFile: File, dbFile: File) {
     this.walFile = walFile;
@@ -24,44 +55,58 @@ export class WALManagerImpl implements WALManager {
   }
 
   public async openWAL(): Promise<void> {
-    await this.walFile.open();
+    return this.mutex.runExclusive(async () => {
+      await this.walFile.open();
+      await this.dbFile.open();
+    });
   }
 
   public async closeWAL(): Promise<void> {
-    await this.walFile.close();
+    return this.mutex.runExclusive(async () => {
+      await this.walFile.close();
+      await this.dbFile.close();
+    });
   }
 
   public async logWrite(offset: number, data: Uint8Array): Promise<void> {
-    const header: Uint32Array = new Uint32Array([offset, data.length]);
-    const pos: number = await this.walFile.stat().then((stat) => stat.size);
-    await this.walFile.writev([Buffer.from(header.buffer), Buffer.from(data)], pos);
+    return this.mutex.runExclusive(async () => {
+      const header: Uint32Array = new Uint32Array([offset, data.length]);
+      const pos: number = await this.walFile.stat().then((stat) => stat.size);
+      await this.walFile.writev([Buffer.from(header.buffer), Buffer.from(data)], pos);
+    });
   }
 
   public async addCommitMarker(): Promise<void> {
-    const marker: Buffer = Buffer.from('COMMIT\n');
-    const pos: number = await this.walFile.stat().then((stat) => stat.size);
-    await this.walFile.writev([marker], pos);
+    return this.mutex.runExclusive(async () => {
+      const marker: Buffer = Buffer.from('COMMIT\n');
+      const pos: number = await this.walFile.stat().then((stat) => stat.size);
+      await this.walFile.writev([marker], pos);
+    });
   }
 
   public async sync(): Promise<void> {
-    await this.walFile.sync();
+    return this.mutex.runExclusive(async () => {
+      await this.walFile.sync();
+    });
   }
 
-  public async checkpoint() {
-    const walSize: number = await this.walFile.stat().then((stat) => stat.size);
-    if (walSize === 0) return;
+  public async checkpoint(): Promise<void> {
+    return this.mutex.runExclusive(async () => {
+      const walSize: number = await this.walFile.stat().then((stat) => stat.size);
+      if (walSize === 0) return;
 
-    const buffer = Buffer.alloc(walSize);
-    await this.walFile.read(buffer, { position: 0 });
+      const buffer = Buffer.alloc(walSize);
+      await this.walFile.read(buffer, { position: 0 });
 
-    const committedData = this.getCommittedData(walSize, buffer);
-    if (committedData.writes.length === 0) {
-      console.log('No committed changes detected. Flushing...');
-    } else {
-      for (const w of committedData.writes) {
-        await this.dbFile.writev([Buffer.from(w.data)], w.offset);
+      const committedData = this.getCommittedData(walSize, buffer);
+      if (committedData.writes.length === 0) {
+        return;
+      } else {
+        for (const w of committedData.writes) {
+          await this.dbFile.writev([Buffer.from(w.data)], w.offset);
+        }
       }
-    }
+    });
   }
 
   private getCommittedData(walSize: number, buffer: Buffer): { writes: { offset: number; data: Buffer }[] } {
@@ -91,29 +136,28 @@ export class WALManagerImpl implements WALManager {
   }
 
   public async recover(): Promise<void> {
-    const journalSize: number = await this.walFile.stat().then((stat) => stat.size);
-    if (!(journalSize > 0)) {
-      return;
-    }
+    return this.mutex.runExclusive(async () => {
+      const journalSize: number = await this.walFile.stat().then((stat) => stat.size);
+      if (!(journalSize > 0)) {
+        return;
+      }
 
-    console.log('A crash has been detected. Trying to recover WAL...');
+      const journalBuffer: Buffer = Buffer.alloc(journalSize);
+      await this.walFile.read(journalBuffer, { position: 0 });
+      const journalContents: string = journalBuffer.toString();
 
-    const journalBuffer: Buffer = Buffer.alloc(journalSize);
-    await this.walFile.read(journalBuffer, { position: 0 });
-    const journalContents: string = journalBuffer.toString();
+      if (!journalContents.includes('COMMIT')) {
+        await this.clearLog();
+        return;
+      }
 
-    if (!journalContents.includes('COMMIT')) {
-      console.log('WAL is dirty. Flushing...');
-      await this.clearLog();
-      return;
-    }
-
-    console.log('Recovering committed WAL...');
-    await this.checkpoint();
-    return;
+      await this.checkpoint();
+    });
   }
 
   public async clearLog(): Promise<void> {
-    await this.walFile.truncate(0);
+    return this.mutex.runExclusive(async () => {
+      await this.walFile.truncate(0);
+    });
   }
 }

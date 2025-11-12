@@ -4,28 +4,36 @@
 import type { File } from '../mockfile.mjs';
 import type { WALManager } from './wal-manager.mjs';
 
-/**
- * AtomicFile is the orchestration layer for transactional writes.
- * - Logs writes via WALManager
- * - Stages pending writes in memory during a transaction
- * - Replays pending/wal records to the DB file on commit/recover
- *
- * This is a minimal skeleton: real durability guarantees require WAL fsyncs,
- * checksums, and robust recovery handling.
- *
- * It should be used like this:
- * At startup:
- 
-   await atomic-file.recoverFromWall();
+/* simple async mutex to serialize async critical sections */
+class Mutex {
+  private locked = false;
+  private waiters: (() => void)[] = [];
 
- * To interact with database:
+  async lock(): Promise<() => void> {
+    return new Promise((resolve) => {
+      const take = () => {
+        this.locked = true;
+        resolve(() => {
+          this.locked = false;
+          const next = this.waiters.shift();
+          if (next) next();
+        });
+      };
+      if (!this.locked) take();
+      else this.waiters.push(take);
+    });
+  }
 
-   await atomic-file.begin();
-   await atomic-file.journalWrite(offset: number, data: Uint8Array);
-   await atomic-file.journalCommit();
-   await atomic-file.checkpoint();
-   await atomic-file.safeShutdown();
- */
+  async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
+    const unlock = await this.lock();
+    try {
+      return await fn();
+    } finally {
+      unlock();
+    }
+  }
+}
+
 export interface AtomicFile {
   begin(): Promise<void>;
   journalWrite(offset: number, data: Uint8Array): Promise<void>;
@@ -42,84 +50,111 @@ export class AtomicFileImpl implements AtomicFile {
   private wal: WALManager;
   private inTransaction = false;
   private pendingWrites: { offset: number; data: Uint8Array }[] = [];
+  private opened = false;
+  private mutex = new Mutex();
 
   public constructor(dbFile: File, walManager: WALManager) {
     this.dbFile = dbFile;
     this.wal = walManager;
   }
 
-  public async begin(): Promise<void> {
-    if (this.inTransaction) throw new Error('transaction already in progress');
+  private async ensureOpen(): Promise<void> {
+    if (this.opened) return;
     await this.dbFile.open();
     await this.wal.openWAL();
-    this.pendingWrites.length = 0;
-    this.inTransaction = true;
+    this.opened = true;
+  }
+
+  public async begin(): Promise<void> {
+    return this.mutex.runExclusive(async () => {
+      if (this.inTransaction) throw new Error('transaction already in progress');
+      await this.ensureOpen();
+      this.pendingWrites.length = 0;
+      this.inTransaction = true;
+    });
   }
 
   /**
    * Writes to WAL
    */
   public async journalWrite(offset: number, data: Uint8Array): Promise<void> {
-    if (!this.inTransaction) throw new Error('no active transaction');
-    // 1) log to WAL (skeleton: WALManagerImpl keeps in-memory records)
-    await this.wal.logWrite(offset, data);
-    // 2) stage write for commit
-    this.pendingWrites.push({ offset, data: data.slice() });
+    return this.mutex.runExclusive(async () => {
+      if (!this.inTransaction) throw new Error('no active transaction');
+      await this.wal.logWrite(offset, data);
+      this.pendingWrites.push({ offset, data: data.slice() });
+    });
   }
 
   public async read(offset: number, length: number): Promise<Uint8Array> {
-    // Simple pass-through read from dbFile. For full correctness should
-    // consider staged pendingWrites that overlap the read range.
-    const buf = Buffer.alloc(length);
-    await this.dbFile.read(buf, { position: offset });
-    return new Uint8Array(buf);
+    return this.mutex.runExclusive(async () => {
+      await this.ensureOpen();
+      const buf = Buffer.alloc(length);
+      await this.dbFile.read(buf, { position: offset });
+      return new Uint8Array(buf);
+    });
   }
 
   /**
-   * Ensures that WAL is not dirty
+   * Ensures that WAL is not dirty and finalizes the transaction.
    */
   public async journalCommit(): Promise<void> {
-    if (!this.inTransaction) throw new Error('no active transaction');
+    return this.mutex.runExclusive(async () => {
+      if (!this.inTransaction) throw new Error('no active transaction');
 
-    // Dubbele sync() om CommitMarker durable te maken zonder atomiciteit te verliezen bij crash tijdens addCommitMarker()
-    await this.wal.sync();
-    await this.wal.addCommitMarker();
-    await this.wal.sync();
+      await this.wal.addCommitMarker();
+      await this.wal.sync();
 
-    this.pendingWrites.length = 0;
-    this.inTransaction = false;
+      await this.wal.checkpoint();
+
+      await this.dbFile.sync();
+
+      await this.wal.clearLog();
+      await this.wal.sync();
+      this.pendingWrites.length = 0;
+      this.inTransaction = false;
+    });
   }
 
   /**
-   * Writes to database
+   * Writes to database (trigger checkpoint). Serialized to avoid races.
    */
   public async checkpoint(): Promise<void> {
-    await this.wal.checkpoint();
-    await this.dbFile.sync();
-    await this.wal.clearLog();
-    await this.wal.sync();
+    return this.mutex.runExclusive(async () => {
+      await this.ensureOpen();
+      await this.wal.checkpoint();
+      await this.dbFile.sync();
+      await this.wal.clearLog();
+      await this.wal.sync();
+    });
   }
 
   /**
    * Checks for a crash and recovers committed data in WAL, run on startup.
    */
   public async recover(): Promise<void> {
-    await this.wal.recover();
+    return this.mutex.runExclusive(async () => {
+      await this.ensureOpen();
+      await this.wal.recover();
+    });
   }
 
   public async abort(): Promise<void> {
-    if (!this.inTransaction) throw new Error('no active transaction');
-    // Discard staged writes, clear WAL (skeleton assumes WAL contains only this tx)
-    this.pendingWrites.length = 0;
-    await this.wal.clearLog();
-    this.inTransaction = false;
-    await this.safeShutdown();
+    return this.mutex.runExclusive(async () => {
+      if (!this.inTransaction) throw new Error('no active transaction');
+      this.pendingWrites.length = 0;
+      await this.wal.clearLog();
+      this.inTransaction = false;
+      await this.safeShutdown();
+    });
   }
 
   public async safeShutdown(): Promise<void> {
-    await this.dbFile.sync();
-    await this.wal.sync();
-    await this.dbFile.close();
-    await this.wal.closeWAL();
+    return this.mutex.runExclusive(async () => {
+      await this.dbFile.sync();
+      await this.wal.sync();
+      await this.dbFile.close();
+      await this.wal.closeWAL();
+      this.opened = false;
+    });
   }
 }

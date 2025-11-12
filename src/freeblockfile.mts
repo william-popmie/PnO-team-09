@@ -95,6 +95,8 @@ export class FreeBlockFile {
 
   private stagedWrites: Map<number, Buffer> = new Map();
 
+  private pendingFrees: number[] = [];
+
   private cachedFreeListHead: number = NO_BLOCK;
   private cachedHeaderBuf: Buffer = Buffer.alloc(0);
 
@@ -274,19 +276,11 @@ export class FreeBlockFile {
    * @param {number} startBlockId - The block ID of the first block of the blob to free.
    */
   async freeBlob(startBlockId: number): Promise<void> {
+    await Promise.resolve();
     this.ensureOpened();
     if (startBlockId === NO_BLOCK) return;
-    let current = startBlockId;
-    while (current !== NO_BLOCK) {
-      const buf = await this.readRawBlock(current);
-      const nextInChain = buf.readUInt32LE(FREE_LIST_HEAD_OFFSET);
-      const freeBuf = Buffer.alloc(this.blockSize, 0);
-      freeBuf.writeUInt32LE(this.cachedFreeListHead >>> 0, FREE_LIST_HEAD_OFFSET);
-      this.stagedWrites.set(current, freeBuf);
-      this.cachedFreeListHead = current;
-      current = nextInChain;
-    }
-    this.stageHeaderBlock();
+
+    this.pendingFrees.push(startBlockId);
   }
 
   /**
@@ -365,11 +359,33 @@ export class FreeBlockFile {
   **/
 
   /**
-   * Commit all staged writes to the underlying file, expanding the file if necessary and refreshing the cached header state.
+   * Commit all staged writes plus any queued frees to the underlying file, expanding the file if necessary
+   * and refreshing the cached header state.
    */
   async commit(): Promise<void> {
     this.ensureOpened();
-    if (this.stagedWrites.size === 0) return;
+    if (this.stagedWrites.size === 0 && this.pendingFrees.length === 0) return;
+
+    if (this.pendingFrees.length > 0) {
+      for (const chainStart of this.pendingFrees) {
+        let current = chainStart;
+        while (current !== NO_BLOCK) {
+          const raw = await this.readRawBlock(current);
+          const nextInChain = raw.readUInt32LE(FREE_LIST_HEAD_OFFSET);
+
+          const freeBuf = Buffer.alloc(this.blockSize, 0);
+          freeBuf.writeUInt32LE(this.cachedFreeListHead >>> 0, FREE_LIST_HEAD_OFFSET);
+
+          this.stagedWrites.set(current, freeBuf);
+
+          this.cachedFreeListHead = current;
+
+          current = nextInChain;
+        }
+      }
+
+      this.stageHeaderBlock();
+    }
 
     if (!this.stagedWrites.has(0)) this.stageHeaderBlock();
 
@@ -390,19 +406,20 @@ export class FreeBlockFile {
 
     if (typeof this.file.sync === 'function') await this.file.sync();
 
-    this.stagedWrites.clear();
-
     const headerBlock = Buffer.alloc(this.blockSize);
     await this.file.read(headerBlock, { position: 0 });
-    this.cachedFreeListHead = headerBlock.readUInt32LE(FREE_LIST_HEAD_OFFSET);
+    const newCachedFreeListHead = headerBlock.readUInt32LE(FREE_LIST_HEAD_OFFSET);
     const headerLen = headerBlock.readUInt32LE(HEADER_LENGTH_OFFSET);
-    if (headerLen > 0) {
-      this.cachedHeaderBuf = Buffer.from(
-        headerBlock.slice(HEADER_CLIENT_AREA_OFFSET, HEADER_CLIENT_AREA_OFFSET + headerLen),
-      );
-    } else {
-      this.cachedHeaderBuf = Buffer.alloc(0);
-    }
+    const newCachedHeaderBuf =
+      headerLen > 0
+        ? Buffer.from(headerBlock.slice(HEADER_CLIENT_AREA_OFFSET, HEADER_CLIENT_AREA_OFFSET + headerLen))
+        : Buffer.alloc(0);
+
+    this.stagedWrites.clear();
+    this.pendingFrees = [];
+
+    this.cachedFreeListHead = newCachedFreeListHead;
+    this.cachedHeaderBuf = newCachedHeaderBuf;
   }
 
   /**

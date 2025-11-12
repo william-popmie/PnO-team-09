@@ -119,7 +119,7 @@ export class FBNodeStorage<Keystype, ValuesType>
     const oldBlockId = node.blockId;
     node.blockId = newBlockId;
     this.cache.set(newBlockId, node);
-    if (typeof oldBlockId === 'number' && oldBlockId !== NO_BLOCK) {
+    if (typeof oldBlockId === 'number' && oldBlockId !== NO_BLOCK && oldBlockId !== newBlockId) {
       await this.FBfile.freeBlob(oldBlockId);
       this.cache.delete(oldBlockId);
     }
@@ -137,7 +137,7 @@ export class FBNodeStorage<Keystype, ValuesType>
     const oldBlockId = node.blockId;
     node.blockId = newBlockId;
     this.cache.set(newBlockId, node);
-    if (typeof oldBlockId === 'number' && oldBlockId !== NO_BLOCK) {
+    if (typeof oldBlockId === 'number' && oldBlockId !== NO_BLOCK && oldBlockId !== newBlockId) {
       await this.FBfile.freeBlob(oldBlockId);
       this.cache.delete(oldBlockId);
     }

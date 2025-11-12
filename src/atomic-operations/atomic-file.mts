@@ -13,16 +13,28 @@ import type { WALManager } from './wal-manager.mjs';
  * This is a minimal skeleton: real durability guarantees require WAL fsyncs,
  * checksums, and robust recovery handling.
  *
- * SEE db-writer.mts FOR SEQUENCE OF USE OF FUNCTIONS
+ * It should be used like this:
+ * At startup:
+ 
+   await atomic-file.recoverFromWall();
+
+ * To interact with database:
+
+   await atomic-file.begin();
+   await atomic-file.journalWrite(offset: number, data: Uint8Array);
+   await atomic-file.journalCommit();
+   await atomic-file.checkpoint();
+   await atomic-file.safeShutdown();
  */
 export interface AtomicFile {
-  begin(): void;
+  begin(): Promise<void>;
   journalWrite(offset: number, data: Uint8Array): Promise<void>;
   read(offset: number, length: number): Promise<Uint8Array>;
   journalCommit(): Promise<void>;
   checkpoint(): Promise<void>;
   recover(): Promise<void>;
   abort(): Promise<void>;
+  safeShutdown(): Promise<void>;
 }
 
 export class AtomicFileImpl implements AtomicFile {
@@ -36,8 +48,10 @@ export class AtomicFileImpl implements AtomicFile {
     this.wal = walManager;
   }
 
-  public begin(): void {
+  public async begin(): Promise<void> {
     if (this.inTransaction) throw new Error('transaction already in progress');
+    await this.dbFile.open();
+    await this.wal.openWAL();
     this.pendingWrites.length = 0;
     this.inTransaction = true;
   }
@@ -82,6 +96,8 @@ export class AtomicFileImpl implements AtomicFile {
   public async checkpoint(): Promise<void> {
     await this.wal.checkpoint();
     await this.dbFile.sync();
+    await this.wal.clearLog();
+    await this.wal.sync();
   }
 
   /**
@@ -97,5 +113,13 @@ export class AtomicFileImpl implements AtomicFile {
     this.pendingWrites.length = 0;
     await this.wal.clearLog();
     this.inTransaction = false;
+    await this.safeShutdown();
+  }
+
+  public async safeShutdown(): Promise<void> {
+    await this.dbFile.sync();
+    await this.wal.sync();
+    await this.dbFile.close();
+    await this.wal.closeWAL();
   }
 }

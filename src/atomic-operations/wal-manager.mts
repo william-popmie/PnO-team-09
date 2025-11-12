@@ -4,6 +4,8 @@
 import type { File } from '../mockfile.mjs';
 
 export interface WALManager {
+  openWAL(): Promise<void>;
+  closeWAL(): Promise<void>;
   logWrite(offset: number, data: Uint8Array): Promise<void>;
   addCommitMarker(): Promise<void>;
   sync(): Promise<void>;
@@ -19,6 +21,14 @@ export class WALManagerImpl implements WALManager {
   public constructor(walFile: File, dbFile: File) {
     this.walFile = walFile;
     this.dbFile = dbFile;
+  }
+
+  public async openWAL(): Promise<void> {
+    await this.walFile.open();
+  }
+
+  public async closeWAL(): Promise<void> {
+    await this.walFile.close();
   }
 
   public async logWrite(offset: number, data: Uint8Array): Promise<void> {
@@ -40,53 +50,44 @@ export class WALManagerImpl implements WALManager {
   public async checkpoint() {
     const walSize: number = await this.walFile.stat().then((stat) => stat.size);
     if (walSize === 0) return;
-    let pos: number = 0;
 
     const buffer = Buffer.alloc(walSize);
     await this.walFile.read(buffer, { position: 0 });
 
-    while (pos < walSize) {
-      const valid: { valid: boolean; nextPos: number } = this.checkValidityWalData(walSize, buffer, pos);
-      if (!valid.valid) {
-        return;
+    const committedData = this.getCommittedData(walSize, buffer);
+    if (committedData.writes.length === 0) {
+      console.log('No committed changes detected. Flushing...');
+    } else {
+      for (const w of committedData.writes) {
+        await this.dbFile.writev([Buffer.from(w.data)], w.offset);
       }
-
-      pos = valid.nextPos;
     }
-
-    const marker = Buffer.from('COMMIT\n');
-    pos = 0;
-    const writes: { offset: number; data: Buffer }[] = [];
-    while (pos + 8 <= walSize) {
-      const offset = buffer.readUInt32LE(pos);
-      const length = buffer.readUInt32LE(pos + 4);
-      const dataStart = pos + 8;
-      const dataEnd = dataStart + length;
-      const commitEnd = dataEnd + marker.length;
-      const dataBuf = buffer.slice(dataStart, dataEnd);
-      writes.push({ offset, data: dataBuf });
-      pos = commitEnd;
-    }
-
-    for (const w of writes) {
-      await this.dbFile.writev([Buffer.from(w.data)], w.offset);
-    }
-
-    await this.clearLog();
   }
 
-  private checkValidityWalData(walSize: number, buffer: Buffer, pos: number): { valid: boolean; nextPos: number } {
+  private getCommittedData(walSize: number, buffer: Buffer): { writes: { offset: number; data: Buffer }[] } {
+    let pos: number = 0;
     const marker: Buffer = Buffer.from('COMMIT\n');
+    const writes: { offset: number; data: Buffer }[] = [];
+    let tempWrites: { offset: number; data: Buffer }[] = [];
     while (pos + 8 <= walSize) {
       const dataCommitLength: number = buffer.readUInt32LE(pos + 4);
       const end = pos + 8 + dataCommitLength + marker.length;
+      const offset: number = buffer.readUInt32LE(pos);
+      const data: Buffer = buffer.subarray(pos + 8, pos + 8 + dataCommitLength);
+      if (pos + 8 + dataCommitLength + marker.length > walSize) break;
       if (end <= walSize && buffer.subarray(end - marker.length, end).equals(marker)) {
-        return { valid: true, nextPos: end };
+        for (const w of tempWrites) {
+          writes.push(w);
+        }
+        writes.push({ offset, data });
+        tempWrites = [];
+        pos = end;
+      } else {
+        tempWrites.push({ offset, data });
+        pos = end - marker.length;
       }
-      pos = end - marker.length;
     }
-    console.log('Uncommitted changes detected. Flushing...');
-    return { valid: false, nextPos: 0 };
+    return { writes };
   }
 
   public async recover(): Promise<void> {

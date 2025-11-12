@@ -14,9 +14,11 @@ export interface WALManager {
 
 export class WALManagerImpl implements WALManager {
   private walFile: File;
+  private dbFile: File;
 
-  public constructor(walFile: File) {
+  public constructor(walFile: File, dbFile: File) {
     this.walFile = walFile;
+    this.dbFile = dbFile;
   }
 
   public async logWrite(offset: number, data: Uint8Array): Promise<void> {
@@ -49,18 +51,25 @@ export class WALManagerImpl implements WALManager {
         return;
       }
 
-      // commit to database hier nog implementeren
-      /*
-        Iets in deze aard waarschijnlijk, maar het moet consistent zijn met recover() ook.
-        Hangt ook af van de functies die hieronder liggen. Misschien moet er hier gewoon een oproep
-        naar een functie in een ander bestand?
-
-      for (const w of this.pendingWrites) {
-        await this.dbFile.writev([Buffer.from(w.data)], w.offset);
-      }
-      */
-
       pos = valid.nextPos;
+    }
+
+    const marker = Buffer.from('COMMIT\n');
+    pos = 0;
+    const writes: { offset: number; data: Buffer }[] = [];
+    while (pos + 8 <= walSize) {
+      const offset = buffer.readUInt32LE(pos);
+      const length = buffer.readUInt32LE(pos + 4);
+      const dataStart = pos + 8;
+      const dataEnd = dataStart + length;
+      const commitEnd = dataEnd + marker.length;
+      const dataBuf = buffer.slice(dataStart, dataEnd);
+      writes.push({ offset, data: dataBuf });
+      pos = commitEnd;
+    }
+
+    for (const w of writes) {
+      await this.dbFile.writev([Buffer.from(w.data)], w.offset);
     }
 
     await this.clearLog();

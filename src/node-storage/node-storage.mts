@@ -60,7 +60,7 @@ export interface NodeBaseStorage<
 > {
   readonly isLeaf: boolean;
   canMergeWithNext(key: KeysType, nextNode: LeafNodeStorageType | InternalNodeStorageType): boolean;
-  mergeWithNext(key: KeysType, nextNode: LeafNodeStorageType | InternalNodeStorageType): void;
+  mergeWithNext(key: KeysType, nextNode: LeafNodeStorageType | InternalNodeStorageType): Promise<void>;
 }
 
 /**

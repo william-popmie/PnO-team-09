@@ -82,10 +82,12 @@ export abstract class TrivialNodeBase<KeysType, ValuesType>
     return false;
   }
 
-  mergeWithNext(
+  async mergeWithNext(
     _key: KeysType,
     _nextNode: TrivialLeafNode<KeysType, ValuesType> | TrivialInternalNode<KeysType, ValuesType>,
-  ): void {}
+  ): Promise<void> {
+    return Promise.resolve();
+  }
 }
 
 /**
@@ -136,10 +138,11 @@ export class TrivialLeafNode<KeysType, ValuesType>
     return this.keys.length + (_nextNode.isLeaf ? _nextNode.keys.length : 0) <= Number.MAX_SAFE_INTEGER;
   }
 
-  override mergeWithNext(
+  override async mergeWithNext(
     _key: KeysType,
     nextNode: TrivialLeafNode<KeysType, ValuesType> | TrivialInternalNode<KeysType, ValuesType>,
-  ): void {
+  ): Promise<void> {
+    await Promise.resolve();
     if (nextNode.isLeaf) {
       this.keys.push(...nextNode.keys);
       this.values.push(...nextNode.values);
@@ -237,10 +240,11 @@ export class TrivialInternalNode<KeysType, ValuesType>
     return this.keys.length + (_nextNode.isLeaf ? 0 : _nextNode.keys.length) <= Number.MAX_SAFE_INTEGER;
   }
 
-  override mergeWithNext(
+  override async mergeWithNext(
     key: KeysType,
     nextNode: TrivialLeafNode<KeysType, ValuesType> | TrivialInternalNode<KeysType, ValuesType>,
-  ): void {
+  ): Promise<void> {
+    await Promise.resolve();
     if (!nextNode.isLeaf) {
       this.keys.push(key, ...nextNode.keys);
       this.children.push(...nextNode.children);

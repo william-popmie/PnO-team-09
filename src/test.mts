@@ -3,9 +3,30 @@
 
 import { BPlusTree } from './b-plus-tree.mjs';
 import { TrivialNodeStorage, TrivialLeafNode, TrivialInternalNode } from './node-storage/trivial-node-storage.mjs';
+import { FBNodeStorage, FBLeafNode, FBInternalNode } from './node-storage/fb-node-storage.mjs';
+import { FreeBlockFile } from './freeblockfile.mjs';
+import { MockFile } from './mockfile.mjs';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+class TestAtomicFile {
+  file: MockFile;
+  constructor(file: MockFile) {
+    this.file = file;
+  }
+  async open() {}
+  async close() {}
+  async atomicWrite(writes: { position: number; buffer: Buffer }[]) {
+    for (const w of writes) {
+      await this.file.writev([w.buffer], w.position);
+    }
+    await this.file.sync();
+  }
+  async sync() {
+    await this.file.sync();
+  }
 }
 
 async function testBPlusTree() {
@@ -14,12 +35,28 @@ async function testBPlusTree() {
     (_key) => 8,
   );
 
+  const mf = new MockFile(512);
+  const atomic = new TestAtomicFile(mf);
+  const fb = new FreeBlockFile(mf, atomic, 4096);
+  await fb.open();
+  console.log('FreeBlockFile opened');
+
+  const fbStorage = new FBNodeStorage<number, string>(
+    (a, b) => a - b,
+    (_key) => 8,
+    fb,
+    64,
+  );
+
   const tree = new BPlusTree<number, string, TrivialLeafNode<number, string>, TrivialInternalNode<number, string>>(
     storage,
     2,
   );
 
+  const tree2 = new BPlusTree<number, string, FBLeafNode<number, string>, FBInternalNode<number, string>>(fbStorage, 2);
+
   await tree.init();
+  await tree2.init();
 
   const keysToInsert = [
     10, 20, 5, 15, 25, 30, 3, 8, 12, 18, 22, 28, 35, 1, 4, 6, 7, 9, 11, 13, 14, 16, 17, 19, 21, 23, 24, 26, 27, 29, 31,
@@ -29,9 +66,12 @@ async function testBPlusTree() {
 
   for (const key of keysToInsert) {
     console.log(`\n--- Inserting ${key} ---`);
-    await tree.insert(key, `value-${key}`);
+    // await tree.insert(key, `value-${key}`);
+    await tree2.insert(key, `value-${key}`);
     console.log('Tree after insertion:');
     tree.ascii();
+    console.log('FB Tree after insertion:');
+    // tree2.ascii();
   }
 
   console.log('\n=== TRAVERSAL CHECKS AFTER INSERTS ===');

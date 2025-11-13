@@ -1,5 +1,5 @@
 // @author Mathias Bouhon Keulen
-// @date 2025-11-09
+// @date 2025-11-13
 
 import { BPlusTree } from './b-plus-tree.mjs';
 import { TrivialNodeStorage, TrivialLeafNode, TrivialInternalNode } from './node-storage/trivial-node-storage.mjs';

@@ -62,6 +62,12 @@ function deserializeValue(serializedValue: unknown): unknown {
   return obj['value'];
 }
 
+/**
+ * FBNodeStorage is a NodeStorage implementation that uses FreeBlockFile for storage.
+ *
+ * @template Keystype - The type of keys used in the nodes.
+ * @template ValuesType - The type of values stored in the leaf nodes.
+ */
 export class FBNodeStorage<Keystype, ValuesType>
   implements NodeStorage<Keystype, ValuesType, FBLeafNode<Keystype, ValuesType>, FBInternalNode<Keystype, ValuesType>>
 {
@@ -242,6 +248,12 @@ export class FBNodeStorage<Keystype, ValuesType>
   }
 }
 
+/**
+ * FBNodeBase is the base class for FBLeafNode and FBInternalNode.
+ *
+ * @template Keystype - The type of keys used in the nodes.
+ * @template ValuesType - The type of values stored in the leaf nodes.
+ */
 export class FBNodeBase<Keystype, ValuesType>
   implements
     NodeBaseStorage<Keystype, ValuesType, FBLeafNode<Keystype, ValuesType>, FBInternalNode<Keystype, ValuesType>>
@@ -269,6 +281,12 @@ export class FBNodeBase<Keystype, ValuesType>
   }
 }
 
+/**
+ * FBLeafNode is the implementation of a leaf node in the FBNodeStorage.
+ *
+ * @template Keystype - The type of keys used in the nodes.
+ * @template ValuesType - The type of values stored in the leaf nodes.
+ */
 export class FBLeafNode<Keystype, ValuesType>
   implements
     LeafNodeStorage<Keystype, ValuesType, FBLeafNode<Keystype, ValuesType>, FBInternalNode<Keystype, ValuesType>>
@@ -358,6 +376,12 @@ export class FBLeafNode<Keystype, ValuesType>
   }
 }
 
+/**
+ * FBLeafCursor is the implementation of a leaf cursor for FBLeafNode.
+ *
+ * @template Keystype - The type of keys used in the nodes.
+ * @template ValuesType - The type of values stored in the leaf nodes.
+ */
 export class FBLeafCursor<Keystype, ValuesType>
   implements LeafCursor<Keystype, ValuesType, FBLeafNode<Keystype, ValuesType>, FBInternalNode<Keystype, ValuesType>>
 {
@@ -426,6 +450,12 @@ export class FBLeafCursor<Keystype, ValuesType>
   }
 }
 
+/**
+ * FBInternalNode is the implementation of an internal node in the FBNodeStorage.
+ *
+ * @template Keystype - The type of keys used in the nodes.
+ * @template ValuesType - The type of values stored in the leaf nodes.
+ */
 export class FBInternalNode<Keystype, ValuesType>
   implements
     InternalNodeStorage<Keystype, ValuesType, FBLeafNode<Keystype, ValuesType>, FBInternalNode<Keystype, ValuesType>>
@@ -556,6 +586,12 @@ export class FBInternalNode<Keystype, ValuesType>
   }
 }
 
+/**
+ * FBChildCursor is the implementation of a child cursor for FBInternalNode.
+ *
+ * @template Keystype - The type of keys used in the nodes.
+ * @template ValuesType - The type of values stored in the leaf nodes.
+ */
 export class FBChildCursor<Keystype, ValuesType>
   implements ChildCursor<Keystype, ValuesType, FBLeafNode<Keystype, ValuesType>, FBInternalNode<Keystype, ValuesType>>
 {

@@ -66,37 +66,37 @@ async function testBPlusTree() {
 
   for (const key of keysToInsert) {
     console.log(`\n--- Inserting ${key} ---`);
-    // await tree.insert(key, `value-${key}`);
+    await tree.insert(key, `value-${key}`);
     await tree2.insert(key, `value-${key}`);
     console.log('Tree after insertion:');
-    tree.ascii();
+    tree2.ascii();
     console.log('FB Tree after insertion:');
-    // tree2.ascii();
+    tree2.ascii();
   }
 
   console.log('\n=== TRAVERSAL CHECKS AFTER INSERTS ===');
 
   console.log('\n-- Full iteration via for await (tree) --');
-  for await (const { key, value } of tree) {
+  for await (const { key, value } of tree2) {
     console.log(`${key}:${value}`);
   }
   console.log('\n');
 
   console.log('\n-- entries() generator --');
-  for await (const { key, value } of tree.entries()) {
+  for await (const { key, value } of tree2.entries()) {
     console.log(`${key}:${value}`);
   }
   console.log('\n');
 
   console.log('\n-- keys() generator --');
-  for await (const k of tree.keys()) {
+  for await (const k of tree2.keys()) {
     console.log(k);
   }
   console.log('\n');
 
   console.log('\n-- values() generator (first 20 values shown) --');
   let i = 0;
-  for await (const v of tree.values()) {
+  for await (const v of tree2.values()) {
     console.log(v);
     if (++i >= 20) break;
   }
@@ -104,26 +104,26 @@ async function testBPlusTree() {
 
   const startKey = 13;
   console.log(`\n-- entriesFrom(${startKey}) --`);
-  for await (const { key, value } of tree.entriesFrom(startKey)) {
+  for await (const { key, value } of tree2.entriesFrom(startKey)) {
     console.log(`${key}:${value}`);
   }
   console.log('\n');
 
   console.log('\n-- range(8, 22) default options (inclusiveStart=true, inclusiveEnd=false in this test file) --');
-  for await (const { key, value } of tree.range(8, 22)) {
+  for await (const { key, value } of tree2.range(8, 22)) {
     console.log(`${key}:${value}`);
   }
   console.log('\n');
 
   console.log('\n-- range(8, 22, { inclusiveStart: true, inclusiveEnd: true }) --');
-  for await (const { key, value } of tree.range(8, 22, { inclusiveStart: true, inclusiveEnd: true })) {
+  for await (const { key, value } of tree2.range(8, 22, { inclusiveStart: true, inclusiveEnd: true })) {
     console.log(`${key}:${value}`);
   }
   console.log('\n');
 
   console.log('\n-- forEach (async callback; will sleep 5ms for each entry, showing first 10) --');
   let count = 0;
-  await tree.forEach(async (k, v) => {
+  await tree2.forEach(async (k, v) => {
     if (count < 10) console.log(`${k}:${v}`);
     count++;
     await sleep(5);
@@ -131,7 +131,7 @@ async function testBPlusTree() {
   console.log(`\n(forEach processed ${count} entries)\n`);
 
   console.log('\n-- Manual iteration with early exit when key === 17 --');
-  for await (const { key, value } of tree.entries()) {
+  for await (const { key, value } of tree2.entries()) {
     console.log(`${key}:${value}`);
     if (key === 17) {
       console.log('\nEarly exit triggered at key 17');
@@ -142,7 +142,7 @@ async function testBPlusTree() {
 
   console.log('\n=== SEARCH PHASE ===');
   for (const key of keysToInsert) {
-    const result = await tree.search(key);
+    const result = await tree2.search(key);
     console.log(`Search ${key}:`, result);
   }
 
@@ -151,16 +151,16 @@ async function testBPlusTree() {
 
   for (const key of keysToDelete) {
     console.log(`\n--- Deleting ${key} ---`);
-    await tree.delete(key);
+    await tree2.delete(key);
     console.log('Tree after deletion:');
-    tree.ascii();
+    tree2.ascii();
 
-    const result = await tree.search(key);
+    const result = await tree2.search(key);
     console.log(`Search ${key} after deletion:`, result);
   }
 
   console.log('\n=== FINAL TREE STRUCTURE ===');
-  tree.ascii();
+  tree2.ascii();
 }
 
 await testBPlusTree();

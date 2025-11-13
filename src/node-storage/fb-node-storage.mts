@@ -93,6 +93,7 @@ export class FBNodeStorage<Keystype, ValuesType>
   ): Promise<FBInternalNode<Keystype, ValuesType>> {
     const childIds = children.map((child) => child.blockId ?? NO_BLOCK);
     const node = new FBInternalNode<Keystype, ValuesType>(this, childIds, keys.slice());
+    node.children = children.slice();
     return Promise.resolve(node);
   }
 
@@ -213,7 +214,17 @@ export class FBNodeStorage<Keystype, ValuesType>
       const keys = Array.isArray(rawInternal.keys) ? rawInternal.keys.map((k) => deserializeKey(k) as Keystype) : [];
       const node = new FBInternalNode<Keystype, ValuesType>(this, childIds, keys);
       node.blockId = blockId;
+      node.children = [];
       this.cache.set(blockId, node);
+
+      for (const childId of childIds) {
+        if (typeof childId === 'number' && childId !== NO_BLOCK) {
+          const childNode = await this.loadNode(childId);
+          node.children.push(childNode);
+        } else {
+          continue;
+        }
+      }
       return node;
     } else {
       throw new Error('Unknown node type in payload');
@@ -475,6 +486,13 @@ export class FBInternalNode<Keystype, ValuesType>
     const lastKey = this.keys.pop()!;
     nextNode.childBlockIds.unshift(lastChildBlockId);
     nextNode.keys.unshift(separatorKey);
+
+    let movedChild: FBLeafNode<Keystype, ValuesType> | FBInternalNode<Keystype, ValuesType>;
+    if (this.children.length > 0) {
+      movedChild = this.children.pop()!;
+      nextNode.children.unshift(movedChild);
+    }
+
     await this.storage.persistInternal(this);
     await this.storage.persistInternal(nextNode);
     return lastKey;
@@ -488,6 +506,13 @@ export class FBInternalNode<Keystype, ValuesType>
     const firstKey = this.keys.shift()!;
     previousNode.childBlockIds.push(firstChildBlockId);
     previousNode.keys.push(separatorKey);
+
+    let movedChild: FBLeafNode<Keystype, ValuesType> | FBInternalNode<Keystype, ValuesType>;
+    if (this.children.length > 0) {
+      movedChild = this.children.shift()!;
+      previousNode.children.push(movedChild);
+    }
+
     await this.storage.persistInternal(this);
     await this.storage.persistInternal(previousNode);
     return firstKey;
@@ -512,6 +537,11 @@ export class FBInternalNode<Keystype, ValuesType>
     const nextInternal = nextNode;
     this.keys.push(_key, ...nextInternal.keys);
     this.childBlockIds.push(...nextInternal.childBlockIds);
+
+    if (nextInternal.children.length > 0) {
+      this.children.push(...nextInternal.children);
+    }
+
     await this.getStorage().persistInternal(this);
 
     if (typeof nextInternal.blockId === 'number' && nextInternal.blockId !== NO_BLOCK) {
@@ -551,11 +581,27 @@ export class FBChildCursor<Keystype, ValuesType>
 
   async getChild(offset: number = 0): Promise<FBLeafNode<Keystype, ValuesType> | FBInternalNode<Keystype, ValuesType>> {
     const targetPosition = this.position + offset;
-    if (targetPosition < 0 || targetPosition >= this.parent.childBlockIds.length) {
+    const maxChildren = Math.max(this.parent.childBlockIds.length, this.parent.children.length);
+    if (targetPosition < 0 || targetPosition >= maxChildren) {
       throw new Error('Child cursor out of bounds');
     }
 
+    const maybeChild = this.parent.children && this.parent.children[targetPosition];
+    if (maybeChild) {
+      return maybeChild;
+    }
+
     const blockId = this.parent.childBlockIds[targetPosition];
+    if (blockId === NO_BLOCK || blockId === undefined || blockId === null) {
+      const kidsBlockIds = JSON.stringify(this.parent.childBlockIds);
+      const kidsInMemory = JSON.stringify((this.parent.children || []).map((c) => (c ? (c.blockId ?? null) : null)));
+      throw new Error(
+        `Child absent at position ${targetPosition}: blockId=${String(blockId)}; parent.keys=${JSON.stringify(
+          this.parent.keys,
+        )}; childBlockIds=${kidsBlockIds}; children.blockIds=${kidsInMemory}`,
+      );
+    }
+
     const childNode = await this.parent.getStorage().loadNode(blockId);
     return childNode;
   }
@@ -594,6 +640,7 @@ export class FBChildCursor<Keystype, ValuesType>
 
     this.parent.keys.splice(this.position, count, ...replacementKeys);
     this.parent.childBlockIds.splice(this.position, count + 1, ...replacementIds);
+    this.parent.children.splice(this.position, count + 1, ...replacementChildren);
 
     await this.parent.getStorage().persistInternal(this.parent);
 

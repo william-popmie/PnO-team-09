@@ -71,10 +71,11 @@ export class FBNodeStorage<Keystype, ValuesType>
     public compareKeys: (a: Keystype, b: Keystype) => number,
     public keySize: (key: Keystype) => number,
     public FBfile: FreeBlockFile,
+    private maxKeySize: number,
   ) {}
 
   getMaxKeySize(): number {
-    return Infinity;
+    return this.maxKeySize;
   }
 
   async createTree(): Promise<FBLeafNode<Keystype, ValuesType>> {
@@ -99,6 +100,16 @@ export class FBNodeStorage<Keystype, ValuesType>
     children: (FBLeafNode<Keystype, ValuesType> | FBInternalNode<Keystype, ValuesType>)[],
     keys: Keystype[],
   ): Promise<FBInternalNode<Keystype, ValuesType>> {
+    for (const child of children) {
+      if (child.blockId === undefined || child.blockId === NO_BLOCK) {
+        if (child.isLeaf) {
+          await this.persistLeaf(child);
+        } else {
+          await this.persistInternal(child);
+        }
+      }
+    }
+
     const node = await this.createInternalNode(children, keys);
     if (node.blockId === undefined || node.blockId === NO_BLOCK) {
       await this.persistInternal(node);
@@ -120,12 +131,21 @@ export class FBNodeStorage<Keystype, ValuesType>
     node.blockId = newBlockId;
     this.cache.set(newBlockId, node);
     if (typeof oldBlockId === 'number' && oldBlockId !== NO_BLOCK && oldBlockId !== newBlockId) {
-      await this.FBfile.freeBlob(oldBlockId);
-      this.cache.delete(oldBlockId);
+      try {
+        await this.FBfile.freeBlob(oldBlockId);
+      } catch (e) {
+        console.warn(`failed to free old block id ${oldBlockId}:`, e);
+      } finally {
+        this.cache.delete(oldBlockId);
+      }
     }
   }
 
   async persistInternal(node: FBInternalNode<Keystype, ValuesType>): Promise<void> {
+    if (node.childBlockIds.some((id) => id === NO_BLOCK || id === undefined)) {
+      throw new Error('Cannot persist internal node with unpersisted children');
+    }
+
     const payload = {
       type: 'internal',
       keys: node.keys.map((key) => serializeKey(key)),
@@ -138,8 +158,13 @@ export class FBNodeStorage<Keystype, ValuesType>
     node.blockId = newBlockId;
     this.cache.set(newBlockId, node);
     if (typeof oldBlockId === 'number' && oldBlockId !== NO_BLOCK && oldBlockId !== newBlockId) {
-      await this.FBfile.freeBlob(oldBlockId);
-      this.cache.delete(oldBlockId);
+      try {
+        await this.FBfile.freeBlob(oldBlockId);
+      } catch (e) {
+        console.warn(`failed to free old block id ${oldBlockId}:`, e);
+      } finally {
+        this.cache.delete(oldBlockId);
+      }
     }
   }
 
@@ -198,6 +223,12 @@ export class FBNodeStorage<Keystype, ValuesType>
   debug_clearCache(): void {
     this.cache.clear();
   }
+
+  deleteCachedBlock(blockId?: number): void {
+    if (typeof blockId === 'number' && blockId !== NO_BLOCK) {
+      this.cache.delete(blockId);
+    }
+  }
 }
 
 export class FBNodeBase<Keystype, ValuesType>
@@ -219,10 +250,12 @@ export class FBNodeBase<Keystype, ValuesType>
     return false;
   }
 
-  mergeWithNext(
+  async mergeWithNext(
     _key: Keystype,
     _nextNode: FBLeafNode<Keystype, ValuesType> | FBInternalNode<Keystype, ValuesType>,
-  ): void {}
+  ): Promise<void> {
+    return Promise.resolve();
+  }
 }
 
 export class FBLeafNode<Keystype, ValuesType>
@@ -287,10 +320,10 @@ export class FBLeafNode<Keystype, ValuesType>
     return totalKeys <= this.storage.getMaxKeySize();
   }
 
-  mergeWithNext(
+  async mergeWithNext(
     _key: Keystype,
     nextNode: FBLeafNode<Keystype, ValuesType> | FBInternalNode<Keystype, ValuesType>,
-  ): void {
+  ): Promise<void> {
     if (!nextNode.isLeaf) {
       throw new Error('Cannot merge with non-leaf node');
     }
@@ -300,13 +333,17 @@ export class FBLeafNode<Keystype, ValuesType>
     this.nextBlockId = nextLeaf.nextBlockId ?? NO_BLOCK;
     this.nextLeaf = nextLeaf.nextLeaf ?? null;
 
-    void (async () => {
-      await this.getStorage().persistLeaf(this);
-      if (typeof nextLeaf.blockId === 'number' && nextLeaf.blockId !== NO_BLOCK) {
+    await this.getStorage().persistLeaf(this);
+
+    if (typeof nextLeaf.blockId === 'number' && nextLeaf.blockId !== NO_BLOCK) {
+      try {
         await this.getStorage().FBfile.freeBlob(nextLeaf.blockId);
-        this.getStorage().debug_clearCache();
+      } catch (e) {
+        console.warn(`failed to free freed next leaf block id ${nextLeaf.blockId}:`, e);
+      } finally {
+        this.getStorage().deleteCachedBlock(nextLeaf.blockId);
       }
-    })();
+    }
   }
 }
 
@@ -465,23 +502,27 @@ export class FBInternalNode<Keystype, ValuesType>
     return totalKeys <= this.storage.getMaxKeySize();
   }
 
-  mergeWithNext(
+  async mergeWithNext(
     _key: Keystype,
     nextNode: FBInternalNode<Keystype, ValuesType> | FBLeafNode<Keystype, ValuesType>,
-  ): void {
+  ): Promise<void> {
     if (nextNode.isLeaf) {
       throw new Error('Cannot merge with non-internal node');
     }
     const nextInternal = nextNode;
     this.keys.push(_key, ...nextInternal.keys);
     this.childBlockIds.push(...nextInternal.childBlockIds);
-    void (async () => {
-      await this.getStorage().persistInternal(this);
-      if (typeof nextInternal.blockId === 'number' && nextInternal.blockId !== NO_BLOCK) {
+    await this.getStorage().persistInternal(this);
+
+    if (typeof nextInternal.blockId === 'number' && nextInternal.blockId !== NO_BLOCK) {
+      try {
         await this.getStorage().FBfile.freeBlob(nextInternal.blockId);
-        this.getStorage().debug_clearCache();
+      } catch (e) {
+        console.warn(`failed to free merged next internal block id ${nextInternal.blockId}:`, e);
+      } finally {
+        this.getStorage().deleteCachedBlock(nextInternal.blockId);
       }
-    })();
+    }
   }
 }
 

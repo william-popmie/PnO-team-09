@@ -53,6 +53,7 @@ async function run() {
     (a, b) => a - b,
     (_k) => 8,
     fb,
+    64,
   );
 
   const leaf = await storage.createLeaf();

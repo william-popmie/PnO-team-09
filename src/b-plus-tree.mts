@@ -467,12 +467,12 @@ export class BPlusTree<
 
     if (leftSibling) {
       const separatorKey = parent.keys[index - 1];
-      leftSibling.mergeWithNext(separatorKey, node);
+      await leftSibling.mergeWithNext(separatorKey, node);
       parent.keys.splice(index - 1, 1);
       parent.children.splice(index, 1);
     } else if (rightSibling) {
       const separatorKey = parent.keys[index];
-      node.mergeWithNext(separatorKey, rightSibling);
+      await node.mergeWithNext(separatorKey, rightSibling);
       parent.keys.splice(index, 1);
       parent.children.splice(index + 1, 1);
     }

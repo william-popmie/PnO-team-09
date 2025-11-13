@@ -1,5 +1,5 @@
 // @author Mathias Bouhon Keulen
-// @date 2025-11-05
+// @date 2025-11-13
 
 /**
  * NodeStorage defines the abstraction for storage and management of nodes in a tree structure.

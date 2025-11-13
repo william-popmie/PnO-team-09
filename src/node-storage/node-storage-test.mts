@@ -1,3 +1,6 @@
+// @author Mathias Bouhon Keulen
+// @date 2025-11-13
+
 import { FBNodeStorage, FBInternalNode } from './fb-node-storage.mjs';
 import { FreeBlockFile, NO_BLOCK } from '../freeblockfile.mjs';
 import { MockFile } from '../mockfile.mjs';

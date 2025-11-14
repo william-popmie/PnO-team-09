@@ -1,14 +1,27 @@
 // @author Frederick Hillen, Arwin Gorissen
-// @date 2025-11-12
+// @date 2025-11-14
 
 import type { File } from '../mockfile.mjs';
 import type { WALManager } from './wal-manager.mjs';
 
-/* simple async mutex to serialize async critical sections */
+/**
+ * Simple async mutex to serialize async critical sections
+ * to avoid races (used in every function of atomic-file).
+ */
 class Mutex {
   private locked = false;
   private waiters: (() => void)[] = [];
 
+  /**
+   * Acquires the mutex lock.
+   *
+   * If the mutex is free, this call resolves immediately and returns an
+   * `unlock` function.
+   * If the mutex is already locked, the caller is queued and the Promise
+   * resolves only when the mutex becomes available.
+   *
+   * @returns A function that releases the lock.
+   */
   async lock(): Promise<() => void> {
     return new Promise((resolve) => {
       const take = () => {
@@ -24,6 +37,15 @@ class Mutex {
     });
   }
 
+  /**
+   * Runs the given asynchronous function with exclusive access to the mutex.
+   *
+   * This helper acquires the lock, executes the provided function fn,
+   * and guarantees that the lock is released afterwards.
+   *
+   * @param fn A function representing the critical section.
+   * @returns The return value of fn.
+   */
   async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
     const unlock = await this.lock();
     try {
@@ -34,6 +56,9 @@ class Mutex {
   }
 }
 
+/**
+ * Interface to interact with atomic-file.
+ */
 export interface AtomicFile {
   begin(): Promise<void>;
   journalWrite(offset: number, data: Uint8Array): Promise<void>;
@@ -45,6 +70,9 @@ export interface AtomicFile {
   safeShutdown(): Promise<void>;
 }
 
+/**
+ * Implementation of atomicfile to ensure crash consistency.
+ */
 export class AtomicFileImpl implements AtomicFile {
   private dbFile: File;
   private wal: WALManager;
@@ -58,6 +86,9 @@ export class AtomicFileImpl implements AtomicFile {
     this.wal = walManager;
   }
 
+  /**
+   * Open the WAL and database files.
+   */
   private async ensureOpen(): Promise<void> {
     if (this.opened) return;
     await this.dbFile.open();
@@ -65,6 +96,9 @@ export class AtomicFileImpl implements AtomicFile {
     this.opened = true;
   }
 
+  /**
+   * Commence a transaction to modify the database.
+   */
   public async begin(): Promise<void> {
     return this.mutex.runExclusive(async () => {
       if (this.inTransaction) throw new Error('transaction already in progress');
@@ -75,7 +109,9 @@ export class AtomicFileImpl implements AtomicFile {
   }
 
   /**
-   * Writes to WAL
+   * Writes data to the WAL.
+   * @param offset at which the data needs to be written in the database
+   * @param data the data to be written to the database
    */
   public async journalWrite(offset: number, data: Uint8Array): Promise<void> {
     return this.mutex.runExclusive(async () => {
@@ -85,17 +121,25 @@ export class AtomicFileImpl implements AtomicFile {
     });
   }
 
+  /**
+   * Reads a sequence of bytes from the database file.
+   *
+   * @param offset The byte position in the database file from which reading
+   *               should begin.
+   * @param length The number of bytes to read.
+   * @returns A Uint8Array containing the read data from the database file.
+   */
   public async read(offset: number, length: number): Promise<Uint8Array> {
     return this.mutex.runExclusive(async () => {
       await this.ensureOpen();
-      const buf = Buffer.alloc(length);
+      const buf: Buffer = Buffer.alloc(length);
       await this.dbFile.read(buf, { position: offset });
       return new Uint8Array(buf);
     });
   }
 
   /**
-   * Ensures that WAL is not dirty and finalizes the transaction.
+   * Commits data to the WAL by adding a marker.
    */
   public async journalCommit(): Promise<void> {
     return this.mutex.runExclusive(async () => {
@@ -116,7 +160,7 @@ export class AtomicFileImpl implements AtomicFile {
   }
 
   /**
-   * Writes to database (trigger checkpoint). Serialized to avoid races.
+   * Writes to database (trigger checkpoint).
    */
   public async checkpoint(): Promise<void> {
     return this.mutex.runExclusive(async () => {
@@ -138,6 +182,9 @@ export class AtomicFileImpl implements AtomicFile {
     });
   }
 
+  /**
+   * Aborts the active transaction and clears the WAL.
+   */
   public async abort(): Promise<void> {
     return this.mutex.runExclusive(async () => {
       if (!this.inTransaction) throw new Error('no active transaction');
@@ -148,6 +195,9 @@ export class AtomicFileImpl implements AtomicFile {
     });
   }
 
+  /**
+   * Shuts down atomic-file safely.
+   */
   public async safeShutdown(): Promise<void> {
     return this.mutex.runExclusive(async () => {
       await this.dbFile.sync();

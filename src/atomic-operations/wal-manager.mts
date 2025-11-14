@@ -91,22 +91,27 @@ export class WALManagerImpl implements WALManager {
   }
 
   public async checkpoint(): Promise<void> {
+    // public locking wrapper
     return this.mutex.runExclusive(async () => {
-      const walSize: number = await this.walFile.stat().then((stat) => stat.size);
-      if (walSize === 0) return;
-
-      const buffer = Buffer.alloc(walSize);
-      await this.walFile.read(buffer, { position: 0 });
-
-      const committedData = this.getCommittedData(walSize, buffer);
-      if (committedData.writes.length === 0) {
-        return;
-      } else {
-        for (const w of committedData.writes) {
-          await this.dbFile.writev([Buffer.from(w.data)], w.offset);
-        }
-      }
+      await this.checkpointInternal();
     });
+  }
+
+  // internal checkpoint implementation that does not acquire the mutex.
+  private async checkpointInternal(): Promise<void> {
+    const walSize: number = await this.walFile.stat().then((stat) => stat.size);
+    if (walSize === 0) return;
+
+    const buffer = Buffer.alloc(walSize);
+    await this.walFile.read(buffer, { position: 0 });
+
+    const committedData = this.getCommittedData(walSize, buffer);
+    if (committedData.writes.length === 0) {
+      return;
+    }
+    for (const w of committedData.writes) {
+      await this.dbFile.writev([Buffer.from(w.data)], w.offset);
+    }
   }
 
   private getCommittedData(walSize: number, buffer: Buffer): { writes: { offset: number; data: Buffer }[] } {
@@ -147,14 +152,17 @@ export class WALManagerImpl implements WALManager {
       const journalContents: string = journalBuffer.toString();
 
       if (!journalContents.includes('COMMIT')) {
-        await this.clearLog();
+        // call non-locking internal clear to avoid nested mutex acquisition
+        await this.walFile.truncate(0);
         return;
       }
 
-      await this.checkpoint();
+      // call the internal, non-locking checkpoint implementation
+      await this.checkpointInternal();
     });
   }
 
+  // public locked clearLog
   public async clearLog(): Promise<void> {
     return this.mutex.runExclusive(async () => {
       await this.walFile.truncate(0);

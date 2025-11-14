@@ -135,6 +135,8 @@ export class AtomicFileImpl implements AtomicFile {
     return this.mutex.runExclusive(async () => {
       await this.ensureOpen();
       await this.wal.recover();
+      await this.dbFile.sync();
+      await this.wal.sync();
     });
   }
 

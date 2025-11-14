@@ -159,6 +159,7 @@ export class WALManagerImpl implements WALManager {
 
       // call the internal, non-locking checkpoint implementation
       await this.checkpointInternal();
+      await this.walFile.truncate(0);
     });
   }
 

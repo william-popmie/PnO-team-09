@@ -1,5 +1,5 @@
 // @author Frederick Hillen, Arwin Gorissen
-// @date 2025-11-14
+// @date 2025-11-15
 
 import type { File } from '../mockfile.mjs';
 
@@ -75,7 +75,8 @@ class Mutex {
 export class WALManagerImpl implements WALManager {
   private walFile: File;
   private dbFile: File;
-  private mutex = new Mutex();
+  private mutex: Mutex = new Mutex();
+  private opened: boolean = false;
 
   /**
    * Constructor
@@ -94,6 +95,7 @@ export class WALManagerImpl implements WALManager {
     return this.mutex.runExclusive(async () => {
       await this.walFile.open();
       await this.dbFile.open();
+      this.opened = true;
     });
   }
 
@@ -104,13 +106,14 @@ export class WALManagerImpl implements WALManager {
     return this.mutex.runExclusive(async () => {
       await this.walFile.close();
       await this.dbFile.close();
+      this.opened = false;
     });
   }
 
   /**
    * Writes data to the WAL.
-   * @param offset at which the data needs to be written in the database
-   * @param data the data to be written to the database
+   * @param offset a number >= 0 at which the data needs to be written in the database
+   * @param data a Uint8Array at which the data to be written to the database
    */
   public async logWrite(offset: number, data: Uint8Array): Promise<void> {
     return this.mutex.runExclusive(async () => {
@@ -161,9 +164,6 @@ export class WALManagerImpl implements WALManager {
     await this.walFile.read(buffer, { position: 0 });
 
     const committedData = this.getCommittedData(walSize, buffer);
-    if (committedData.writes.length === 0) {
-      return;
-    }
     for (const w of committedData.writes) {
       await this.dbFile.writev([Buffer.from(w.data)], w.offset);
     }
@@ -171,7 +171,7 @@ export class WALManagerImpl implements WALManager {
 
   /**
    * Helper function that extracts all committed data from the WAL.
-   * @param walSize size of the WAL
+   * @param walSize a number > 0, the size of the WAL
    * @param buffer contents of WAL
    * @returns An object containing an array writes, of which each element
    *          represents a fully committed write.
@@ -186,6 +186,7 @@ export class WALManagerImpl implements WALManager {
       const end: number = pos + 8 + dataCommitLength + marker.length;
       const offset: number = buffer.readUInt32LE(pos);
       const data: Buffer = buffer.subarray(pos + 8, pos + 8 + dataCommitLength);
+
       if (pos + 8 + dataCommitLength + marker.length > walSize) break;
       if (end <= walSize && buffer.subarray(end - marker.length, end).equals(marker)) {
         for (const w of tempWrites) {
@@ -196,7 +197,7 @@ export class WALManagerImpl implements WALManager {
         pos = end;
       } else {
         tempWrites.push({ offset, data });
-        pos = end - marker.length;
+        pos = pos + 8 + dataCommitLength;
       }
     }
     return { writes };
@@ -220,11 +221,14 @@ export class WALManagerImpl implements WALManager {
       const journalContents: string = journalBuffer.toString();
 
       if (!journalContents.includes('COMMIT')) {
+        console.log('No committed changes detected. Flushing...');
         await this.walFile.truncate(0);
         return;
       }
 
+      console.log('Recovering committed WAL...');
       await this.checkpointInternal();
+      console.log('Committed changes succesfully recovered.');
       await this.walFile.truncate(0);
     });
   }
@@ -233,5 +237,11 @@ export class WALManagerImpl implements WALManager {
     return this.mutex.runExclusive(async () => {
       await this.walFile.truncate(0);
     });
+  }
+
+  // Helper functions for testing
+
+  public getOpen(): boolean {
+    return this.opened;
   }
 }

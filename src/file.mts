@@ -1,3 +1,6 @@
+// @author Tijn Gommers
+// @date 2025-15-11
+
 import type { File } from './mockfile.mjs';
 import { MockFile } from './mockfile.mjs';
 
@@ -36,6 +39,8 @@ export class MockFileSystem {
 
   /**
    * Internal helper to split and validate a path
+   * @param {string} path The file or directory path
+   * @returns {string[]} Array of path components
    * @throws {Error} If path is empty or contains invalid characters
    */
   private validateAndSplitPath(path: string): string[] {
@@ -45,7 +50,8 @@ export class MockFileSystem {
 
   /**
    * Internal helper to traverse the file system to a specific path
-   * @returns Tuple of [parent directory Map, final path component]
+   * @param {string} path The file or directory path
+   * @returns {[Map<string,FileSystemNode>,string]} Tuple of [parent directory Map, final path component]
    * @throws {Error} If any parent component is a file or doesn't exist
    */
   private traverseToParent(path: string): [Map<string, FileSystemNode>, string] {
@@ -75,6 +81,9 @@ export class MockFileSystem {
 
   /**
    * Writes a file to the specified path, creating parent directories as needed
+   * @param {string} path The file path where to write the file
+   * @param {File} file The File instance to write
+   * @returns {Promise<void>}
    */
   async writeFile(path: string, file: File): Promise<void> {
     const [parent, filename] = this.traverseToParent(path);
@@ -96,6 +105,8 @@ export class MockFileSystem {
 
   /**
    * Reads a file from the specified path
+   * @param {string} path The file path to read
+   * @returns {Promise<File>} file instance at the given path
    * @throws {Error} If file doesn't exist or path points to a directory
    */
   async readFile(path: string): Promise<File> {
@@ -114,7 +125,9 @@ export class MockFileSystem {
 
   /**
    * Lists contents of a directory
-   * @returns Map of entry names to their FileSystemNode (File or MockFileSystem)
+   * @param {string} path The directory path to read
+   * @returns {Promise<Map<string, FileSystemNode>>} Map of entry names to their FileSystemNode (File or MockFileSystem)
+   * @throws {Error} If path doesn't exist or points to a file
    */
   async readdir(path: string): Promise<Map<string, FileSystemNode>> {
     if (!path || path === '/') return Promise.resolve(this.store);
@@ -135,6 +148,9 @@ export class MockFileSystem {
   /**
    * Creates a new directory at the specified path
    * Parent directories must exist
+   * @param {string} path The directory path to create
+   * @returns {Promise<void>}
+   * @throws {Error} If path already exists
    */
   async mkdir(path: string): Promise<void> {
     const [parent, dirname] = this.traverseToParent(path);
@@ -149,6 +165,8 @@ export class MockFileSystem {
 
   /**
    * Removes a file from the file system
+   * @param {string} path The file path to remove
+   * @returns {Promise<void>}
    * @throws {Error} If path doesn't exist or points to a directory
    */
   async unlink(path: string): Promise<void> {
@@ -168,7 +186,10 @@ export class MockFileSystem {
 
   /**
    * Removes an empty directory
+   * @param {string} path The directory path to remove
+   * @returns {Promise<void>}
    * @throws {Error} If path doesn't exist or points to a file
+   * @throws {Error} If directory is not empty
    */
   async rmdir(path: string): Promise<void> {
     const [parent, dirname] = this.traverseToParent(path);
@@ -193,6 +214,11 @@ export class MockFileSystem {
   /**
    * Renames a file or directory
    * Note: This only handles renaming within the same directory
+   * @param {string} oldPath The current path of the file or directory
+   * @param {string} newName The new name for the file or directory
+   * @returns {Promise<void>}
+   * @throws {Error} If oldPath doesn't exist
+   * @throws {Error} If newName already exists in the same directory
    */
   async rename(oldPath: string, newName: string): Promise<void> {
     const [parent, oldName] = this.traverseToParent(oldPath);

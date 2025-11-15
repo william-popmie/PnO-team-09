@@ -1,3 +1,6 @@
+// @author Tijn Gommers
+// @date 2025-15-11
+
 import { describe, it, expect } from 'vitest';
 import { MockFileSystem } from './file.mjs';
 import { MockFile } from './mockfile.mjs';

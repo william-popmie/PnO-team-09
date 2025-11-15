@@ -31,6 +31,48 @@ describe('AtomicFile + WALManager integration (concurrency safe skeleton)', () =
     await dbFile.truncate(0);
   });
 
+  it('crash drops uncommitted WAL entries and does not apply them to DB', async () => {
+    // write a WAL record but do NOT add commit marker
+    await wal.logWrite(0, Uint8Array.from([42]));
+
+    // simulate crash (partial persistence)
+    walFile.crash();
+
+    // recover should clear WAL and not apply the uncommitted record
+    await atomic.recover();
+
+    const walStat = await walFile.stat();
+    const dbStat = await dbFile.stat();
+    expect(walStat.size).toBe(0);
+    expect(dbStat.size).toBe(0);
+  });
+
+  it('crash may or may not persist committed WAL; after recover WAL is cleared and DB is consistent', async () => {
+    // write an entry and a commit marker (but do not fsync)
+    await wal.logWrite(8, Uint8Array.from([7, 8]));
+    await wal.addCommitMarker();
+
+    // simulate crash that may or may not have persisted commit marker + data
+    walFile.crash();
+
+    // recover: if commit marker (and data) survived, it will be applied; otherwise not.
+    await atomic.recover();
+
+    // WAL must be cleared after recover
+    const walStat = await walFile.stat();
+    expect(walStat.size).toBe(0);
+
+    // DB may contain the payload or be empty depending on what persisted
+    const dbSize = (await dbFile.stat()).size;
+    if (dbSize >= 2) {
+      const out = Buffer.alloc(2);
+      await dbFile.read(out, { position: 8 });
+      expect(Array.from(out)).toEqual([7, 8]);
+    } else {
+      expect(dbSize).toBe(0);
+    }
+  });
+
   it('begin() test', async () => {
     await atomic.begin();
     await expect(atomic.begin()).rejects.toThrowError('Transaction already in progress.');

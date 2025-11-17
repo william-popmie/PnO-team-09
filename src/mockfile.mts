@@ -1,55 +1,83 @@
+// @author Tijn Gommers
+// @date 2025-17-11
+
 import assert from 'node:assert/strict';
-import * as fsPromises from 'node:fs/promises';
 import random from 'random';
+import type { File } from './file.mts';
 
-export interface File {
-  /**
-   * The maximum N such that writes of size N at offsets that are multiples of N are atomic.
-   */
-  readonly sectorSize: number;
-  create(): Promise<void>;
-  open(): Promise<void>;
-  close(): Promise<void>;
-  sync(): Promise<void>;
-  writev(buffers: Buffer[], position: number): Promise<void>;
-  read(buffer: Buffer, options: { position: number }): Promise<void>;
-  truncate(length: number): Promise<void>;
-  stat(): Promise<{ size: number }>;
-}
-
+/**
+ * Mock implementation of the File interface.
+ * Stores data in-memory for testing purposes and supports various crash simulations.
+ */
 export class MockFile implements File {
+  /** Sector size for atomic writes. */
   public readonly sectorSize: number;
+
+  /** Current logical file size in bytes. */
   private size: number;
+
+  /** Array of sectors representing stored data. */
   private sectors: Buffer[] = [];
-  // Invariant: for each `[key, value]` in `newSectors`, and for each buffer in `value`, buffer.length === sectorSize
+
+  /**
+   * Map of pending writes for each sector.
+   * Invariant: each buffer in the value array has length equal to sectorSize.
+   */
   private newSectors: Map<number, Buffer[]> = new Map();
 
+  /**
+   * Constructs a new MockFile with a given sector size.
+   * @param {number} sectorSize - Size of each sector in bytes.
+   */
   public constructor(sectorSize: number) {
     this.sectorSize = sectorSize;
     this.size = 0;
   }
 
-  public async create() {
-    return Promise.resolve();
+  /**
+   * Creates a new file.
+   * @returns {Promise<void>} Resolves immediately.
+   */
+  public async create(): Promise<void> {
+    return await Promise.resolve();
   }
 
-  public async open() {
-    return Promise.resolve();
+  /**
+   * Opens the file.
+   * @returns {Promise<void>} Resolves immediately.
+   */
+  public async open(): Promise<void> {
+    return await Promise.resolve();
   }
 
-  public async close() {
+  /**
+   * Closes the file. Throws if there are pending writes that have not been synced.
+   * @returns {Promise<void>} Resolves when the file is closed.
+   * @throws {Error} If there are unsynced writes in newSectors.
+   */
+  public async close(): Promise<void> {
     if (this.newSectors.size !== 0) throw new Error("Closed the file without sync'ing first.");
-    return Promise.resolve();
+    return await Promise.resolve();
   }
 
-  public async sync() {
+  /**
+   * Synchronizes all pending writes to the main sectors array.
+   * @returns {Promise<void>} Resolves when sync is complete.
+   */
+  public async sync(): Promise<void> {
     for (const [address, writes] of this.newSectors.entries()) {
       this.sectors[address] = writes.at(-1)!;
     }
     this.newSectors.clear();
-    return Promise.resolve();
+    return await Promise.resolve();
   }
 
+  /**
+   * Reads a sector buffer, returning the latest write if pending.
+   * @param {number} sectorOrdinal - Index of the sector to read.
+   * @returns {Buffer} The sector buffer.
+   * @throws {AssertionError} If sectorOrdinal is out of bounds.
+   */
   private read_sector(sectorOrdinal: number): Buffer {
     const i = sectorOrdinal;
     assert(0 <= i && i < this.sectors.length);
@@ -57,18 +85,40 @@ export class MockFile implements File {
     return newSector_i ? newSector_i.at(-1)! : this.sectors[i];
   }
 
+  /**
+   * Writes a buffer to a specific sector at a given offset.
+   * @param {number} offsetInSector - Offset within the sector to start writing.
+   * @param {Buffer} buffer - Buffer to write.
+   * @param {number} sectorOrdinal - Sector index to write to.
+   * @throws {AssertionError} If buffer does not fit in the sector.
+   */
   private write_sector(offsetInSector: number, buffer: Buffer, sectorOrdinal: number) {
     assert(buffer.length <= this.sectorSize - offsetInSector);
+    // If this write fills an entire sector at offset 0, commit it immediately
+    if (offsetInSector === 0 && buffer.length === this.sectorSize) {
+      this.sectors[sectorOrdinal] = Buffer.from(buffer);
+      // Any pending writes for this sector are now superseded
+      this.newSectors.delete(sectorOrdinal);
+      return;
+    }
+
     if (buffer.length !== this.sectorSize) {
       const sector = Buffer.from(this.read_sector(sectorOrdinal));
       buffer.copy(sector, offsetInSector);
       buffer = sector;
     } else buffer = Buffer.from(buffer);
+
     if (!this.newSectors.has(sectorOrdinal)) this.newSectors.set(sectorOrdinal, []);
     this.newSectors.get(sectorOrdinal)!.push(buffer);
   }
 
-  public async writev(buffers: Buffer[], position: number) {
+  /**
+   * Writes multiple buffers to the file at a specified position.
+   * @param {Buffer[]} buffers - Buffers to write.
+   * @param {number} position - Position in file to start writing.
+   * @returns {Promise<void>} Resolves when write is complete.
+   */
+  public async writev(buffers: Buffer[], position: number): Promise<void> {
     let buffer = Buffer.concat(buffers);
     if (position + buffer.length > this.size) await this.truncate(position + buffer.length);
     let sectorOrdinal = Math.floor(position / this.sectorSize);
@@ -83,7 +133,14 @@ export class MockFile implements File {
     return Promise.resolve();
   }
 
-  public async read(buffer: Buffer, options: { position: number }) {
+  /**
+   * Reads data from the file into a buffer.
+   * @param {Buffer} buffer - Buffer to fill with read data.
+   * @param {{position: number}} options - Position to start reading.
+   * @returns {Promise<void>} Resolves when read is complete.
+   * @throws {AssertionError} If the read exceeds file bounds.
+   */
+  public async read(buffer: Buffer, options: { position: number }): Promise<void> {
     assert(0 <= options.position);
     assert(options.position + buffer.length <= this.sectors.length * this.sectorSize);
     let sectorOrdinal = Math.floor(options.position / this.sectorSize);
@@ -100,7 +157,12 @@ export class MockFile implements File {
     return Promise.resolve();
   }
 
-  public async truncate(length: number) {
+  /**
+   * Truncates the file to a given length.
+   * @param {number} length - New length in bytes.
+   * @returns {Promise<void>} Resolves when truncation is complete.
+   */
+  public async truncate(length: number): Promise<void> {
     const sectorCount = Math.ceil(length / this.sectorSize);
     if (sectorCount < this.sectors.length) {
       this.sectors.length = sectorCount;
@@ -115,70 +177,85 @@ export class MockFile implements File {
     return Promise.resolve();
   }
 
-  public async stat() {
+  /**
+   * Returns the file size.
+   * @returns {Promise<{size: number}>} Object containing the file size in bytes.
+   */
+  public async stat(): Promise<{ size: number }> {
     return Promise.resolve({ size: this.size });
   }
 
+  // =====================
+  // Crash methods
+  // =====================
+
   /**
-   * Performs some randomly chosen subset of the pending writes; the others are lost.
+   * Simulates a basic crash where a random subset of pending writes are saved.
    */
-  public crash() {
+  public crashBasic(): void {
     for (const [sectorOrdinal, writes] of this.newSectors) {
       const nbWritesToSave = random.uniformInt(0, writes.length)();
       if (nbWritesToSave > 0) this.sectors[sectorOrdinal] = writes[nbWritesToSave - 1];
     }
     this.newSectors.clear();
   }
-}
 
-export class RealFile implements File {
-  public readonly sectorSize = 512;
-  public readonly filePath: string;
-  private fileHandle: fsPromises.FileHandle | null;
-
-  public constructor(filePath: string) {
-    this.filePath = filePath;
-    this.fileHandle = null;
+  /**
+   * Simulates a crash where all pending writes are lost.
+   */
+  public crashFullLoss(): void {
+    // Simulate losing everything: both pending writes and committed sectors
+    this.newSectors.clear();
+    this.sectors = [];
+    this.size = 0;
   }
 
-  public async create() {
-    assert(this.fileHandle === null);
-    this.fileHandle = await fsPromises.open(this.filePath, 'w+');
+  /**
+   * Simulates a crash that partially corrupts the last pending write in each sector.
+   */
+  public crashPartialCorruption(): void {
+    if (this.newSectors.size > 0) {
+      for (const [sectorOrdinal, writes] of this.newSectors) {
+        const lastWrite = writes.at(-1);
+        if (!lastWrite) continue;
+
+        const corrupted = Buffer.from(lastWrite);
+        const byteToCorrupt = random.uniformInt(0, corrupted.length - 1)();
+        corrupted[byteToCorrupt] ^= 0xff;
+
+        this.sectors[sectorOrdinal] = corrupted;
+      }
+    } else {
+      // If there are no pending writes, corrupt committed sectors instead
+      for (let sectorOrdinal = 0; sectorOrdinal < this.sectors.length; sectorOrdinal++) {
+        const current = this.sectors[sectorOrdinal];
+        if (!current) continue;
+        const corrupted = Buffer.from(current);
+        const byteToCorrupt = random.uniformInt(0, corrupted.length - 1)();
+        corrupted[byteToCorrupt] ^= 0xff;
+        this.sectors[sectorOrdinal] = corrupted;
+      }
+    }
+    this.newSectors.clear();
   }
 
-  public async open() {
-    assert(this.fileHandle === null);
-    this.fileHandle = await fsPromises.open(this.filePath, 'r+');
-  }
+  /**
+   * Simulates a mixed crash where some sectors lose all writes and others have corrupted data.
+   */
+  public crashMixed(): void {
+    for (const [sectorOrdinal, writes] of this.newSectors) {
+      if (random.bool()) continue; // 50% chance volledig weg
 
-  public async close() {
-    assert(this.fileHandle !== null);
-    await this.fileHandle.close();
-    this.fileHandle = null;
-  }
-
-  public async sync() {
-    assert(this.fileHandle !== null);
-    await this.fileHandle.sync();
-  }
-
-  public async writev(buffers: Buffer[], position: number) {
-    assert(this.fileHandle !== null);
-    await this.fileHandle.writev(buffers, position);
-  }
-
-  public async read(buffer: Buffer, options: { position: number }) {
-    assert(this.fileHandle !== null);
-    await this.fileHandle.read(buffer, 0, buffer.length, options.position);
-  }
-
-  public async truncate(length: number) {
-    assert(this.fileHandle !== null);
-    await this.fileHandle.truncate(length);
-  }
-
-  public async stat(): Promise<{ size: number }> {
-    assert(this.fileHandle !== null);
-    return await this.fileHandle.stat();
+      const nbWritesToSave = random.uniformInt(0, writes.length)();
+      if (nbWritesToSave > 0) {
+        const saved = Buffer.from(writes[nbWritesToSave - 1]);
+        if (random.bool()) {
+          const byteToCorrupt = random.uniformInt(0, saved.length - 1)();
+          saved[byteToCorrupt] ^= 0xff;
+        }
+        this.sectors[sectorOrdinal] = saved;
+      }
+    }
+    this.newSectors.clear();
   }
 }

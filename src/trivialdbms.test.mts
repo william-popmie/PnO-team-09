@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { Database } from './trivialdbms.mjs';
-import { MockFile, RealFile } from './mockfile.mjs';
+import { MockFile } from './mockfile.mjs';
+import { RealFile } from './file.mjs';
 
 async function testOneCommit(deepEqual: (x: unknown, y: unknown) => void) {
   const file = new MockFile(512);
@@ -62,7 +63,7 @@ async function testCrash(deepEqual: (x: unknown, y: unknown) => void) {
     ]);
     await db.deleteRecord(0);
     deepEqual(await db.getRecords(), [{ id: 'Leuven', population: 101032, isProvinceCapital: true }]);
-    file.crash();
+    file.crashBasic();
   }
   {
     const db = await Database.open(file);

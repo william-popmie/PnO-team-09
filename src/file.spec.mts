@@ -1,193 +1,129 @@
 // @author Tijn Gommers
-// @date 2025-15-11
+// @date 2025-17-11
 
-import { describe, it, expect } from 'vitest';
-import { MockFileSystem } from './file.mjs';
-import { MockFile } from './mockfile.mjs';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import * as fs from 'node:fs/promises';
+import { RealFile } from './file.mjs';
+import path from 'node:path';
 
-describe('MockFileSystem', () => {
-  // Helper om een MockFile te maken met bepaalde content
-  async function createMockFile(content: string): Promise<MockFile> {
-    const file = new MockFile(512); // 512 bytes sector size
+const TEST_DIR = './test_files';
+
+export async function cleanupTestDir(): Promise<void> {
+  try {
+    // Verwijder de directory en alles erin, als het bestaat
+    await fs.rm(TEST_DIR, { recursive: true, force: true });
+  } catch (err) {
+    console.error(`Failed to remove test directory: ${(err as Error).message}`);
+  }
+
+  try {
+    // Maak de directory opnieuw aan
+    await fs.mkdir(TEST_DIR, { recursive: true });
+  } catch (err) {
+    console.error(`Failed to create test directory: ${(err as Error).message}`);
+    throw err;
+  }
+}
+
+describe('RealFile', () => {
+  beforeEach(async () => {
+    await cleanupTestDir();
+  });
+
+  afterEach(async () => {
+    await cleanupTestDir();
+  });
+
+  it('should create, open, write, read and truncate a file', async () => {
+    const filePath = path.join(TEST_DIR, 'test1.txt');
+    const file = new RealFile(filePath);
+
     await file.create();
-    if (content) {
-      await file.writev([Buffer.from(content)], 0);
-      await file.sync();
-    }
-    return file;
-  }
+    expect(file.isOpen()).toBe(true);
 
-  // Helper om content van een File te lezen
-  async function readContent(file: MockFile): Promise<string> {
+    const bufferToWrite = Buffer.from('Hello, RealFile!');
+    await file.writev([bufferToWrite], 0);
+
+    const readBuffer = Buffer.alloc(bufferToWrite.length);
+    await file.read(readBuffer, { position: 0 });
+    expect(readBuffer.toString()).toBe('Hello, RealFile!');
+
+    await file.truncate(5);
+    const truncatedBuffer = Buffer.alloc(5);
+    await file.read(truncatedBuffer, { position: 0 });
+    expect(truncatedBuffer.toString()).toBe('Hello');
+
     const stats = await file.stat();
-    const buffer = Buffer.alloc(stats.size);
-    await file.read(buffer, { position: 0 });
-    return buffer.toString();
-  }
+    expect(stats.size).toBe(5);
 
-  describe('basic file operations', () => {
-    it('should write and read a file in root', async () => {
-      const fs = new MockFileSystem();
-      const content = 'Hello, World!';
-      const file = await createMockFile(content);
-
-      await fs.writeFile('test.txt', file);
-      const readBack = await fs.readFile('test.txt');
-
-      expect(await readContent(readBack as MockFile)).toBe(content);
-    });
-
-    it('should write and read a file in nested directory', async () => {
-      const fs = new MockFileSystem();
-      const content = 'Nested content';
-      const file = await createMockFile(content);
-
-      await fs.writeFile('dir1/dir2/test.txt', file);
-      const readBack = await fs.readFile('dir1/dir2/test.txt');
-
-      expect(await readContent(readBack as MockFile)).toBe(content);
-    });
-
-    it('should overwrite existing file', async () => {
-      const fs = new MockFileSystem();
-      const file1 = await createMockFile('Original');
-      const file2 = await createMockFile('Updated');
-
-      await fs.writeFile('overwrite.txt', file1);
-      await fs.writeFile('overwrite.txt', file2);
-
-      const readBack = await fs.readFile('overwrite.txt');
-      expect(await readContent(readBack as MockFile)).toBe('Updated');
-    });
-
-    it('should fail reading non-existent file', async () => {
-      const fs = new MockFileSystem();
-      await expect(fs.readFile('not-exists.txt')).rejects.toThrow('File not found');
-    });
+    await file.close();
+    expect(file.isOpen()).toBe(false);
   });
 
-  describe('directory operations', () => {
-    it('should create and list directory contents', async () => {
-      const fs = new MockFileSystem();
-      await fs.mkdir('testdir');
-      const file = await createMockFile('content');
-      await fs.writeFile('testdir/file.txt', file);
+  it('should check existence and delete a file', async () => {
+    const filePath = path.join(TEST_DIR, 'test2.txt');
+    const file = new RealFile(filePath);
 
-      const contents = await fs.readdir('testdir');
-      expect(contents.has('file.txt')).toBe(true);
-    });
+    expect(await file.exists()).toBe(false);
 
-    it('should create nested directories automatically via writeFile', async () => {
-      const fs = new MockFileSystem();
-      const file = await createMockFile('nested');
-      await fs.writeFile('auto/created/dirs/file.txt', file);
+    await file.create();
+    expect(await file.exists()).toBe(true);
 
-      const readBack = await fs.readFile('auto/created/dirs/file.txt');
-      expect(await readContent(readBack as MockFile)).toBe('nested');
-    });
-
-    it('should fail when part of path is a file', async () => {
-      const fs = new MockFileSystem();
-      const file = await createMockFile('blocking');
-      await fs.writeFile('block.txt', file);
-
-      const newFile = await createMockFile('fail');
-      await expect(fs.writeFile('block.txt/fail.txt', newFile)).rejects.toThrow('is a file, cannot traverse');
-    });
+    await file.close();
+    await file.delete();
+    expect(await file.exists()).toBe(false);
   });
 
-  describe('file operations', () => {
-    it('should delete file with unlink', async () => {
-      const fs = new MockFileSystem();
-      const file = await createMockFile('delete me');
-      await fs.writeFile('todelete.txt', file);
+  it('should throw if deleting an open file', async () => {
+    const filePath = path.join(TEST_DIR, 'test3.txt');
+    const file = new RealFile(filePath);
 
-      await fs.unlink('todelete.txt');
-      await expect(fs.readFile('todelete.txt')).rejects.toThrow('File not found');
-    });
-
-    it('should rename files', async () => {
-      const fs = new MockFileSystem();
-      const file = await createMockFile('rename test');
-      await fs.writeFile('dir/old.txt', file);
-
-      await fs.rename('dir/old.txt', 'new.txt');
-      const readBack = await fs.readFile('dir/new.txt');
-
-      expect(await readContent(readBack as MockFile)).toBe('rename test');
-      await expect(fs.readFile('dir/old.txt')).rejects.toThrow('File not found');
-    });
-
-    it('should remove empty directory', async () => {
-      const fs = new MockFileSystem();
-      await fs.mkdir('empty-dir');
-      await fs.rmdir('empty-dir');
-
-      const contents = await fs.readdir('/');
-      expect(contents.has('empty-dir')).toBe(false);
-    });
+    await file.create();
+    await expect(file.delete()).rejects.toThrow('Cannot delete an open file.');
   });
 
-  describe('error cases', () => {
-    it('should fail when removing non-empty directory', async () => {
-      const fs = new MockFileSystem();
-      const file = await createMockFile('preventing delete');
-      await fs.writeFile('nonempty/file.txt', file);
+  it('should maintain file isolation between two instances', async () => {
+    const filePath1 = path.join(TEST_DIR, 'file1.txt');
+    const filePath2 = path.join(TEST_DIR, 'file2.txt');
 
-      await expect(fs.rmdir('nonempty')).rejects.toThrow('is not empty');
-    });
+    const file1 = new RealFile(filePath1);
+    const file2 = new RealFile(filePath2);
 
-    it('should fail when creating directory that exists', async () => {
-      const fs = new MockFileSystem();
-      await fs.mkdir('existing');
-      await expect(fs.mkdir('existing')).rejects.toThrow('already exists');
-    });
+    await file1.create();
+    await file2.create();
 
-    it('should fail renaming to existing target', async () => {
-      const fs = new MockFileSystem();
-      const file1 = await createMockFile('file1');
-      const file2 = await createMockFile('file2');
+    await file1.writev([Buffer.from('one')], 0);
+    await file2.writev([Buffer.from('two')], 0);
 
-      await fs.writeFile('source.txt', file1);
-      await fs.writeFile('target.txt', file2);
+    const buffer1 = Buffer.alloc(3);
+    const buffer2 = Buffer.alloc(3);
 
-      await expect(fs.rename('source.txt', 'target.txt')).rejects.toThrow('already exists');
-    });
+    await file1.read(buffer1, { position: 0 });
+    await file2.read(buffer2, { position: 0 });
 
-    it('should handle empty paths correctly', async () => {
-      const fs = new MockFileSystem();
-      const file = await createMockFile('test');
-      await expect(fs.writeFile('', file)).rejects.toThrow('Path cannot be empty');
-    });
+    expect(buffer1.toString()).toBe('one');
+    expect(buffer2.toString()).toBe('two');
+
+    await file1.close();
+    await file2.close();
   });
 
-  describe('complex scenarios', () => {
-    it('should handle deep directory structures', async () => {
-      const fs = new MockFileSystem();
-      const file = await createMockFile('deep');
-      const path = 'very/deep/directory/structure/file.txt';
+  it('should throw when reading from a closed file', async () => {
+    const filePath = path.join(TEST_DIR, 'test4.txt');
+    const file = new RealFile(filePath);
+    await file.create();
+    await file.close();
 
-      await fs.writeFile(path, file);
-      const readBack = await fs.readFile(path);
+    const buffer = Buffer.alloc(10);
+    await expect(file.read(buffer, { position: 0 })).rejects.toThrow('File is not open.');
+  });
 
-      expect(await readContent(readBack as MockFile)).toBe('deep');
-    });
+  it('should throw when writing to a closed file', async () => {
+    const filePath = path.join(TEST_DIR, 'test5.txt');
+    const file = new RealFile(filePath);
+    await file.create();
+    await file.close();
 
-    it('should maintain file system isolation between instances', async () => {
-      const fs1 = new MockFileSystem();
-      const fs2 = new MockFileSystem();
-
-      const file1 = await createMockFile('one');
-      const file2 = await createMockFile('two');
-
-      await fs1.writeFile('test.txt', file1);
-      await fs2.writeFile('test.txt', file2);
-
-      const content1 = await readContent((await fs1.readFile('test.txt')) as MockFile);
-      const content2 = await readContent((await fs2.readFile('test.txt')) as MockFile);
-
-      expect(content1).toBe('one');
-      expect(content2).toBe('two');
-    });
+    await expect(file.writev([Buffer.from('data')], 0)).rejects.toThrow('File is not open.');
   });
 });

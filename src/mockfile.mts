@@ -3,7 +3,7 @@
 
 import assert from 'node:assert/strict';
 import random from 'random';
-import type { File } from './file.mts';
+import type { File } from './file.mjs';
 
 /**
  * Mock implementation of the File interface.

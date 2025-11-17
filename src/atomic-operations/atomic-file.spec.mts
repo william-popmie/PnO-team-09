@@ -5,7 +5,6 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { MockFile } from '../mockfile.mjs';
 import { WALManagerImpl } from './wal-manager.mjs';
 import { AtomicFileImpl } from './atomic-file.mjs';
-import { buffer } from 'stream/consumers';
 
 describe('AtomicFile + WALManager integration (concurrency safe skeleton)', () => {
   let dbFile: MockFile;

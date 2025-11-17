@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { MockFile } from '../mockfile.mjs';
 import { WALManagerImpl } from './wal-manager.mjs';
 import { AtomicFileImpl } from './atomic-file.mjs';
+import { buffer } from 'stream/consumers';
 
 describe('AtomicFile + WALManager integration (concurrency safe skeleton)', () => {
   let dbFile: MockFile;
@@ -50,6 +51,7 @@ describe('AtomicFile + WALManager integration (concurrency safe skeleton)', () =
   it('crash may or may not persist committed WAL; after recover WAL is cleared and DB is consistent', async () => {
     // write an entry and a commit marker (but do not fsync)
     await wal.logWrite(8, Uint8Array.from([7, 8]));
+    await wal.logWrite(10, Uint8Array.from(data));
     await wal.addCommitMarker();
 
     // simulate crash that may or may not have persisted commit marker + data
@@ -62,12 +64,15 @@ describe('AtomicFile + WALManager integration (concurrency safe skeleton)', () =
     const walStat = await walFile.stat();
     expect(walStat.size).toBe(0);
 
-    // DB may contain the payload or be empty depending on what persisted
+    // DB may contain the full payload or be empty depending on what persisted
     const dbSize = (await dbFile.stat()).size;
-    if (dbSize >= 2) {
+    if (dbSize > 0) {
       const out = Buffer.alloc(2);
       await dbFile.read(out, { position: 8 });
       expect(Array.from(out)).toEqual([7, 8]);
+      const out2 = Buffer.alloc(3);
+      await dbFile.read(out2, { position: 10 });
+      expect(out2).toEqual(Buffer.from(data));
     } else {
       expect(dbSize).toBe(0);
     }
@@ -87,14 +92,14 @@ describe('AtomicFile + WALManager integration (concurrency safe skeleton)', () =
     await atomic.begin();
     await atomic.journalWrite(0, data);
     const buffer: Buffer = Buffer.alloc(data.length);
-    await walFile.read(buffer, { position: 8 });
+    await walFile.read(buffer, { position: 12 });
     expect(buffer).toEqual(Buffer.from(data));
 
     //writes correctly to WAL if there is already data present
     await atomic.journalWrite(0, data2);
     const buffer2: Buffer = Buffer.alloc(data2.length);
-    const pos: number = data2.length + 16;
-    await walFile.read(buffer, { position: 8 });
+    const pos: number = data2.length + 24;
+    await walFile.read(buffer, { position: 12 });
     await walFile.read(buffer2, { position: pos });
     expect(buffer).toEqual(Buffer.from(data));
     expect(buffer2).toEqual(Buffer.from(data2));
@@ -107,9 +112,9 @@ describe('AtomicFile + WALManager integration (concurrency safe skeleton)', () =
 
     //after commit the WAL contains the data and the commit marker
     const out: Buffer = Buffer.alloc(data.length);
-    await walFile.read(out, { position: 8 });
+    await walFile.read(out, { position: 12 });
     const marker: Buffer = Buffer.alloc(Buffer.from('COMMIT\n').length);
-    await walFile.read(marker, { position: 8 + data.length });
+    await walFile.read(marker, { position: 12 + data.length });
 
     expect(out).toEqual(Buffer.from(data));
     expect(Buffer.from('COMMIT\n')).toEqual(marker);
@@ -122,7 +127,7 @@ describe('AtomicFile + WALManager integration (concurrency safe skeleton)', () =
     await atomic.journalWrite(0, data2);
     await atomic.commitDataToWal();
     const marker2: Buffer = Buffer.alloc(Buffer.from('COMMIT\n').length);
-    const pos: number = 16 + data.length + data2.length;
+    const pos: number = 24 + data.length + data2.length;
     await walFile.read(marker2, { position: pos });
 
     expect(Buffer.from('COMMIT\n')).toEqual(marker2);
@@ -183,6 +188,22 @@ describe('AtomicFile + WALManager integration (concurrency safe skeleton)', () =
     //database contains committed data
     expect(buffer).toEqual(Buffer.from(data));
     expect(buffer2).toEqual(Buffer.from(data2));
+  });
+
+  it('checkpoint() test4: checksum test', async () => {
+    await atomic.begin();
+    await atomic.journalWrite(0, Uint8Array.from(data2));
+    await atomic.journalWrite(data.length, Uint8Array.from(data2));
+    await atomic.commitDataToWal();
+    //corrupt data in WAL
+    await walFile.writev([Buffer.from(data)], 12);
+    await atomic.checkpoint();
+
+    //nothing should be written to database and WAL should be flushed
+    const walStat = await walFile.stat();
+    const dbStat = await dbFile.stat();
+    expect(walStat.size).toBe(0);
+    expect(dbStat.size).toBe(0);
   });
 
   it('Recover() test1: drops uncommitted WAL entries (no commit marker)', async () => {

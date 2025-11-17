@@ -117,7 +117,8 @@ export class WALManagerImpl implements WALManager {
    */
   public async logWrite(offset: number, data: Uint8Array): Promise<void> {
     return this.mutex.runExclusive(async () => {
-      const header: Uint32Array = new Uint32Array([offset, data.length]);
+      const checksum: number = this.checksumCalculator(data);
+      const header: Uint32Array = new Uint32Array([offset, data.length, checksum]);
       const pos: number = await this.walFile.stat().then((stat) => stat.size);
       await this.walFile.writev([Buffer.from(header.buffer), Buffer.from(data)], pos);
     });
@@ -179,25 +180,35 @@ export class WALManagerImpl implements WALManager {
   private getCommittedData(walSize: number, buffer: Buffer): { writes: { offset: number; data: Buffer }[] } {
     let pos: number = 0;
     const marker: Buffer = Buffer.from('COMMIT\n');
-    const writes: { offset: number; data: Buffer }[] = [];
+    let writes: { offset: number; data: Buffer }[] = [];
     let tempWrites: { offset: number; data: Buffer }[] = [];
-    while (pos + 8 <= walSize) {
-      const dataCommitLength: number = buffer.readUInt32LE(pos + 4);
-      const end: number = pos + 8 + dataCommitLength + marker.length;
+    while (pos + 12 <= walSize) {
+      const headerSize: number = 12;
+      const size: number = headerSize + buffer.readUInt32LE(pos + 4);
       const offset: number = buffer.readUInt32LE(pos);
-      const data: Buffer = buffer.subarray(pos + 8, pos + 8 + dataCommitLength);
+      const checksum = buffer.readUInt32LE(pos + 8);
+      const data: Buffer = buffer.subarray(pos + headerSize, pos + size);
 
-      if (pos + 8 + dataCommitLength + marker.length > walSize) break;
-      if (end <= walSize && buffer.subarray(end - marker.length, end).equals(marker)) {
+      if (pos + size + marker.length > walSize) break;
+      const check: number = this.checksumCalculator(data);
+      if (check !== checksum) {
+        console.log('All previous commits to the WAL were corrupted, sorry... :(( \nFlusing...');
+        writes = [];
+        break;
+      }
+      if (
+        pos + size + marker.length <= walSize &&
+        buffer.subarray(pos + size, pos + size + marker.length).equals(marker)
+      ) {
         for (const w of tempWrites) {
           writes.push(w);
         }
         writes.push({ offset, data });
         tempWrites = [];
-        pos = end;
+        pos += size + marker.length;
       } else {
         tempWrites.push({ offset, data });
-        pos = pos + 8 + dataCommitLength;
+        pos += size;
       }
     }
     return { writes };
@@ -237,6 +248,15 @@ export class WALManagerImpl implements WALManager {
     return this.mutex.runExclusive(async () => {
       await this.walFile.truncate(0);
     });
+  }
+
+  private checksumCalculator(buf: Uint8Array | Buffer): number {
+    let hash: number = 0x811c9dc5;
+    for (const i of buf) {
+      hash ^= buf[i];
+      hash = (hash * 0x01000193) >>> 0;
+    }
+    return hash >>> 0;
   }
 
   // Helper functions for testing

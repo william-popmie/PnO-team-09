@@ -39,14 +39,14 @@ describe('AtomicFile + WALManager integration (concurrency safe skeleton)', () =
     //writes correctly to WAL
     await wal.logWrite(0, data);
     const buffer: Buffer = Buffer.alloc(data.length);
-    await walFile.read(buffer, { position: 8 });
+    await walFile.read(buffer, { position: 12 });
     expect(buffer).toEqual(Buffer.from(data));
 
     //writes correctly to WAL if there is already data present
     await wal.logWrite(0, data2);
     const buffer2: Buffer = Buffer.alloc(data2.length);
-    const pos: number = data2.length + 16;
-    await walFile.read(buffer, { position: 8 });
+    const pos: number = data2.length + 24;
+    await walFile.read(buffer, { position: 12 });
     await walFile.read(buffer2, { position: pos });
     expect(buffer).toEqual(Buffer.from(data));
     expect(buffer2).toEqual(Buffer.from(data2));
@@ -58,9 +58,9 @@ describe('AtomicFile + WALManager integration (concurrency safe skeleton)', () =
 
     //after commit the WAL contains the data and the commit marker
     const out: Buffer = Buffer.alloc(data.length);
-    await walFile.read(out, { position: 8 });
+    await walFile.read(out, { position: 12 });
     const marker: Buffer = Buffer.alloc(Buffer.from('COMMIT\n').length);
-    await walFile.read(marker, { position: 8 + data.length });
+    await walFile.read(marker, { position: 12 + data.length });
 
     expect(out).toEqual(Buffer.from(data));
     expect(Buffer.from('COMMIT\n')).toEqual(marker);
@@ -72,7 +72,7 @@ describe('AtomicFile + WALManager integration (concurrency safe skeleton)', () =
     await wal.logWrite(0, data2);
     await wal.addCommitMarker();
     const marker2: Buffer = Buffer.alloc(Buffer.from('COMMIT\n').length);
-    const pos: number = 16 + data.length + data2.length;
+    const pos: number = 24 + data.length + data2.length;
     await walFile.read(marker2, { position: pos });
 
     expect(Buffer.from('COMMIT\n')).toEqual(marker2);
@@ -131,6 +131,19 @@ describe('AtomicFile + WALManager integration (concurrency safe skeleton)', () =
     expect(buffer2).toEqual(Buffer.from(data2));
   });
 
+  it('checkpoint() test4: checksum test', async () => {
+    await wal.logWrite(0, Uint8Array.from(data2));
+    await wal.logWrite(data.length, Uint8Array.from(data2));
+    await wal.addCommitMarker();
+    //corrupt data in WAL
+    await walFile.writev([Buffer.from(data)], 12);
+    await wal.checkpoint();
+
+    //nothing should be written to database and WAL should be flushed
+    const dbStat = await dbFile.stat();
+    expect(dbStat.size).toBe(0);
+  });
+
   it('Recover() test1: drops uncommitted WAL entries (no commit marker)', async () => {
     // write a log entry but do NOT add commit marker
     await wal.logWrite(16, Uint8Array.from([9, 9, 9]));
@@ -146,7 +159,7 @@ describe('AtomicFile + WALManager integration (concurrency safe skeleton)', () =
   });
 
   it('Recover() test2: applies committed WAL entries but not uncommitted ones', async () => {
-    // write entry and commit marker (simulate a flushed WAL)
+    // write entry and commit marker (simulate a crash)
     await wal.logWrite(0, Uint8Array.from([7, 8]));
     await wal.addCommitMarker();
     await wal.logWrite(0, Uint8Array.from(data));

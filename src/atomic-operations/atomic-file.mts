@@ -5,6 +5,7 @@
  * INSTRUCTIONS TO USE ATOMIC-FILE:
  * On startup, run: 
     await atomic-file.recover();
+    
  * To commit data to the database:
     await atomic-file.begin();              //Start transaction
     await atomic-file.journalWrite(offset: number, data: Uint8Array);  //Do any
@@ -205,6 +206,7 @@ export class AtomicFileImpl implements AtomicFile {
       await this.ensureOpen();
       await this.wal.recover();
       await this.dbFile.sync();
+      await this.wal.clearLog();
       await this.wal.sync();
     });
   }

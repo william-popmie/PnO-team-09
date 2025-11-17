@@ -250,12 +250,12 @@ export class WALManagerImpl implements WALManager {
   }
 
   private checksumCalculator(buf: Uint8Array | Buffer): number {
-    let hash: number = 0x811c9dc5;
-    for (const i of buf) {
-      hash ^= buf[i];
-      hash = (hash * 0x01000193) >>> 0;
+    let hash = 0x811c9dc5 >>> 0;
+    for (const b of buf) {
+      hash ^= b & 0xff;
+      hash = Math.imul(hash, 0x01000193) >>> 0;
     }
-    return hash >>> 0;
+    return hash;
   }
 
   // Helper functions for testing

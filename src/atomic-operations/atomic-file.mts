@@ -1,5 +1,5 @@
 // @author Frederick Hillen, Arwin Gorissen
-// @date 2025-11-15
+// @date 2025-11-17
 
 /**
  * INSTRUCTIONS TO USE ATOMIC-FILE:
@@ -75,8 +75,8 @@ class Mutex {
    * This helper acquires the lock, executes the provided function fn,
    * and guarantees that the lock is released afterwards.
    *
-   * @param fn A function representing the critical section.
-   * @returns The return value of fn.
+   * @param {() => Promise<T>} fn A function representing the critical section.
+   * @returns {T} The return value of fn.
    */
   async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
     const unlock = await this.lock();
@@ -142,8 +142,8 @@ export class AtomicFileImpl implements AtomicFile {
 
   /**
    * Writes data to the WAL.
-   * @param offset a number >= 0, at which the data needs to be written in the database
-   * @param data a Uint8Array with the data to be written to the database
+   * @param {number} offset a number >= 0, at which the data needs to be written in the database
+   * @param {Uint8Array} data a Uint8Array with the data to be written to the database
    */
   public async journalWrite(offset: number, data: Uint8Array): Promise<void> {
     return this.mutex.runExclusive(async () => {
@@ -156,10 +156,10 @@ export class AtomicFileImpl implements AtomicFile {
   /**
    * Reads a sequence of bytes from the database file.
    *
-   * @param offset a number >= 0, the byte position in the database file from which reading
+   * @param {number} offset a number >= 0, the byte position in the database file from which reading
    *               should begin.
-   * @param length a number >= 0, the number of bytes to read.
-   * @returns A Uint8Array containing the read data from the database file.
+   * @param {number} length a number >= 0, the number of bytes to read.
+   * @returns {Uint8Array} A Uint8Array containing the read data from the database file.
    */
   public async read(offset: number, length: number): Promise<Uint8Array> {
     return this.mutex.runExclusive(async () => {

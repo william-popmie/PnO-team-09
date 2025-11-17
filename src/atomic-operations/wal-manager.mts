@@ -1,5 +1,5 @@
 // @author Frederick Hillen, Arwin Gorissen
-// @date 2025-11-15
+// @date 2025-11-17
 
 import type { File } from '../mockfile.mjs';
 
@@ -55,8 +55,8 @@ class Mutex {
    * This helper acquires the lock, executes the provided function fn,
    * and guarantees that the lock is released afterwards.
    *
-   * @param fn A function representing the critical section.
-   * @returns The return value of fn.
+   * @param {() => Promise<T>} fn A function representing the critical section.
+   * @returns {T} The return value of fn.
    */
   async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
     const unlock = await this.lock();
@@ -80,8 +80,8 @@ export class WALManagerImpl implements WALManager {
 
   /**
    * Constructor
-   * @param walFile the write-ahead log file
-   * @param dbFile the database file
+   * @param {File} walFile the write-ahead log file
+   * @param {File} dbFile the database file
    */
   public constructor(walFile: File, dbFile: File) {
     this.walFile = walFile;
@@ -112,8 +112,8 @@ export class WALManagerImpl implements WALManager {
 
   /**
    * Writes data to the WAL.
-   * @param offset a number >= 0 at which the data needs to be written in the database
-   * @param data a Uint8Array at which the data to be written to the database
+   * @param {number} offset a number >= 0 at which the data needs to be written in the database
+   * @param {Uint8Array} data a Uint8Array at which the data to be written to the database
    */
   public async logWrite(offset: number, data: Uint8Array): Promise<void> {
     return this.mutex.runExclusive(async () => {
@@ -172,10 +172,9 @@ export class WALManagerImpl implements WALManager {
 
   /**
    * Helper function that extracts all committed data from the WAL.
-   * @param walSize a number > 0, the size of the WAL
-   * @param buffer contents of WAL
-   * @returns An object containing an array writes, of which each element
-   *          represents a fully committed write.
+   * @param {number} walSize a number > 0, the size of the WAL
+   * @param {Buffer} buffer contents of WAL
+   * @returns {{ writes: { offset: number; data: Buffer }[] }} An object containing an array writes, of which each element represents a fully committed write.
    */
   private getCommittedData(walSize: number, buffer: Buffer): { writes: { offset: number; data: Buffer }[] } {
     let pos: number = 0;

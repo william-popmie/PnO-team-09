@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { FreeBlockFile, NO_BLOCK } from '../src/freeblockfile.mjs';
-import { MockFile } from '../src/mockfile.mjs';
-import type { File as FileInterface } from '../src/mockfile.mjs';
+import { MockFile } from '../src/file/mockfile.mjs';
+import type { File as FileInterface } from '../src/file/file.mjs';
 import type { AtomicFile } from '../src/freeblockfile.mjs';
 
 const DEFAULT_BLOCK_SIZE = 4096;

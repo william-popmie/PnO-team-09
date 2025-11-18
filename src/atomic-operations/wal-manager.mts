@@ -1,7 +1,7 @@
 // @author Frederick Hillen, Arwin Gorissen
 // @date 2025-11-17
 
-import type { File } from '../mockfile.mjs';
+import type { File } from '../file/file.mjs';
 
 /**
  * Interface to manage the write-ahead log.
@@ -93,6 +93,7 @@ export class WALManagerImpl implements WALManager {
    */
   public async openWAL(): Promise<void> {
     return this.mutex.runExclusive(async () => {
+      if (this.opened) return;
       await this.walFile.open();
       await this.dbFile.open();
       this.opened = true;
@@ -104,6 +105,7 @@ export class WALManagerImpl implements WALManager {
    */
   public async closeWAL(): Promise<void> {
     return this.mutex.runExclusive(async () => {
+      if (!this.opened) return;
       await this.walFile.close();
       await this.dbFile.close();
       this.opened = false;

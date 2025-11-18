@@ -1,5 +1,5 @@
 // @author Tijn Gommers
-// @date 2025-17-11
+// @date 2025-11-18
 
 import * as fsPromises from 'node:fs/promises';
 
@@ -212,6 +212,7 @@ export class RealFile implements File {
    */
   public async stat(): Promise<{ size: number }> {
     if (!this.isOpen()) throw new Error('File is not open.');
-    return await this.fileHandle!.stat();
+    const stats = await this.fileHandle!.stat();
+    return { size: stats.size };
   }
 }

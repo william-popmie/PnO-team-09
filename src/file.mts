@@ -1,5 +1,5 @@
 // @author Tijn Gommers
-// @date 2025-11-17
+// @date 2025-11-18
 
 import * as fsPromises from 'node:fs/promises';
 

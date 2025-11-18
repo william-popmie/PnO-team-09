@@ -1,5 +1,5 @@
 // @author Tijn Gommers
-// @date 2025-17-11
+// @date 2025-11-18
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs/promises';
@@ -17,7 +17,7 @@ export async function cleanupTestDir(): Promise<void> {
   }
 
   try {
-    // Maak de directory opnieuw aan
+    // remake a directory
     await fs.mkdir(TEST_DIR, { recursive: true });
   } catch (err) {
     console.error(`Failed to create test directory: ${(err as Error).message}`);
@@ -125,5 +125,53 @@ describe('RealFile', () => {
     await file.close();
 
     await expect(file.writev([Buffer.from('data')], 0)).rejects.toThrow('File is not open.');
+  });
+
+  it('should throw when opening an already open file', async () => {
+    const filePath = path.join(TEST_DIR, 'test6.txt');
+    const file = new RealFile(filePath);
+    await file.create();
+    await expect(file.open()).rejects.toThrow('File is already open.');
+    await file.close();
+  });
+
+  it('should throw when creating an already open file', async () => {
+    const filePath = path.join(TEST_DIR, 'test7.txt');
+    const file = new RealFile(filePath);
+    await file.create();
+    await expect(file.create()).rejects.toThrow('File is already open.');
+    await file.close();
+  });
+
+  it('should throw when closing an already closed file', async () => {
+    const filePath = path.join(TEST_DIR, 'test8.txt');
+    const file = new RealFile(filePath);
+    await file.create();
+    await file.close();
+    await expect(file.close()).rejects.toThrow('File is not open.');
+  });
+
+  it('should throw when syncing a closed file', async () => {
+    const filePath = path.join(TEST_DIR, 'test9.txt');
+    const file = new RealFile(filePath);
+    await file.create();
+    await file.close();
+    await expect(file.sync()).rejects.toThrow('File is not open.');
+  });
+
+  it('should throw when truncating a closed file', async () => {
+    const filePath = path.join(TEST_DIR, 'test10.txt');
+    const file = new RealFile(filePath);
+    await file.create();
+    await file.close();
+    await expect(file.truncate(10)).rejects.toThrow('File is not open.');
+  });
+
+  it('should throw when getting stats of a closed file', async () => {
+    const filePath = path.join(TEST_DIR, 'test11.txt');
+    const file = new RealFile(filePath);
+    await file.create();
+    await file.close();
+    await expect(file.stat()).rejects.toThrow('File is not open.');
   });
 });

@@ -1,5 +1,5 @@
 // @author Tijn Gommers
-// @date 2025-11-17
+// @date 2025-11-18
 
 import assert from 'node:assert/strict';
 import random from 'random';
@@ -45,6 +45,14 @@ export class MockFile implements File {
    */
   private ensureOpen(): void {
     if (!this.openFlag) throw new Error('File is not open.');
+  }
+
+  /**
+   * gets the map of pending writes for testing purposes.
+   * @returns {Map<number, Buffer[]>} The map of pending writes.
+   */
+  public getnewSectors(): Map<number, Buffer[]> {
+    return this.newSectors;
   }
 
   /**

@@ -33,7 +33,7 @@
     await atomic-file.safeShutdown(); 
  */
 
-import type { File } from '../mockfile.mjs';
+import type { File } from '../file/file.mjs';
 import type { WALManager } from './wal-manager.mjs';
 
 /**

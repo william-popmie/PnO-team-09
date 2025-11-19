@@ -1,185 +1,143 @@
 // @author Tijn Gommers
-// @date 2025-17-11
+// @date 2025-19-11
 
 /// <reference lib="dom" />
 
-// Base URL for the API - adjust port if needed
 const API_BASE = 'http://localhost:3000';
 
-// Get references to DOM elements
-const collectionInput = document.getElementById('collectionInput') as HTMLInputElement;
-const loadButton = document.getElementById('loadButton') as HTMLButtonElement;
-const documentsView = document.getElementById('documentsView') as HTMLPreElement;
-const insertIdInput = document.getElementById('insertIdInput') as HTMLInputElement;
-const insertJsonInput = document.getElementById('insertJsonInput') as HTMLTextAreaElement;
-const insertButton = document.getElementById('insertButton') as HTMLButtonElement;
-const deleteIdInput = document.getElementById('deleteIdInput') as HTMLInputElement;
-const deleteButton = document.getElementById('deleteButton') as HTMLButtonElement;
-const errorDiv = document.getElementById('error') as HTMLDivElement;
+function getEl<T extends HTMLElement>(id: string): T {
+  const el = document.getElementById(id);
+  if (!el) throw new Error(`Missing element with id="${id}"`);
+  return el as T;
+}
 
-/**
- * Display an error message to the user
- */
-function showError(message: string): void {
-  errorDiv.textContent = message;
+// DOM elements
+const collectionSearch = getEl<HTMLInputElement>('collectionSearch');
+const collectionsList = getEl<HTMLDivElement>('collectionsList');
+const refreshCollections = getEl<HTMLButtonElement>('refreshCollections');
+const createCollectionButton = getEl<HTMLButtonElement>('createCollection');
+const selectedCount = getEl<HTMLSpanElement>('selectedCount');
+const deleteSelected = getEl<HTMLButtonElement>('deleteSelected');
+const confirmCreate = getEl<HTMLButtonElement>('confirmCreate');
+const confirmDelete = getEl<HTMLButtonElement>('confirmDelete');
+const collectionNameInput = getEl<HTMLInputElement>('collectionNameInput');
+const errorDiv = getEl<HTMLDivElement>('error');
+
+// State management -- moet nog let worden maar pas na de implementatie van de functies
+const selectedCollections = new Set<string>();
+const allCollections: string[] = [];
+
+// Utility functions
+function showError(msg: string) {
+  errorDiv.textContent = msg;
   setTimeout(() => {
     errorDiv.textContent = '';
   }, 5000);
 }
 
-/**
- * Clear the error message
- */
-function clearError(): void {
+function clearError() {
   errorDiv.textContent = '';
 }
 
-/**
- * Safely convert unknown error to string
- */
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+function getErrorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }
 
-/**
- * Load all documents from a collection
- */
-async function loadDocuments(): Promise<void> {
-  const collectionName = collectionInput.value.trim();
-
-  if (!collectionName) {
-    showError('Please enter a collection name');
-    return;
-  }
-
-  try {
-    clearError();
-    const response = await fetch(`${API_BASE}/collections/${collectionName}`);
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const documents: unknown = await response.json();
-
-    if (!Array.isArray(documents)) {
-      throw new Error('Invalid response format: expected an array of documents');
-    }
-
-    documentsView.textContent = JSON.stringify(documents, null, 2);
-  } catch (error: unknown) {
-    showError(`Failed to load documents: ${getErrorMessage(error)}`);
-    documentsView.textContent = '';
-  }
+function updateSelectionUI() {
+  // TODO: Update UI based on selected collections count
+  // Show/hide selectedCount span and deleteSelected button
+  // Update selectedCount text with number of selected collections
 }
 
-/**
- * Insert a new document into the collection
- */
-async function insertDocument(): Promise<void> {
-  const collectionName = collectionInput.value.trim();
-  const id = insertIdInput.value.trim();
-  const jsonText = insertJsonInput.value.trim();
-
-  if (!collectionName) {
-    showError('Please enter a collection name');
-    return;
-  }
-
-  if (!id) {
-    showError('Please enter a document ID');
-    return;
-  }
-
-  if (!jsonText) {
-    showError('Please enter document fields as JSON');
-    return;
-  }
-
-  try {
-    clearError();
-    // Parse the JSON input
-    const fields: unknown = JSON.parse(jsonText);
-
-    if (typeof fields !== 'object' || fields === null || Array.isArray(fields)) {
-      throw new Error('Invalid JSON: expected an object');
-    }
-
-    // Combine id with the parsed fields
-    const document = { id, ...fields };
-
-    const response = await fetch(`${API_BASE}/collections/${collectionName}/documents`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(document),
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    // Clear the input fields
-    insertIdInput.value = '';
-    insertJsonInput.value = '';
-
-    // Reload the documents to show the new one
-    await loadDocuments();
-  } catch (error: unknown) {
-    showError(`Failed to insert document: ${getErrorMessage(error)}`);
-  }
+function getCollectionName(name: string): string {
+  // TODO: Process collection name if needed (validation, formatting)
+  // For now just return the name as-is
+  return name;
 }
 
-/**
- * Delete a document by its ID
- */
-async function deleteDocument(): Promise<void> {
-  const collectionName = collectionInput.value.trim();
-  const id = deleteIdInput.value.trim();
-
-  if (!collectionName) {
-    showError('Please enter a collection name');
-    return;
-  }
-
-  if (!id) {
-    showError('Please enter a document ID to delete');
-    return;
-  }
-
-  try {
-    clearError();
-    const response = await fetch(`${API_BASE}/collections/${collectionName}/documents/${id}`, {
-      method: 'DELETE',
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    // Clear the delete input
-    deleteIdInput.value = '';
-
-    // Reload the documents to show the updated list
-    await loadDocuments();
-  } catch (error: unknown) {
-    showError(`Failed to delete document: ${getErrorMessage(error)}`);
-  }
+// API functions
+async function fetchCollections(): Promise<string[]> {
+  // TODO: Fetch collections from API endpoint
+  // GET ${API_BASE}/collections
+  // Handle errors and return empty array on failure
+  return Promise.resolve([]);
 }
 
-// Attach event listeners to buttons
-loadButton.addEventListener('click', () => {
-  void loadDocuments();
+async function createCollection(name: string): Promise<boolean> {
+  // TODO: Create new collection via API
+  // POST ${API_BASE}/collections
+  // Return true on success, false on failure
+  return Promise.resolve(false);
+}
+
+async function deleteCollections(names: string[]): Promise<boolean> {
+  // TODO: Delete multiple collections via API
+  // DELETE ${API_BASE}/collections/${name} for each name
+  // Return true if all deletions successful, false otherwise
+  return Promise.resolve(false);
+}
+
+// Rendering functions
+function renderCollections(collections: string[]) {
+  // TODO: Render collections list with checkboxes (Gmail-style)
+  // Clear collectionsList, create list items with checkboxes and names
+  // Add click handlers for checkbox selection and navigation to documents
+  // Update allCollections state
+}
+
+function selectCollection(name: string) {
+  // TODO: Navigate to documents page with collection parameter
+  // window.location.href = `documents.html?collection=${encodeURIComponent(name)}`;
+}
+
+function toggleCollectionSelection(name: string, checkbox: HTMLElement, item: HTMLElement) {
+  // TODO: Toggle collection selection state
+  // Update selectedCollections Set, checkbox visual state, item highlight
+  // Call updateSelectionUI()
+}
+
+// Event handlers
+async function handleRefreshCollections() {
+  // TODO: Refresh collections list
+  // Call fetchCollections() and renderCollections()
+}
+
+async function handleCreateCollection() {
+  // TODO: Handle collection creation
+  // Get value from collectionNameInput, call createCollection()
+  // Refresh collections list on success, clear input
+}
+
+async function handleDeleteSelected() {
+  // TODO: Handle batch collection deletion
+  // Get selected collection names, call deleteCollections()
+  // Clear selection, refresh collections list on success
+}
+
+async function handleSearchCollections() {
+  // TODO: Handle collection search/filtering
+  // Filter allCollections based on search input, call renderCollections()
+}
+
+// Event listeners
+refreshCollections.addEventListener('click', () => {
+  void handleRefreshCollections();
 });
-insertButton.addEventListener('click', () => {
-  void insertDocument();
+createCollectionButton.addEventListener('click', () => {
+  /* Modal will open automatically via HTML */
 });
-deleteButton.addEventListener('click', () => {
-  void deleteDocument();
+confirmCreate.addEventListener('click', () => {
+  void handleCreateCollection();
+});
+confirmDelete.addEventListener('click', () => {
+  void handleDeleteSelected();
+});
+collectionSearch.addEventListener('input', () => {
+  void handleSearchCollections();
 });
 
-// Allow pressing Enter in the collection input to load documents
-collectionInput.addEventListener('keypress', (e: KeyboardEvent) => {
-  if (e.key === 'Enter') void loadDocuments();
-});
+// Initialize page
+void (async () => {
+  const collections = await fetchCollections();
+  renderCollections(collections);
+})();

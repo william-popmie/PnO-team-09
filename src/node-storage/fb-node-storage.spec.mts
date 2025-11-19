@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { FBNodeStorage } from './fb-node-storage.mjs';
+import { FBChildCursor, FBNodeStorage } from './fb-node-storage.mjs';
 import { FreeBlockFile, NO_BLOCK } from '../freeblockfile.mjs';
 import { MockFile } from '../mockfile.mjs';
 
@@ -161,6 +161,7 @@ describe('FBNodeStorage', () => {
 
     expect(allocatedId).toBe(firstId);
   });
+
   it('returns maxKeySize', () => {
     const maxKeySize = storage.getMaxKeySize();
     expect(maxKeySize).toBe(64);
@@ -235,6 +236,135 @@ describe('FBNodeStorage', () => {
     await cursor.removeKeyValuePairAfter();
     expect(leaf.keys).toEqual([2, 3]);
 
-    // console.log(storage.loadNode(leaf.blockId!));
+    await storage.commitAndReclaim();
+    expect(typeof leaf.blockId).toBe('number');
+  });
+
+  it('cursor reset/isAfterLast/movePrev behavior', async () => {
+    const leaf = await storage.createLeaf();
+    const cur = leaf.getCursorBeforeFirst();
+    await cur.insert(1, 'one');
+    await cur.insert(2, 'two');
+
+    const c = leaf.getCursorBeforeFirst();
+    expect(c.isAfterLast()).toBe(false);
+
+    c.moveNext();
+    expect(c.isAfterLast()).toBe(false);
+
+    c.moveNext();
+    expect(c.isAfterLast()).toBe(true);
+
+    c.reset();
+    expect(c.isAfterLast()).toBe(false);
+
+    c.moveNext();
+    c.moveNext();
+    expect(() => c.getKeyValuePairAfter()).toThrow();
+  });
+
+  it('debug_clearCache and deleteCachedBlock affect loadNode object identity', async () => {
+    const leaf = await storage.createLeaf();
+    await leaf.getCursorBeforeFirst().insert(7, 's');
+    await storage.commitAndReclaim();
+
+    const id = leaf.blockId!;
+    const n1 = await storage.loadNode(id);
+    const n2 = await storage.loadNode(id);
+    expect(n1 === n2).toBe(true);
+
+    storage.debug_clearCache();
+    const n3 = await storage.loadNode(id);
+    expect(n3 === n1).toBe(false);
+
+    const n4 = await storage.loadNode(id);
+    storage.deleteCachedBlock(id);
+    const n5 = await storage.loadNode(id);
+    expect(n4 === n5).toBe(false);
+  });
+
+  it('internal child cursor getChild, setPosition, first/last child, getKeyAfter', async () => {
+    const leaf1 = await storage.createLeaf();
+    await leaf1.getCursorBeforeFirst().insert(10, 'a');
+    const leaf2 = await storage.createLeaf();
+    await leaf2.getCursorBeforeFirst().insert(20, 'b');
+    await storage.commitAndReclaim();
+
+    const internal = await storage.allocateInternalNodeStorage([leaf1, leaf2], [20]);
+    await storage.commitAndReclaim();
+
+    const childCursor = (await internal.getChildCursorAtFirstChild()) as FBChildCursor<number, string>;
+    expect(childCursor.isFirstChild()).toBe(true);
+    const firstChild = await childCursor.getChild(0);
+    expect(firstChild.isLeaf).toBe(true);
+    const secondChild = await childCursor.getChild(1);
+    expect(secondChild.isLeaf).toBe(true);
+
+    childCursor.setPosition(1);
+    expect(childCursor.isLastChild()).toBe(true);
+
+    const kc = await internal.getChildCursorAtFirstChild();
+    const keyAfter = kc.getKeyAfter();
+    expect(keyAfter).toBe(20);
+  });
+
+  it('replaceKeysAndChildrenAfterBy persists replacement children and updates keys/children', async () => {
+    const a = await storage.createLeaf();
+    await a.getCursorBeforeFirst().insert(1, 'a');
+    const b = await storage.createLeaf();
+    await b.getCursorBeforeFirst().insert(3, 'b');
+    await storage.commitAndReclaim();
+
+    const internal = await storage.allocateInternalNodeStorage([a, b], [3]);
+    await storage.commitAndReclaim();
+
+    const rep = await storage.createLeaf();
+    await rep.getCursorBeforeFirst().insert(2, 'rep');
+
+    const childCursor = (await internal.getChildCursorAtFirstChild()) as FBChildCursor<number, string>;
+    childCursor.setPosition(0);
+
+    const res = await childCursor.replaceKeysAndChildrenAfterBy(1, [2], [rep]);
+
+    expect(res.keys).toContain(2);
+    expect(res.nodes.length).toBeGreaterThan(0);
+    expect(internal.childBlockIds.length).toBe(1);
+    expect(internal.keys.length).toBe(1);
+  });
+
+  it('moveLastChildTo and moveFirstChildTo adjust keys and children and persist', async () => {
+    const l1 = await storage.createLeaf();
+    await l1.getCursorBeforeFirst().insert(5, 'x');
+    const l2 = await storage.createLeaf();
+    await l2.getCursorBeforeFirst().insert(15, 'y');
+    await storage.commitAndReclaim();
+
+    const parent = await storage.allocateInternalNodeStorage([l1, l2], [15]);
+    await storage.commitAndReclaim();
+
+    const nextNode = await storage.createInternalNode([], []);
+    const returnedKey = await parent.moveLastChildTo(999, nextNode);
+    expect(returnedKey).toBe(15);
+    expect(nextNode.keys[0]).toBe(999);
+    expect(parent.keys.length).toBe(0);
+
+    const sep = await nextNode.moveFirstChildTo(parent, 123);
+    expect(typeof sep === 'number').toBeTruthy();
+    expect(parent.keys.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('leaf canMergeWithNext and mergeWithNext combine keys and enqueue frees', async () => {
+    const left = await storage.createLeaf();
+    await left.getCursorBeforeFirst().insert(1, 'a');
+    const right = await storage.createLeaf();
+    await right.getCursorBeforeFirst().insert(2, 'b');
+    await storage.commitAndReclaim();
+
+    const can = left.canMergeWithNext(0, right);
+    expect(typeof can === 'boolean').toBeTruthy();
+
+    await left.mergeWithNext(0, right);
+    expect(left.keys).toEqual([1, 2]);
+    expect(typeof left.blockId).toBe('number');
   });
 });

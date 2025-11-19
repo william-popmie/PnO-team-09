@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SimpleDBMS Team 9</title>
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="../styles/styles.css" />
   </head>
   <body>
     <div class="container">
@@ -12,6 +12,10 @@
         <div class="logo">DB9</div>
         <div>
           <h1>SimpleDBMS Team 9</h1>
+        </div>
+        <div class="header-user">
+          <span id="welcomeUser" class="welcome-text">Welcome, User</span>
+          <button id="logoutBtn" class="btn btn-ghost">Logout</button>
         </div>
       </header>
 
@@ -53,15 +57,55 @@
       </div>
     </div>
 
-    <!-- Module handles UI interactions; remove inline demo script to avoid accidental document loading -->
-    <script type="module" src="webclient.js" defer></script>
     <script>
-      // Modal functionality for create form
+      // Check login status first
       document.addEventListener('DOMContentLoaded', () => {
+        const loggedInUser = localStorage.getItem('currentUser');
+        const userSession = localStorage.getItem('sessionToken');
+        
+        if (!loggedInUser || !userSession) {
+          // Geen geldige sessie, terug naar login
+          window.location.href = 'login.html';
+          return;
+        }
+        
+        // Toon welkomstbericht
+        const welcomeText = document.querySelector('.welcome-text');
+        if (welcomeText) {
+          welcomeText.textContent = `Welkom, ${loggedInUser}!`;
+        }
+        
+        console.log('Dashboard geladen voor:', loggedInUser);
+        
+        // Modal functionality for create form
         const createBtn = document.getElementById('createCollection');
         const modalOverlay = document.getElementById('modalOverlay');
         const cancelBtn = document.getElementById('cancelCreate');
         const nameInput = document.getElementById('collectionNameInput');
+        const logoutBtn = document.getElementById('logoutBtn');
+        const welcomeUser = document.getElementById('welcomeUser');
+
+        // Check if user is logged in
+        const sessionToken = localStorage.getItem('sessionToken');
+        const username = localStorage.getItem('username');
+
+        if (!sessionToken || !username) {
+          // Not logged in, redirect to login
+          window.location.href = 'login.html';
+          return;
+        }
+
+        // Set welcome message
+        if (welcomeUser) {
+          welcomeUser.textContent = `Welcome, ${username}`;
+        }
+
+        // Logout functionality
+        logoutBtn?.addEventListener('click', () => {
+          localStorage.removeItem('sessionToken');
+          localStorage.removeItem('username');
+          window.location.href = 'login.html';
+        });
 
         createBtn?.addEventListener('click', () => {
           modalOverlay?.classList.add('show');

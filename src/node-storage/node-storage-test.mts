@@ -68,7 +68,7 @@ async function run() {
   await c1.insert(20, 'v20');
   console.log('Inserted keys into leaf. Leaf blockId:', leaf.blockId);
 
-  await fb.commit();
+  await storage.commitAndReclaim();
   console.log('Committed staged writes to mock file');
 
   const persistedId = leaf.blockId;
@@ -111,13 +111,13 @@ async function run() {
   await leaf2.getCursorBeforeFirst().insert(30, 'v30');
   await leaf2.getCursorBeforeFirst().insert(40, 'v40');
 
-  await fb.commit();
+  await storage.commitAndReclaim();
   console.log('Committed second leaf. blockIds:', leaf.blockId, leaf2.blockId);
 
   const internal = await storage.allocateInternalNodeStorage([leaf, leaf2], [30]);
   console.log('Created internal node. blockId =', internal.blockId);
 
-  await fb.commit();
+  await storage.commitAndReclaim();
   console.log('Committed internal node and children to file');
 
   if (typeof internal.blockId === 'number') {
@@ -135,7 +135,7 @@ async function run() {
   await cur.insert(7, 'v7');
   console.log('Inserted 7 into first leaf; new blockId:', leaf.blockId);
 
-  await fb.commit();
+  await storage.commitAndReclaim();
   const freeHead = await fb.debug_getFreeListHead();
   console.log('Free list head after update (should be previous leaf block id):', freeHead);
 

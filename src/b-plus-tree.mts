@@ -99,7 +99,8 @@ export class BPlusTree<
    * @returns {Promise<void>} A promise that resolves when the deletion is complete.
    */
   async delete(key: KeysType): Promise<void> {
-    const leaf = await this.findLeaf(key);
+    const { leaf, parents, parentIndices } = await this.findLeafWithPath(key);
+
     const { cursor, isAtKey } = await leaf.getCursorBeforeKey(key);
     if (!isAtKey) return;
 
@@ -115,7 +116,7 @@ export class BPlusTree<
     }
 
     if (leaf.keys.length < minKeys) {
-      await this.handleUnderflow(leaf);
+      await this.handleUnderflow(leaf, parents, parentIndices);
     }
   }
 
@@ -415,17 +416,41 @@ export class BPlusTree<
   /**
    * Handles underflow in a node by borrowing or merging with siblings.
    *
+   * Accepts optional parent stack (parents from root..parent and parentIndices) to avoid repeated findParent calls.
+   *
    * @param {LeafNodeStorageType | InternalNodeStorageType} node - The node that is underflowing.
+   * @param {InternalNodeStorageType[] | undefined} parents - Optional parent stack (root..parent of node).
+   * @param {number[] | undefined} parentIndices - Optional indices for each parent in the stack.
    * @returns {Promise<void>} A promise that resolves when the underflow is handled.
    * @throws {Error} If the parent does not contain the node in its children.
    */
-  private async handleUnderflow(node: LeafNodeStorageType | InternalNodeStorageType): Promise<void> {
-    const parent = await this.findParent(node);
+  private async handleUnderflow(
+    node: LeafNodeStorageType | InternalNodeStorageType,
+    parents?: InternalNodeStorageType[],
+    parentIndices?: number[],
+  ): Promise<void> {
+    let parent: InternalNodeStorageType | undefined;
+    if (parents && parents.length > 0) {
+      parent = parents[parents.length - 1];
+    } else {
+      parent = await this.findParent(node);
+    }
+
     if (!parent) {
       return;
     }
 
-    const index = parent.children.indexOf(node);
+    let index: number;
+    if (parentIndices && parentIndices.length > 0) {
+      const stackIdx = parentIndices[parentIndices.length - 1];
+      if (stackIdx >= 0 && parent.children[stackIdx] === node) {
+        index = stackIdx;
+      } else {
+        index = parent.children.indexOf(node);
+      }
+    } else {
+      index = parent.children.indexOf(node);
+    }
     if (index === -1) throw new Error('Parent does not contain node in children');
 
     const leftSibling = index > 0 ? parent.children[index - 1] : null;
@@ -493,7 +518,13 @@ export class BPlusTree<
     }
 
     if (parent.keys.length < minKeys) {
-      await this.handleUnderflow(parent);
+      if (parents && parents.length > 0) {
+        const parentsUp = parents.slice(0, -1);
+        const parentIndicesUp = parentIndices ? parentIndices.slice(0, -1) : undefined;
+        await this.handleUnderflow(parent, parentsUp, parentIndicesUp);
+      } else {
+        await this.handleUnderflow(parent);
+      }
     }
   }
 

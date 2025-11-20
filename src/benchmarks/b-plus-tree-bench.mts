@@ -188,3 +188,21 @@ n       log2(n) insert_total_ms insert_us/op    search_total_ms search_us/op    
 50000   log2(n)=15.61   insert_total_ms=178.89  insert_us/op=3.578      search_total_ms=75.95   search_us/op=1.519      delete_total_ms=92.00   delete_us/op=1.840
 100000  log2(n)=16.61   insert_total_ms=553.38  insert_us/op=5.534      search_total_ms=140.83  search_us/op=1.408      delete_total_ms=185.06  delete_us/op=1.851
 */
+
+/*
+Mode: random inserts/searches
+n       log2(n) insert_total_ms insert_us/op    search_total_ms search_us/op    delete_total_ms delete_us/op
+1000    log2(n)=9.97    insert_total_ms=3.61    insert_us/op=3.612      search_total_ms=1.64    search_us/op=1.642      delete_total_ms=1.80    delete_us/op=1.796
+5000    log2(n)=12.29   insert_total_ms=10.05   insert_us/op=2.010      search_total_ms=5.92    search_us/op=1.183      delete_total_ms=6.93    delete_us/op=1.386
+10000   log2(n)=13.29   insert_total_ms=18.68   insert_us/op=1.868      search_total_ms=10.91   search_us/op=1.091      delete_total_ms=12.59   delete_us/op=1.259
+50000   log2(n)=15.61   insert_total_ms=158.52  insert_us/op=3.170      search_total_ms=69.58   search_us/op=1.392      delete_total_ms=74.95   delete_us/op=1.499
+100000  log2(n)=16.61   insert_total_ms=481.52  insert_us/op=4.815      search_total_ms=139.44  search_us/op=1.394      delete_total_ms=156.87  delete_us/op=1.569
+
+Mode: sequential inserts/searches
+n       log2(n) insert_total_ms insert_us/op    search_total_ms search_us/op    delete_total_ms delete_us/op
+1000    log2(n)=9.97    insert_total_ms=1.28    insert_us/op=1.285      search_total_ms=0.74    search_us/op=0.741      delete_total_ms=0.82    delete_us/op=0.816
+5000    log2(n)=12.29   insert_total_ms=8.76    insert_us/op=1.752      search_total_ms=5.18    search_us/op=1.036      delete_total_ms=5.49    delete_us/op=1.098
+10000   log2(n)=13.29   insert_total_ms=19.24   insert_us/op=1.924      search_total_ms=10.62   search_us/op=1.062      delete_total_ms=9.61    delete_us/op=0.961
+50000   log2(n)=15.61   insert_total_ms=166.05  insert_us/op=3.321      search_total_ms=70.53   search_us/op=1.411      delete_total_ms=54.55   delete_us/op=1.091
+100000  log2(n)=16.61   insert_total_ms=531.77  insert_us/op=5.318      search_total_ms=139.36  search_us/op=1.394      delete_total_ms=118.55  delete_us/op=1.186
+*/

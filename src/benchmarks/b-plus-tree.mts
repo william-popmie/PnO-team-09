@@ -152,3 +152,21 @@ async function main() {
 }
 
 await main();
+
+/*
+Mode: random inserts/searches
+n       log2(n)         insert_total_ms         insert_us/op            search_total_ms         search_us/op            delete_total_ms         delete_us/op
+1000    log2(n)=9.97    insert_total_ms=4.86    insert_us/op=4.863      search_total_ms=1.41    search_us/op=1.413      delete_total_ms=2.28    delete_us/op=2.284
+5000    log2(n)=12.29   insert_total_ms=30.67   insert_us/op=6.134      search_total_ms=5.42    search_us/op=1.085      delete_total_ms=18.05   delete_us/op=3.609
+10000   log2(n)=13.29   insert_total_ms=93.21   insert_us/op=9.321      search_total_ms=9.03    search_us/op=0.903      delete_total_ms=55.06   delete_us/op=5.506
+50000   log2(n)=15.61   insert_total_ms=1979.79 insert_us/op=39.596     search_total_ms=58.37   search_us/op=1.167      delete_total_ms=1205.82 delete_us/op=24.116
+100000  log2(n)=16.61   insert_total_ms=7805.24 insert_us/op=78.052     search_total_ms=120.30  search_us/op=1.203      delete_total_ms=4860.59 delete_us/op=48.606
+
+Mode: sequential inserts/searches
+n       log2(n)         insert_total_ms         insert_us/op            search_total_ms         search_us/op            delete_total_ms         delete_us/op
+1000    log2(n)=9.97    insert_total_ms=2.68    insert_us/op=2.681      search_total_ms=0.74    search_us/op=0.739      delete_total_ms=0.95    delete_us/op=0.947
+5000    log2(n)=12.29   insert_total_ms=37.13   insert_us/op=7.427      search_total_ms=4.70    search_us/op=0.940      delete_total_ms=7.00    delete_us/op=1.400
+10000   log2(n)=13.29   insert_total_ms=137.98  insert_us/op=13.798     search_total_ms=9.60    search_us/op=0.960      delete_total_ms=14.51   delete_us/op=1.451
+50000   log2(n)=15.61   insert_total_ms=2954.60 insert_us/op=59.092     search_total_ms=60.78   search_us/op=1.216      delete_total_ms=79.91   delete_us/op=1.598
+100000  log2(n)=16.61   insert_total_ms=11544.3 insert_us/op=115.443    search_total_ms=125.06  search_us/op=1.251      delete_total_ms=170.94  delete_us/op=1.709
+*/

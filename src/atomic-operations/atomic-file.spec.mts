@@ -2,7 +2,7 @@
 // @date 2025-11-15
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { MockFile } from '../mockfile.mjs';
+import { MockFile } from '../file/mockfile.mjs';
 import { WALManagerImpl } from './wal-manager.mjs';
 import { AtomicFileImpl } from './atomic-file.mjs';
 
@@ -36,7 +36,7 @@ describe('AtomicFile + WALManager integration (concurrency safe skeleton)', () =
     await wal.logWrite(0, Uint8Array.from([42]));
 
     // simulate crash (partial persistence)
-    walFile.crash();
+    walFile.crashBasic();
 
     // recover should clear WAL and not apply the uncommitted record
     await atomic.recover();
@@ -54,7 +54,7 @@ describe('AtomicFile + WALManager integration (concurrency safe skeleton)', () =
     await wal.addCommitMarker();
 
     // simulate crash that may or may not have persisted commit marker + data
-    walFile.crash();
+    walFile.crashBasic();
 
     // recover: if commit marker (and data) survived, it will be applied; otherwise not.
     await atomic.recover();

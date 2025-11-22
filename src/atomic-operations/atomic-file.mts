@@ -98,8 +98,8 @@ export interface AtomicFile {
   commitDataToWal(): Promise<void>;
   checkpoint(): Promise<void>;
   recover(): Promise<void>;
-  abort(): Promise<void>;
-  safeShutdown(): Promise<void>;
+  open(): Promise<void>;
+  close(): Promise<void>;
 }
 
 /**

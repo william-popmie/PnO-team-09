@@ -238,6 +238,33 @@ export class AtomicFileImpl implements AtomicFile {
     });
   }
 
+  /**
+   * Opens the atomic file (alias for ensureOpen).
+   */
+  public async open(): Promise<void> {
+    await this.ensureOpen();
+  }
+
+  /**
+   * Closes the atomic file (alias for safeShutdown).
+   */
+  public async close(): Promise<void> {
+    await this.safeShutdown();
+  }
+
+  /**
+   * Performs an atomic write of multiple buffers.
+   * @param writes Array of writes to perform.
+   */
+  public async atomicWrite(writes: { position: number; buffer: Buffer }[]): Promise<void> {
+    await this.begin();
+    for (const w of writes) {
+      await this.journalWrite(w.position, w.buffer);
+    }
+    await this.commitDataToWal();
+    await this.checkpoint();
+  }
+
   // Helper functions for testing
 
   public getOpenAndInTransaction(): boolean {

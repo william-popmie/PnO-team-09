@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { FBChildCursor, FBNodeStorage } from './fb-node-storage.mjs';
 import { FreeBlockFile, NO_BLOCK } from '../freeblockfile.mjs';
-import { MockFile } from '../mockfile.mjs';
+import { MockFile } from '../file/mockfile.mjs';
 
 /**
  * Small TestAtomicFile wrapper used by FreeBlockFile in your test harness.
@@ -12,8 +12,8 @@ class TestAtomicFile {
   constructor(file: MockFile) {
     this.file = file;
   }
-  async open() {}
-  async close() {}
+  async open() { }
+  async close() { }
   async atomicWrite(writes: { position: number; buffer: Buffer }[]) {
     for (const w of writes) {
       await this.file.writev([w.buffer], w.position);

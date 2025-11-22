@@ -384,7 +384,8 @@ app.post('/db/:collection/aggregate', async (req, res) => {
         const { groupBy, operations } = req.body;
 
         if (!groupBy || !operations) {
-            return res.status(400).json({ error: 'groupBy and operations are required' });
+            res.status(400).json({ error: 'groupBy and operations are required' });
+            return;
         }
 
         const collection = await db.getCollection(collectionName);
@@ -422,7 +423,8 @@ app.post('/db/:collection/bulk', async (req, res) => {
         const { operations } = req.body;
 
         if (!operations || !Array.isArray(operations)) {
-            return res.status(400).json({ error: 'operations array is required' });
+            res.status(400).json({ error: 'operations array is required' });
+            return;
         }
 
         const collection = await db.getCollection(collectionName);
@@ -480,7 +482,8 @@ app.post('/db/:collection/join', async (req, res) => {
         const { collection: rightCollection, on, type } = req.body;
 
         if (!rightCollection || !on) {
-            return res.status(400).json({ error: 'collection and on fields are required' });
+            res.status(400).json({ error: 'collection and on fields are required' });
+            return;
         }
 
         const results = await db.join({

@@ -13,3 +13,6 @@ testdb
 *.tsbuildinfo
 
 .vscode/
+
+mydb.db
+mydb.wal

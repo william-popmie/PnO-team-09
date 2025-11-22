@@ -15,6 +15,13 @@ const insertButton = document.getElementById('insertButton') as HTMLButtonElemen
 const deleteIdInput = document.getElementById('deleteIdInput') as HTMLInputElement;
 const deleteButton = document.getElementById('deleteButton') as HTMLButtonElement;
 const errorDiv = document.getElementById('error') as HTMLDivElement;
+const csvCollectionInput = document.getElementById('csvCollectionInput') as HTMLInputElement | null;
+const dropzone = document.getElementById('dropzone') as HTMLDivElement;
+const csvFileInput = document.getElementById('csvFileInput') as HTMLInputElement;
+const uploadCsvButton = document.getElementById('uploadCsvButton') as HTMLButtonElement;
+const csvStatus = document.getElementById('csvStatus') as HTMLSpanElement | null;
+
+let selectedCsvFile: File | null = null;
 
 /**
  * Display an error message to the user
@@ -31,6 +38,15 @@ function showError(message: string): void {
  */
 function clearError(): void {
   errorDiv.textContent = '';
+}
+
+/**
+ * Update CSV status area
+ */
+function setCsvStatus(msg: string, isError = false) {
+  if (!csvStatus) return;
+  csvStatus.textContent = msg;
+  csvStatus.style.color = isError ? 'red' : 'black';
 }
 
 /**
@@ -151,10 +167,123 @@ async function deleteDocument(): Promise<void> {
   }
 }
 
+/**
+ * CSV upload helpers
+ */
+function handleFileSelection(file: File | null) {
+  selectedCsvFile = file;
+  if (file) {
+    setCsvStatus(`Selected: ${file.name} (${Math.round(file.size / 1024)} KB)`);
+  } else {
+    setCsvStatus('');
+  }
+}
+
+dropzone.addEventListener('click', () => {
+  csvFileInput.click();
+});
+
+csvFileInput.addEventListener('change', (e) => {
+  const files = (e.target as HTMLInputElement).files;
+  handleFileSelection(files && files.length > 0 ? files[0] : null);
+});
+
+// Drag & drop support
+dropzone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  dropzone.classList.add('dragover');
+});
+
+dropzone.addEventListener('dragleave', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  dropzone.classList.remove('dragover');
+});
+
+dropzone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  dropzone.classList.remove('dragover');
+  const dt = e.dataTransfer;
+  if (dt && dt.files && dt.files.length > 0) {
+    handleFileSelection(dt.files[0]);
+  }
+});
+
+/**
+ * Upload selected CSV file to backend.
+ * If an optional collection name is provided, the client will post to
+ * /collections/{name}/import-csv, otherwise to /import/csv.
+ *
+ * Backend expectations:
+ * - Form field "file" contains the CSV
+ * - Optional field "collection" contains the collection name (if present)
+ */
+async function uploadCsv(): Promise<void> {
+  if (!selectedCsvFile) {
+    setCsvStatus('No CSV file selected', true);
+    return;
+  }
+
+  const optionalCollection = (csvCollectionInput && csvCollectionInput.value.trim()) || '';
+
+  try {
+    clearError();
+    setCsvStatus('Uploading...', false);
+    uploadCsvButton.disabled = true;
+
+    const form = new FormData();
+    form.append('file', selectedCsvFile, selectedCsvFile.name);
+    if (optionalCollection) form.append('collection', optionalCollection);
+
+    // Choose endpoint depending on whether a collection name was supplied
+    const endpoint = optionalCollection
+      ? `${API_BASE}/collections/${encodeURIComponent(optionalCollection)}/import-csv`
+      : `${API_BASE}/import/csv`;
+
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      body: form,
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`Server responded ${resp.status}: ${text}`);
+    }
+
+    // If the backend returns JSON with details, show them
+    let resultText = 'Upload successful';
+    try {
+      const json = await resp.json();
+      resultText = `Upload succeeded: ${JSON.stringify(json)}`;
+    } catch {
+      // not JSON; ignore
+    }
+
+    setCsvStatus(resultText, false);
+
+    // If user supplied a collection name, refresh the view for that collection
+    if (optionalCollection) {
+      await loadDocuments();
+    }
+
+    // clear selection
+    selectedCsvFile = null;
+    csvFileInput.value = '';
+  } catch (err) {
+    setCsvStatus(`Upload failed: ${err}`, true);
+    showError(`CSV upload failed: ${err}`);
+  } finally {
+    uploadCsvButton.disabled = false;
+  }
+}
+
 // Attach event listeners to buttons
 loadButton.addEventListener('click', loadDocuments);
 insertButton.addEventListener('click', insertDocument);
 deleteButton.addEventListener('click', deleteDocument);
+uploadCsvButton.addEventListener('click', uploadCsv);
 
 // Allow pressing Enter in the collection input to load documents
 collectionInput.addEventListener('keypress', (e) => {

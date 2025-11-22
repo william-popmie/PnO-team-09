@@ -1,6 +1,6 @@
 import { performance } from 'perf_hooks';
 import { BPlusTree } from '../b-plus-tree.mjs';
-import { TrivialNodeStorage, TrivialLeafNode, TrivialInternalNode } from '../trivial-node-storage.mjs';
+import { TrivialNodeStorage, TrivialLeafNode, TrivialInternalNode } from '../node-storage/trivial-node-storage.mjs';
 
 function xorshift32(seed: number) {
   let s = seed >>> 0;

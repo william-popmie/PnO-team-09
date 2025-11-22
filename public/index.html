@@ -1,0 +1,491 @@
+<!-- @author Claude Sonnet 4.5
+ this is a test file for testing with a front end, will not be used in the final product.
+@date 2025-11-22 -->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SimpleDBMS Admin</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: white;
+            font-size: 2.5rem;
+            margin-bottom: 2rem;
+            text-align: center;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        .card h2 {
+            color: #667eea;
+            margin-bottom: 1.5rem;
+            font-size: 1.5rem;
+        }
+
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: #4a5568;
+            font-weight: 500;
+        }
+
+        input,
+        textarea,
+        select {
+            width: 100%;
+            padding: 0.75rem;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: border-color 0.3s;
+        }
+
+        input:focus,
+        textarea:focus,
+        select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        textarea {
+            min-height: 100px;
+            font-family: 'Courier New', monospace;
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        .btn-secondary {
+            background: linear-gradient(135deg, #718096 0%, #4a5568 100%);
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #fc8181 0%, #f56565 100%);
+        }
+
+        .documents {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .document {
+            background: #f7fafc;
+            padding: 1rem;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+
+        .document-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+
+        .document-id {
+            font-weight: 600;
+            color: #667eea;
+            font-family: 'Courier New', monospace;
+        }
+
+        .document-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .document-actions button {
+            padding: 0.4rem 0.8rem;
+            font-size: 0.875rem;
+        }
+
+        .document-content {
+            color: #4a5568;
+            font-family: 'Courier New', monospace;
+            font-size: 0.875rem;
+            white-space: pre-wrap;
+        }
+
+        .flex {
+            display: flex;
+            gap: 1rem;
+            align-items: flex-end;
+        }
+
+        .flex-1 {
+            flex: 1;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: #a0aec0;
+        }
+
+        .error {
+            background: #fed7d7;
+            color: #c53030;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+
+        .success {
+            background: #c6f6d5;
+            color: #2f855a;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🗄️ SimpleDBMS Admin</h1>
+
+        <div class="card">
+            <h2>📝 Insert Document</h2>
+            <div id="insertMessage"></div>
+            <div class="form-group">
+                <label for="collectionName">Collection Name</label>
+                <input type="text" id="collectionName" placeholder="e.g., users, posts">
+            </div>
+            <div class="form-group">
+                <label for="documentData">Document (JSON)</label>
+                <textarea id="documentData" placeholder='{"name": "Alice", "age": 30}'></textarea>
+            </div>
+            <button onclick="insertDocument()">Insert Document</button>
+        </div>
+
+        <div class="card">
+            <h2>🔍 Query Collection</h2>
+            <div id="viewMessage"></div>
+            <div class="flex">
+                <div class="flex-1">
+                    <label for="viewCollection">Collection Name</label>
+                    <input type="text" id="viewCollection" placeholder="e.g., users">
+                </div>
+                <button onclick="loadDocuments()">Load All</button>
+                <button class="btn-secondary" onclick="toggleFilters()">Toggle Filters</button>
+                <button class="btn-secondary" onclick="clearView()">Clear</button>
+            </div>
+
+            <!-- Filter Section -->
+            <div id="filterSection"
+                style="display: none; margin-top: 1.5rem; padding: 1.5rem; background: #f7fafc; border-radius: 8px;">
+                <h3 style="color: #667eea; margin-bottom: 1rem; font-size: 1.2rem;">🎯 Advanced Filters</h3>
+                <div id="filterFields"></div>
+                <button onclick="applyFilters()" style="margin-top: 1rem;">Apply Filters</button>
+                <button class="btn-secondary" onclick="clearFilters()" style="margin-top: 1rem;">Clear Filters</button>
+            </div>
+
+            <div id="documentsContainer" style="margin-top: 2rem;"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:3000';
+        let detectedFields = [];
+        let currentFilters = {};
+
+        function toggleFilters() {
+            const section = document.getElementById('filterSection');
+            section.style.display = section.style.display === 'none' ? 'block' : 'none';
+        }
+
+        function detectFields(documents) {
+            if (documents.length === 0) return [];
+
+            const fieldSet = new Set();
+            documents.forEach(doc => {
+                Object.keys(doc).forEach(key => {
+                    // Exclude fields starting with underscore and 'id'
+                    if (!key.startsWith('_') && key !== 'id') {
+                        fieldSet.add(key);
+                    }
+                });
+            });
+
+            return Array.from(fieldSet).sort();
+        }
+
+        function renderFilterFields(fields) {
+            const container = document.getElementById('filterFields');
+
+            if (fields.length === 0) {
+                container.innerHTML = '<p style="color: #a0aec0;">Load documents first to see available fields</p>';
+                return;
+            }
+
+            container.innerHTML = fields.map(field => `
+                <div style="margin-bottom: 1rem; padding: 1rem; background: white; border-radius: 8px;">
+                    <div style="display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem;">
+                        <strong style="color: #4a5568; min-width: 100px;">${field}:</strong>
+                        <select id="op_${field}" style="width: 120px; padding: 0.5rem;">
+                            <option value="">No filter</option>
+                            <option value="$eq">= (equals)</option>
+                            <option value="$ne">≠ (not equals)</option>
+                            <option value="$gt">&gt; (greater than)</option>
+                            <option value="$gte">≥ (greater or equal)</option>
+                            <option value="$lt">&lt; (less than)</option>
+                            <option value="$lte">≤ (less or equal)</option>
+                        </select>
+                        <input type="text" id="val_${field}" placeholder="Value" style="flex: 1; padding: 0.5rem;">
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function clearFilters() {
+            detectedFields.forEach(field => {
+                document.getElementById(`op_${field}`).value = '';
+                document.getElementById(`val_${field}`).value = '';
+            });
+            currentFilters = {};
+        }
+
+        function applyFilters() {
+            currentFilters = {};
+
+            detectedFields.forEach(field => {
+                const op = document.getElementById(`op_${field}`).value;
+                const val = document.getElementById(`val_${field}`).value.trim();
+
+                if (op && val) {
+                    if (!currentFilters[field]) {
+                        currentFilters[field] = {};
+                    }
+
+                    // Try to parse as number if possible
+                    let parsedVal = val;
+                    if (!isNaN(val) && val !== '') {
+                        parsedVal = Number(val);
+                    } else if (val === 'true' || val === 'false') {
+                        parsedVal = val === 'true';
+                    }
+
+                    currentFilters[field][op] = parsedVal;
+                }
+            });
+
+            loadDocumentsWithFilters();
+        }
+
+        async function loadDocumentsWithFilters() {
+            const collection = document.getElementById('viewCollection').value.trim();
+            const msgEl = document.getElementById('viewMessage');
+            const container = document.getElementById('documentsContainer');
+
+            if (!collection) {
+                showMessage(msgEl, 'Please enter a collection name', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/db/${collection}`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+                let documents = await response.json();
+
+                // Apply filters client-side
+                if (Object.keys(currentFilters).length > 0) {
+                    documents = documents.filter(doc => {
+                        for (const [field, ops] of Object.entries(currentFilters)) {
+                            const value = doc[field];
+                            for (const [op, filterVal] of Object.entries(ops)) {
+                                // Convert both to same type for comparison
+                                let docVal = value;
+                                let compVal = filterVal;
+
+                                // If filter value is a number, try to convert doc value to number
+                                if (typeof filterVal === 'number' && typeof value !== 'number') {
+                                    docVal = Number(value);
+                                } else if (typeof filterVal === 'string' && typeof value === 'number') {
+                                    compVal = Number(filterVal);
+                                }
+
+                                if (op === '$eq' && docVal !== compVal) return false;
+                                if (op === '$ne' && docVal === compVal) return false;
+                                if (op === '$gt' && !(docVal > compVal)) return false;
+                                if (op === '$gte' && !(docVal >= compVal)) return false;
+                                if (op === '$lt' && !(docVal < compVal)) return false;
+                                if (op === '$lte' && !(docVal <= compVal)) return false;
+                            }
+                        }
+                        return true;
+                    });
+                }
+
+                displayDocuments(documents);
+
+                const filterCount = Object.keys(currentFilters).length;
+                if (filterCount > 0) {
+                    showMessage(msgEl, `Found ${documents.length} documents matching ${filterCount} filter(s)`, 'success');
+                } else {
+                    msgEl.innerHTML = '';
+                }
+            } catch (error) {
+                showMessage(msgEl, `Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function insertDocument() {
+            const collection = document.getElementById('collectionName').value.trim();
+            const dataStr = document.getElementById('documentData').value.trim();
+            const msgEl = document.getElementById('insertMessage');
+
+            if (!collection || !dataStr) {
+                showMessage(msgEl, 'Please fill in all fields', 'error');
+                return;
+            }
+
+            try {
+                const data = JSON.parse(dataStr);
+                const response = await fetch(`${API_BASE}/db/${collection}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+                const result = await response.json();
+                showMessage(msgEl, `Document inserted with ID: ${result.id}`, 'success');
+                document.getElementById('documentData').value = '';
+
+                // Auto-refresh if viewing the same collection
+                if (document.getElementById('viewCollection').value === collection) {
+                    loadDocuments();
+                }
+            } catch (error) {
+                showMessage(msgEl, `Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function loadDocuments() {
+            const collection = document.getElementById('viewCollection').value.trim();
+            const msgEl = document.getElementById('viewMessage');
+            const container = document.getElementById('documentsContainer');
+
+            if (!collection) {
+                showMessage(msgEl, 'Please enter a collection name', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/db/${collection}`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+                const documents = await response.json();
+
+                // Detect fields for filtering
+                detectedFields = detectFields(documents);
+                renderFilterFields(detectedFields);
+
+                displayDocuments(documents);
+                msgEl.innerHTML = '';
+            } catch (error) {
+                showMessage(msgEl, `Error: ${error.message}`, 'error');
+            }
+        }
+
+        function displayDocuments(documents) {
+            const container = document.getElementById('documentsContainer');
+
+            if (documents.length === 0) {
+                container.innerHTML = '<div class="empty-state">No documents found</div>';
+                return;
+            }
+
+            container.innerHTML = '<div class="documents">' + documents.map(doc => `
+                <div class="document">
+                    <div class="document-header">
+                        <span class="document-id">ID: ${doc.id}</span>
+                        <div class="document-actions">
+                            <button class="btn-danger" onclick="deleteDocument('${doc.id}')">Delete</button>
+                        </div>
+                    </div>
+                    <div class="document-content">${JSON.stringify(doc, null, 2)}</div>
+                </div>
+            `).join('') + '</div>';
+        }
+
+        async function deleteDocument(id) {
+            const collection = document.getElementById('viewCollection').value.trim();
+            if (!confirm(`Delete document ${id}?`)) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/db/${collection}/${id}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+                loadDocuments(); // Refresh
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+            }
+        }
+
+        function clearView() {
+            document.getElementById('documentsContainer').innerHTML = '';
+            document.getElementById('viewMessage').innerHTML = '';
+        }
+
+        function showMessage(element, message, type) {
+            element.innerHTML = `<div class="${type}">${message}</div>`;
+            setTimeout(() => element.innerHTML = '', 5000);
+        }
+    </script>
+</body>
+
+</html>

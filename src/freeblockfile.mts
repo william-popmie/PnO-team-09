@@ -31,7 +31,7 @@
 //
 // =============================================================
 
-import { type File } from './mockfile.mjs';
+import { type File } from './file/file.mjs';
 
 /**
  * Test interface for atomic file operations used by FreeBlockFile.
@@ -127,8 +127,11 @@ export class FreeBlockFile {
    * Open the FreeBlockFile, initializing or loading the header and free list.
    */
   async open(): Promise<void> {
-    await this.file.open();
-    if (this.atomicFile.open) await this.atomicFile.open();
+    if (this.atomicFile.open) {
+      await this.atomicFile.open();
+    } else {
+      await this.file.open();
+    }
 
     const st = await this.file.stat();
     if (st.size === 0) {
@@ -156,8 +159,11 @@ export class FreeBlockFile {
    * Close the FreeBlockFile, flushing any pending changes.
    */
   async close(): Promise<void> {
-    if (this.atomicFile.close) await this.atomicFile.close();
-    await this.file.close();
+    if (this.atomicFile.close) {
+      await this.atomicFile.close();
+    } else {
+      await this.file.close();
+    }
     this.opened = false;
   }
 

@@ -21,7 +21,6 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../public')));
 
-
 const swaggerOptions = {
     definition: {
         openapi: '3.0.0',
@@ -53,7 +52,7 @@ async function initDB(customDbPath?: string, customWalPath?: string) {
         try {
             db = await SimpleDBMS.open(dbFile, walFile);
             console.log('Database opened successfully.');
-        } catch (e) {
+        } catch {
             console.log('Could not open existing database, creating new one...');
             await dbFile.create();
             await dbFile.close();
@@ -96,7 +95,7 @@ async function initDB(customDbPath?: string, customWalPath?: string) {
 app.post('/db/:collection', async (req, res) => {
     try {
         const collectionName = req.params.collection;
-        const doc = req.body;
+        const doc = req.body as Omit<import('./simpledbms.mjs').Document, 'id'> & { id?: string };
         const collection = await db.getCollection(collectionName);
         const newDoc = await collection.insert(doc);
         res.status(201).json(newDoc);
@@ -206,7 +205,7 @@ app.put('/db/:collection/:id', async (req, res) => {
     try {
         const collectionName = req.params.collection;
         const id = req.params.id;
-        const updates = req.body;
+        const updates = req.body as Partial<import('./simpledbms.mjs').Document>;
         const collection = await db.getCollection(collectionName);
         const updated = await collection.update(id, updates);
         if (updated) {
@@ -314,8 +313,8 @@ app.post('/db/:collection/indexes/:field', async (req, res) => {
         const indexStorage = new FBNodeStorage<string, string>(
             (a, b) => (a < b ? -1 : a > b ? 1 : 0),
             () => 1024,
-            (db as any).fbFile,
-            4096
+            db.getFreeBlockFile(),
+            4096,
         );
 
         await collection.createIndex(field, indexStorage);
@@ -381,7 +380,8 @@ app.delete('/db/:collection/indexes/:field', async (req, res) => {
 app.post('/db/:collection/aggregate', async (req, res) => {
     try {
         const collectionName = req.params.collection;
-        const { groupBy, operations } = req.body;
+        const body = req.body as { groupBy?: string; operations?: import('./simpledbms.mjs').AggregateQuery['operations'] };
+        const { groupBy, operations } = body;
 
         if (!groupBy || !operations) {
             res.status(400).json({ error: 'groupBy and operations are required' });
@@ -420,7 +420,8 @@ app.post('/db/:collection/aggregate', async (req, res) => {
 app.post('/db/:collection/bulk', async (req, res) => {
     try {
         const collectionName = req.params.collection;
-        const { operations } = req.body;
+        const body = req.body as { operations?: unknown[] };
+        const { operations } = body;
 
         if (!operations || !Array.isArray(operations)) {
             res.status(400).json({ error: 'operations array is required' });
@@ -428,21 +429,22 @@ app.post('/db/:collection/bulk', async (req, res) => {
         }
 
         const collection = await db.getCollection(collectionName);
-        const results = [];
+        const results: Array<{ success: boolean; type?: string; id?: string; found?: boolean; deleted?: boolean; error?: string }> = [];
 
         for (const op of operations) {
             try {
-                if (op.type === 'insert') {
-                    const doc = await collection.insert(op.document);
+                const operation = op as { type: string; document?: unknown; id?: string; updates?: unknown };
+                if (operation.type === 'insert') {
+                    const doc = await collection.insert(operation.document as Omit<import('./simpledbms.mjs').Document, 'id'> & { id?: string });
                     results.push({ success: true, type: 'insert', id: doc.id });
-                } else if (op.type === 'update') {
-                    const doc = await collection.update(op.id, op.updates);
-                    results.push({ success: true, type: 'update', id: op.id, found: !!doc });
-                } else if (op.type === 'delete') {
-                    const deleted = await collection.delete(op.id);
-                    results.push({ success: true, type: 'delete', id: op.id, deleted });
+                } else if (operation.type === 'update') {
+                    const doc = await collection.update(operation.id as string, operation.updates as Partial<import('./simpledbms.mjs').Document>);
+                    results.push({ success: true, type: 'update', id: operation.id, found: !!doc });
+                } else if (operation.type === 'delete') {
+                    const deleted = await collection.delete(operation.id as string);
+                    results.push({ success: true, type: 'delete', id: operation.id, deleted });
                 } else {
-                    results.push({ success: false, error: `Unknown operation type: ${op.type}` });
+                    results.push({ success: false, error: `Unknown operation type: ${operation.type}` });
                 }
             } catch (error) {
                 results.push({ success: false, error: (error as Error).message });
@@ -479,7 +481,8 @@ app.post('/db/:collection/bulk', async (req, res) => {
 app.post('/db/:collection/join', async (req, res) => {
     try {
         const leftCollection = req.params.collection;
-        const { collection: rightCollection, on, type } = req.body;
+        const body = req.body as { collection?: string; on?: string; type?: 'inner' | 'left' | 'right' };
+        const { collection: rightCollection, on, type } = body;
 
         if (!rightCollection || !on) {
             res.status(400).json({ error: 'collection and on fields are required' });
@@ -490,7 +493,7 @@ app.post('/db/:collection/join', async (req, res) => {
             leftCollection,
             rightCollection,
             on,
-            type: type || 'inner'
+            type: type || 'inner',
         });
 
         res.json(results);
@@ -501,15 +504,17 @@ app.post('/db/:collection/join', async (req, res) => {
 
 // Start server
 if (process.env['NODE_ENV'] !== 'test') {
-    initDB().then(() => {
-        app.listen(port, () => {
-            console.log(`SimpleDBMS Daemon listening at http://localhost:${port}`);
-            console.log(`Swagger UI available at http://localhost:${port}/api-docs`);
+    initDB()
+        .then(() => {
+            app.listen(port, () => {
+                console.log(`SimpleDBMS Daemon listening at http://localhost:${port}`);
+                console.log(`Swagger UI available at http://localhost:${port}/api-docs`);
+            });
+        })
+        .catch((err) => {
+            console.error('Failed to start daemon:', err);
+            process.exit(1);
         });
-    }).catch((err) => {
-        console.error('Failed to start daemon:', err);
-        process.exit(1);
-    });
 }
 
 export { app, initDB };

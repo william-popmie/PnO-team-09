@@ -11,22 +11,24 @@ import { type File } from './file/file.mjs';
 import { randomUUID } from 'crypto';
 
 // Document interface
+export type DocumentValue = string | number | boolean | null | bigint | DocumentValue[] | { [key: string]: DocumentValue };
+
 export interface Document {
     id: string;
-    [key: string]: any;
+    [key: string]: DocumentValue;
 }
 
 // Filter operators interface
 export interface FilterOperators {
     [field: string]: {
-        $eq?: any;
-        $ne?: any;
-        $gt?: any;
-        $gte?: any;
-        $lt?: any;
-        $lte?: any;
-        $in?: any[];
-        $nin?: any[];
+        $eq?: DocumentValue;
+        $ne?: DocumentValue;
+        $gt?: DocumentValue;
+        $gte?: DocumentValue;
+        $lt?: DocumentValue;
+        $lte?: DocumentValue;
+        $in?: DocumentValue[];
+        $nin?: DocumentValue[];
     };
 }
 
@@ -64,11 +66,11 @@ export interface Query {
 /**
  * Serializes a field value for use as a B+ Tree key.
  * Ensures proper ordering: numbers, strings, booleans, null, bigint.
- * 
+ *
  * @param value The value to serialize
  * @returns A string representation that maintains sort order
  */
-export function serializeFieldValue(value: any): string {
+export function serializeFieldValue(value: unknown): string {
     if (value === null || value === undefined) return 'null';
 
     if (typeof value === 'boolean') {
@@ -96,16 +98,23 @@ export function serializeFieldValue(value: any): string {
     }
 
     // Default to string
-    return `str:${String(value)}`;
+    if (typeof value === 'object' && value !== null) {
+        return `str:${JSON.stringify(value)}`;
+    }
+    if (value === undefined) {
+        return 'str:undefined';
+    }
+    // For primitive types, convert to string
+    return `str:${value as string | number | boolean | bigint}`;
 }
 
 /**
  * Deserializes a field value from its B+ Tree key representation.
- * 
+ *
  * @param serialized The serialized string
  * @returns The original value
  */
-export function deserializeFieldValue(serialized: string): any {
+export function deserializeFieldValue(serialized: string): DocumentValue {
     if (serialized === '' || serialized === 'null') return null;
 
     if (serialized.startsWith('bool')) {
@@ -138,7 +147,17 @@ export function deserializeFieldValue(serialized: string): any {
     }
 
     if (serialized.startsWith('str:')) {
-        return serialized.substring(4);
+        const strValue = serialized.substring(4);
+        try {
+            const parsed: unknown = JSON.parse(strValue);
+            // Check if it was originally an object/array
+            if (typeof parsed === 'object' && parsed !== null) {
+                return parsed as DocumentValue;
+            }
+        } catch {
+            // Not a JSON string, return as is
+        }
+        return strValue;
     }
 
     return serialized;
@@ -151,12 +170,7 @@ export function isIndexableField(fieldName: string): boolean {
 
 // Collection class with secondary index support
 export class Collection {
-    private primaryTree: BPlusTree<
-        string,
-        Document,
-        FBLeafNode<string, Document>,
-        FBInternalNode<string, Document>
-    >;
+    private primaryTree: BPlusTree<string, Document, FBLeafNode<string, Document>, FBInternalNode<string, Document>>;
 
     // Secondary indexes: field name -> B+ Tree
     private secondaryIndexes: Map<
@@ -167,12 +181,7 @@ export class Collection {
     private onChangeCallback?: () => Promise<void>;
 
     constructor(
-        primaryTree: BPlusTree<
-            string,
-            Document,
-            FBLeafNode<string, Document>,
-            FBInternalNode<string, Document>
-        >,
+        primaryTree: BPlusTree<string, Document, FBLeafNode<string, Document>, FBInternalNode<string, Document>>,
         onChangeCallback?: () => Promise<void>,
     ) {
         this.primaryTree = primaryTree;
@@ -184,10 +193,7 @@ export class Collection {
      * @param fieldName The field to index
      * @param storage The storage to use for the index B+ Tree
      */
-    async createIndex(
-        fieldName: string,
-        storage: FBNodeStorage<string, string>
-    ): Promise<void> {
+    async createIndex(fieldName: string, storage: FBNodeStorage<string, string>): Promise<void> {
         if (!isIndexableField(fieldName)) {
             throw new Error(`Field ${fieldName} cannot be indexed (starts with _ or is 'id')`);
         }
@@ -198,7 +204,7 @@ export class Collection {
 
         const indexTree = new BPlusTree<string, string, FBLeafNode<string, string>, FBInternalNode<string, string>>(
             storage,
-            50
+            50,
         );
         await indexTree.init();
 
@@ -239,14 +245,18 @@ export class Collection {
     /**
      * Gets a secondary index tree for a field.
      */
-    getIndex(fieldName: string): BPlusTree<string, string, FBLeafNode<string, string>, FBInternalNode<string, string>> | undefined {
+    getIndex(
+        fieldName: string,
+    ): BPlusTree<string, string, FBLeafNode<string, string>, FBInternalNode<string, string>> | undefined {
         return this.secondaryIndexes.get(fieldName);
     }
 
     /**
      * Sets secondary indexes (used when loading from disk).
      */
-    setIndexes(indexes: Map<string, BPlusTree<string, string, FBLeafNode<string, string>, FBInternalNode<string, string>>>): void {
+    setIndexes(
+        indexes: Map<string, BPlusTree<string, string, FBLeafNode<string, string>, FBInternalNode<string, string>>>,
+    ): void {
         this.secondaryIndexes = indexes;
     }
 
@@ -286,7 +296,7 @@ export class Collection {
      */
     private async applyFilterOps(filterOps: FilterOperators): Promise<Set<string> | null> {
         let bestField: string | null = null;
-        let bestOps: any = null;
+        let bestOps: FilterOperators[string] | null = null;
 
         for (const [field, ops] of Object.entries(filterOps)) {
             if (this.secondaryIndexes.has(field)) {
@@ -314,8 +324,12 @@ export class Collection {
                     break;
                 }
             }
-        } else if (bestOps.$gt !== undefined || bestOps.$gte !== undefined ||
-            bestOps.$lt !== undefined || bestOps.$lte !== undefined) {
+        } else if (
+            bestOps.$gt !== undefined ||
+            bestOps.$gte !== undefined ||
+            bestOps.$lt !== undefined ||
+            bestOps.$lte !== undefined
+        ) {
             const minVal = bestOps.$gt !== undefined ? bestOps.$gt : bestOps.$gte;
             const maxVal = bestOps.$lt !== undefined ? bestOps.$lt : bestOps.$lte;
             const minInclusive = bestOps.$gte !== undefined;
@@ -327,13 +341,12 @@ export class Collection {
                 const actualValue = deserializeFieldValue(serializedValue);
 
                 let matches = true;
-                if (minVal !== undefined) {
-                    matches = matches && (minInclusive ? actualValue >= minVal : actualValue > minVal);
+                if (minVal !== undefined && minVal !== null) {
+                    matches = matches && (minInclusive ? (actualValue as unknown as number) >= (minVal as unknown as number) : (actualValue as unknown as number) > (minVal as unknown as number));
                 }
-                if (maxVal !== undefined) {
-                    matches = matches && (maxInclusive ? actualValue <= maxVal : actualValue < maxVal);
+                if (maxVal !== undefined && maxVal !== null) {
+                    matches = matches && (maxInclusive ? (actualValue as unknown as number) <= (maxVal as unknown as number) : (actualValue as unknown as number) < (maxVal as unknown as number));
                 }
-
                 if (matches) {
                     matchingIds.add(docId);
                 }
@@ -373,13 +386,13 @@ export class Collection {
                     if (doc) {
                         let matches = true;
                         for (const [field, ops] of Object.entries(query.filterOps)) {
-                            const value = (doc as any)[field];
+                            const value = doc[field];
                             if (ops.$eq !== undefined && value !== ops.$eq) matches = false;
                             if (ops.$ne !== undefined && value === ops.$ne) matches = false;
-                            if (ops.$gt !== undefined && !(value > ops.$gt)) matches = false;
-                            if (ops.$gte !== undefined && !(value >= ops.$gte)) matches = false;
-                            if (ops.$lt !== undefined && !(value < ops.$lt)) matches = false;
-                            if (ops.$lte !== undefined && !(value <= ops.$lte)) matches = false;
+                            if (ops.$gt !== undefined && ops.$gt !== null && value !== null && !((value as unknown as number) > (ops.$gt as unknown as number))) matches = false;
+                            if (ops.$gte !== undefined && ops.$gte !== null && value !== null && !((value as unknown as number) >= (ops.$gte as unknown as number))) matches = false;
+                            if (ops.$lt !== undefined && ops.$lt !== null && value !== null && !((value as unknown as number) < (ops.$lt as unknown as number))) matches = false;
+                            if (ops.$lte !== undefined && ops.$lte !== null && value !== null && !((value as unknown as number) <= (ops.$lte as unknown as number))) matches = false;
                             if (ops.$in !== undefined && !ops.$in.includes(value)) matches = false;
                             if (ops.$nin !== undefined && ops.$nin.includes(value)) matches = false;
                         }
@@ -405,7 +418,7 @@ export class Collection {
             if (min && max) {
                 iterator = this.primaryTree.range(min, max, {
                     inclusiveStart: true,
-                    inclusiveEnd: true
+                    inclusiveEnd: true,
                 });
             } else if (min) {
                 iterator = this.primaryTree.entriesFrom(min);
@@ -464,7 +477,8 @@ export class Collection {
                 if (!query.filter || query.filter(value)) {
                     all.push(value);
                 }
-            } all.reverse();
+            }
+            all.reverse();
 
             results = this.applyProjection(all, query.projection);
             return this.applyPagination(results, query.skip, query.limit);
@@ -500,7 +514,7 @@ export class Collection {
         filter?: (doc: Document) => boolean;
     }): Promise<Document[]> {
         const { groupBy, operations, filter } = options;
-        const groups = new Map<any, Document[]>();
+        const groups = new Map<DocumentValue, Document[]>();
 
         // Use secondary index if available fr grouping
         let iterator: AsyncIterable<{ key: string; value: Document | string }>;
@@ -535,7 +549,8 @@ export class Collection {
         // Compute aggregations for each group
         const results: Document[] = [];
         for (const [groupValue, docs] of groups.entries()) {
-            const result: Document = { id: `group_${groupValue}`, [groupBy]: groupValue };
+            const groupValueStr = typeof groupValue === 'object' && groupValue !== null ? JSON.stringify(groupValue) : String(groupValue);
+            const result: Document = { id: `group_${groupValueStr}`, [groupBy]: groupValue };
 
             if (operations.count) {
                 result[operations.count] = docs.length;
@@ -562,14 +577,14 @@ export class Collection {
 
             if (operations.min) {
                 for (const { field, as } of operations.min) {
-                    const values = docs.map(d => d[field]).filter(v => typeof v === 'number') as number[];
+                    const values = docs.map((d) => d[field]).filter((v) => typeof v === 'number');
                     result[as] = values.length > 0 ? Math.min(...values) : null;
                 }
             }
 
             if (operations.max) {
                 for (const { field, as } of operations.max) {
-                    const values = docs.map(d => d[field]).filter(v => typeof v === 'number') as number[];
+                    const values = docs.map((d) => d[field]).filter((v) => typeof v === 'number');
                     result[as] = values.length > 0 ? Math.max(...values) : null;
                 }
             }
@@ -588,7 +603,7 @@ export class Collection {
             return docs;
         }
 
-        return docs.map(doc => {
+        return docs.map((doc) => {
             const projected: Document = { id: doc.id };
             for (const field of fields) {
                 if (field !== 'id' && doc[field] !== undefined) {
@@ -608,10 +623,12 @@ export class Collection {
         }
 
         return docs.sort((a, b) => {
-            const valA = (a as any)[sort.field];
-            const valB = (b as any)[sort.field];
-            if (valA < valB) return sort.order === 'asc' ? -1 : 1;
-            if (valA > valB) return sort.order === 'asc' ? 1 : -1;
+            const valA = a[sort.field];
+            const valB = b[sort.field];
+            if (valA === null || valA === undefined) return 1;
+            if (valB === null || valB === undefined) return -1;
+            if ((valA as unknown as number) < (valB as unknown as number)) return sort.order === 'asc' ? -1 : 1;
+            if ((valA as unknown as number) > (valB as unknown as number)) return sort.order === 'asc' ? 1 : -1;
             return 0;
         });
     }
@@ -706,17 +723,16 @@ export class Collection {
  */
 export class SimpleDBMS {
     private fbFile: FreeBlockFile;
-    private catalogTree!: BPlusTree<
-        string,
-        number,
-        FBLeafNode<string, number>,
-        FBInternalNode<string, number>
-    >;
+    private catalogTree!: BPlusTree<string, number, FBLeafNode<string, number>, FBInternalNode<string, number>>;
     private catalogStorage!: FBNodeStorage<string, number>;
     private collections: Map<string, Collection> = new Map();
 
     private constructor(fbFile: FreeBlockFile) {
         this.fbFile = fbFile;
+    }
+
+    public getFreeBlockFile(): FreeBlockFile {
+        return this.fbFile;
     }
 
     /**
@@ -774,7 +790,7 @@ export class SimpleDBMS {
             (a, b) => (a < b ? -1 : a > b ? 1 : 0),
             (key) => key.length,
             this.fbFile,
-            4096
+            4096,
         );
 
         this.catalogTree = new BPlusTree(this.catalogStorage, 100);
@@ -789,7 +805,7 @@ export class SimpleDBMS {
                 await this.saveCatalogRoot();
             } else {
                 try {
-                    this.dbHeader = JSON.parse(headerBuf.toString());
+                    this.dbHeader = JSON.parse(headerBuf.toString()) as typeof this.dbHeader;
                     const rootNode = await this.catalogStorage.loadNode(this.dbHeader.catalogRootBlockId);
                     this.catalogTree.load(rootNode);
                 } catch {
@@ -807,11 +823,11 @@ export class SimpleDBMS {
         let rootId: number;
 
         if (root.isLeaf) {
-            await this.catalogStorage.persistLeaf(root as FBLeafNode<string, number>);
-            rootId = (root as FBLeafNode<string, number>).blockId!;
+            await this.catalogStorage.persistLeaf(root);
+            rootId = root.blockId!;
         } else {
-            await this.catalogStorage.persistInternal(root as FBInternalNode<string, number>);
-            rootId = (root as FBInternalNode<string, number>).blockId!;
+            await this.catalogStorage.persistInternal(root);
+            rootId = root.blockId!;
         }
 
         this.dbHeader.catalogRootBlockId = rootId;
@@ -837,9 +853,12 @@ export class SimpleDBMS {
             (a, b) => (a < b ? -1 : a > b ? 1 : 0),
             (key) => key.length,
             this.fbFile,
-            4096
+            4096,
         );
-        const tree = new BPlusTree<string, Document, FBLeafNode<string, Document>, FBInternalNode<string, Document>>(storage, 50);
+        const tree = new BPlusTree<string, Document, FBLeafNode<string, Document>, FBInternalNode<string, Document>>(
+            storage,
+            50,
+        );
 
         if (rootBlockId !== null) {
             const rootNode = await storage.loadNode(rootBlockId);
@@ -855,16 +874,22 @@ export class SimpleDBMS {
 
         const collectionMeta = this.dbHeader.collections[name];
         if (collectionMeta?.indexes) {
-            const indexMap = new Map<string, BPlusTree<string, string, FBLeafNode<string, string>, FBInternalNode<string, string>>>();
+            const indexMap = new Map<
+                string,
+                BPlusTree<string, string, FBLeafNode<string, string>, FBInternalNode<string, string>>
+            >();
 
             for (const [field, indexRootId] of Object.entries(collectionMeta.indexes)) {
                 const indexStorage = new FBNodeStorage<string, string>(
                     (a, b) => (a < b ? -1 : a > b ? 1 : 0),
                     () => 1024,
                     this.fbFile,
-                    4096
+                    4096,
                 );
-                const indexTree = new BPlusTree<string, string, FBLeafNode<string, string>, FBInternalNode<string, string>>(indexStorage, 50);
+                const indexTree = new BPlusTree<string, string, FBLeafNode<string, string>, FBInternalNode<string, string>>(
+                    indexStorage,
+                    50,
+                );
 
                 const indexRootNode = await indexStorage.loadNode(indexRootId);
                 indexTree.load(indexRootNode);
@@ -887,21 +912,20 @@ export class SimpleDBMS {
         leftCollection: string;
         rightCollection: string;
         on: string;
-        type?: 'inner' | 'left';
+        type?: 'inner' | 'left' | 'right';
     }): Promise<Document[]> {
         const { leftCollection, rightCollection, on, type = 'inner' } = options;
 
         const left = await this.getCollection(leftCollection);
         const right = await this.getCollection(rightCollection);
 
-        const rightMap = new Map<any, Document[]>();
-
+        const rightMap = new Map<DocumentValue, Document[]>();
 
         if (right.getIndexedFields().includes(on)) {
             const indexTree = right.getIndex(on);
             if (indexTree) {
                 for await (const { value: docId } of indexTree.entries()) {
-                    const doc = await right.findById(docId as string);
+                    const doc = await right.findById(docId);
                     if (doc) {
                         const key = doc[on];
                         if (!rightMap.has(key)) {
@@ -912,7 +936,8 @@ export class SimpleDBMS {
                 }
             }
         } else {
-            for await (const doc of (await right.find({}))) {
+            const rightDocs = await right.find({});
+            for (const doc of rightDocs) {
                 const key = doc[on];
                 if (!rightMap.has(key)) {
                     rightMap.set(key, []);
@@ -922,7 +947,8 @@ export class SimpleDBMS {
         }
 
         const results: Document[] = [];
-        for await (const leftDoc of (await left.find({}))) {
+        const leftDocs = await left.find({});
+        for (const leftDoc of leftDocs) {
             const key = leftDoc[on];
             const rightDocs = rightMap.get(key);
 
@@ -947,16 +973,16 @@ export class SimpleDBMS {
     private async saveCollectionRoot(
         name: string,
         tree: BPlusTree<string, Document, FBLeafNode<string, Document>, FBInternalNode<string, Document>>,
-        storage: FBNodeStorage<string, Document>
+        storage: FBNodeStorage<string, Document>,
     ) {
         const root = tree.getRoot();
         let rootId: number;
         if (root.isLeaf) {
-            await storage.persistLeaf(root as FBLeafNode<string, Document>);
-            rootId = (root as FBLeafNode<string, Document>).blockId!;
+            await storage.persistLeaf(root);
+            rootId = root.blockId!;
         } else {
-            await storage.persistInternal(root as FBInternalNode<string, Document>);
-            rootId = (root as FBInternalNode<string, Document>).blockId!;
+            await storage.persistInternal(root);
+            rootId = root.blockId!;
         }
 
         await this.catalogTree.insert(name, rootId);

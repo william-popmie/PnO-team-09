@@ -644,7 +644,7 @@ export class Collection {
         const existing = await this.primaryTree.search(id);
         if (!existing) return null;
 
-        const updated = { ...existing, ...updates, id };
+        const updated: Document = { ...existing, ...updates, id };
 
         // Remove old index entries for changed fields
         for (const [fieldName, indexTree] of this.secondaryIndexes.entries()) {
@@ -896,7 +896,7 @@ export class SimpleDBMS {
 
         const rightMap = new Map<any, Document[]>();
 
-        let rightIterator: AsyncIterable<{ key: string; value: Document | string }>;
+
         if (right.getIndexedFields().includes(on)) {
             const indexTree = right.getIndex(on);
             if (indexTree) {

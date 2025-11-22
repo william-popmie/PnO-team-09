@@ -10,8 +10,8 @@ class TestAtomicFile {
   constructor(file: MockFile) {
     this.file = file;
   }
-  async open() { }
-  async close() { }
+  async open() {}
+  async close() {}
   async atomicWrite(writes: { position: number; buffer: Buffer }[]) {
     for (const w of writes) {
       await this.file.writev([w.buffer], w.position);

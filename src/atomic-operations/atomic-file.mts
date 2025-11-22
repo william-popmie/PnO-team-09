@@ -3,15 +3,14 @@
 
 /**
  * INSTRUCTIONS TO USE ATOMIC-FILE:
- * On startup, run: 
+ * On startup, run:
     await atomic-file.recover();
-    
  * To commit data to the database:
     await atomic-file.begin();              //Start transaction
     await atomic-file.journalWrite(offset: number, data: Uint8Array);  //Do any
     .                                                                    number of
     .                                                                    writes
-    .                                                                    to WAL                                                                    
+    .                                                                    to WAL
     await atomic-file.commitDataToWal();   //Definitive commit to WAL
     .                                      //More journalWrites followed by
     .                                        by a commitDataToWAl() can be done
@@ -132,7 +131,7 @@ export class AtomicFileImpl implements AtomicFile {
    */
   public async begin(): Promise<void> {
     return this.mutex.runExclusive(async () => {
-      if (this.inTransaction) throw new Error("Transaction already in progress.");
+      if (this.inTransaction) throw new Error('Transaction already in progress.');
       await this.ensureOpen();
       this.pendingWrites.length = 0;
       this.inTransaction = true;
@@ -146,7 +145,7 @@ export class AtomicFileImpl implements AtomicFile {
    */
   public async journalWrite(offset: number, data: Uint8Array): Promise<void> {
     return this.mutex.runExclusive(async () => {
-      if (!this.inTransaction) throw new Error("No active transaction.");
+      if (!this.inTransaction) throw new Error('No active transaction.');
       await this.wal.logWrite(offset, data);
       this.pendingWrites.push({ offset, data: data.slice() });
     });
@@ -174,7 +173,7 @@ export class AtomicFileImpl implements AtomicFile {
    */
   public async commitDataToWal(): Promise<void> {
     return this.mutex.runExclusive(async () => {
-      if (!this.inTransaction) throw new Error("no active transaction");
+      if (!this.inTransaction) throw new Error('no active transaction');
 
       await this.wal.sync();
       await this.wal.addCommitMarker();

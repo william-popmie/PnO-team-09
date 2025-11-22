@@ -518,12 +518,12 @@ export class Collection {
     if (query.sort?.field === 'id' && query.sort.order === 'desc') {
       //TODO: Implement reverse iteration in BPlusTree
       const all: Document[] = [];
-      for await (const { value } of this.primaryTree.entries()) {
+      for await (const { value } of this.primaryTree.reverseEntries()) {
         if (!query.filter || query.filter(value)) {
           all.push(value);
         }
       }
-      all.reverse();
+      // all.reverse();
 
       results = this.applyProjection(all, query.projection);
       return this.applyPagination(results, query.skip, query.limit);

@@ -292,6 +292,26 @@ export class BPlusTree<
   }
 
   /**
+   * Returns an async generator that yields all key-value pairs in the B+ tree in reverse order.
+   *
+   * @returns {AsyncGenerator<{ key: KeysType; value: ValuesType }, void, unknown>} An async generator yielding key-value pairs in reverse order.
+   */
+  public async *reverseEntries(): AsyncGenerator<{ key: KeysType; value: ValuesType }, void, unknown> {
+    if (!this.root) return;
+    let leaf = await this.getRightmostLeaf();
+    while (leaf) {
+      for (let i = leaf.keys.length - 1; i >= 0; i--) {
+        yield { key: leaf.keys[i], value: leaf.values[i] };
+      }
+      if (leaf.prevLeaf) {
+        leaf = leaf.prevLeaf;
+      } else {
+        break;
+      }
+    }
+  }
+
+  /**
    * Returns an async iterator that yields all key-value pairs in the B+ tree in order.
    *
    * @returns {AsyncGenerator<{ key: KeysType; value: ValuesType }, void, unknown>} An async generator yielding key-value pairs.
@@ -418,6 +438,22 @@ export class BPlusTree<
     while (!node.isLeaf) {
       const internal = node;
       node = internal.children[0];
+    }
+    return Promise.resolve(node);
+  }
+
+  /**
+   * Retrieves the rightmost leaf node of the B+ tree.
+   *
+   * @returns {Promise<LeafNodeStorageType>} A promise that resolves to the rightmost leaf node.
+   * @throws {Error} If the tree is not initialized.
+   */
+  private async getRightmostLeaf(): Promise<LeafNodeStorageType> {
+    if (!this.root) throw new Error('Tree is not initialized');
+    let node: LeafNodeStorageType | InternalNodeStorageType = this.root;
+    while (!node.isLeaf) {
+      const internal = node;
+      node = internal.children[internal.children.length - 1];
     }
     return Promise.resolve(node);
   }
@@ -634,7 +670,12 @@ export class BPlusTree<
     newLeaf.values = leaf.values.splice(mid);
 
     newLeaf.nextLeaf = leaf.nextLeaf;
+    newLeaf.prevLeaf = leaf;
     leaf.nextLeaf = newLeaf;
+
+    if (newLeaf.nextLeaf) {
+      newLeaf.nextLeaf.prevLeaf = newLeaf;
+    }
 
     const promotedKey = newLeaf.keys[0];
     await this.insertInParent(leaf, promotedKey, newLeaf);

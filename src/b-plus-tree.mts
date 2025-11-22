@@ -50,6 +50,24 @@ export class BPlusTree<
   }
 
   /**
+   * Loads the B+ tree from an existing root node.
+   *
+   * @param {LeafNodeStorageType | InternalNodeStorageType} root - The root node to load.
+   */
+  load(root: LeafNodeStorageType | InternalNodeStorageType): void {
+    this.root = root;
+  }
+
+  /**
+   * Gets the current root node of the B+ tree.
+   *
+   * @returns {LeafNodeStorageType | InternalNodeStorageType} The root node.
+   */
+  getRoot(): LeafNodeStorageType | InternalNodeStorageType {
+    return this.root;
+  }
+
+  /**
    * Inserts a key-value pair into the B+ tree.
    *
    * @param {KeysType} key - The key to insert.

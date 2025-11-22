@@ -1,5 +1,9 @@
+<!-- @author Claude Sonnet 4.5
+ this is a test file for testing with a front end, will not be used in the final product.
+@date 2025-11-22 -->
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -12,21 +16,27 @@
             padding: 20px;
             background-color: #f5f5f5;
         }
+
         h1 {
             color: #333;
         }
+
         .section {
             background: white;
             padding: 20px;
             margin: 20px 0;
             border-radius: 5px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
-        input, textarea, button {
+
+        input,
+        textarea,
+        button {
             margin: 5px 0;
             padding: 8px;
             font-size: 14px;
         }
+
         button {
             background-color: #4CAF50;
             color: white;
@@ -34,9 +44,11 @@
             cursor: pointer;
             border-radius: 3px;
         }
+
         button:hover {
             background-color: #45a049;
         }
+
         #documentsView {
             background: #f9f9f9;
             border: 1px solid #ddd;
@@ -45,29 +57,34 @@
             overflow-x: auto;
             min-height: 100px;
         }
+
         #error {
             color: red;
             margin: 10px 0;
             font-weight: bold;
         }
+
         label {
             display: block;
             margin-top: 10px;
             font-weight: bold;
         }
+
         textarea {
             width: 100%;
             min-height: 80px;
             font-family: monospace;
         }
+
         input {
             width: 300px;
         }
     </style>
 </head>
+
 <body>
     <h1>SimpleDBMS Web Client</h1>
-    
+
     <div id="error"></div>
 
     <div class="section">
@@ -83,7 +100,7 @@
         <label for="insertIdInput">Document ID:</label>
         <input type="text" id="insertIdInput">
         <label for="insertJsonInput">Document Fields (JSON):</label>
-        <textarea id="insertJsonInput" ></textarea>
+        <textarea id="insertJsonInput"></textarea>
         <button id="insertButton">Insert document</button>
     </div>
 
@@ -96,4 +113,5 @@
 
     <script type="module" src="webclient.js"></script>
 </body>
+
 </html>

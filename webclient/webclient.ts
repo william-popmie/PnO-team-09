@@ -1,3 +1,7 @@
+// @author Claude Sonnet 4.5
+// this is a test file for testing with a front end, will not be used in the final product.
+// @date 2025-11-22
+
 // Base URL for the API - adjust port if needed
 const API_BASE = 'http://localhost:3000';
 
@@ -34,7 +38,7 @@ function clearError(): void {
  */
 async function loadDocuments(): Promise<void> {
     const collectionName = collectionInput.value.trim();
-    
+
     if (!collectionName) {
         showError('Please enter a collection name');
         return;
@@ -43,11 +47,11 @@ async function loadDocuments(): Promise<void> {
     try {
         clearError();
         const response = await fetch(`${API_BASE}/collections/${collectionName}`);
-        
+
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
-        
+
         const documents = await response.json();
         documentsView.textContent = JSON.stringify(documents, null, 2);
     } catch (error) {
@@ -83,7 +87,7 @@ async function insertDocument(): Promise<void> {
         clearError();
         // Parse the JSON input
         const fields = JSON.parse(jsonText);
-        
+
         // Combine id with the parsed fields
         const document = { id, ...fields };
 

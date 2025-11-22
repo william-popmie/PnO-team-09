@@ -132,7 +132,7 @@ export class WALManagerImpl implements WALManager {
    */
   public async addCommitMarker(): Promise<void> {
     return this.mutex.runExclusive(async () => {
-      const marker: Buffer = Buffer.from('COMMIT\n');
+      const marker: Buffer = Buffer.from("COMMIT\n");
       const pos: number = await this.walFile.stat().then((stat) => stat.size);
       await this.walFile.writev([marker], pos);
     });
@@ -180,7 +180,7 @@ export class WALManagerImpl implements WALManager {
    */
   private getCommittedData(walSize: number, buffer: Buffer): { writes: { offset: number; data: Buffer }[] } {
     let pos: number = 0;
-    const marker: Buffer = Buffer.from('COMMIT\n');
+    const marker: Buffer = Buffer.from("COMMIT\n");
     let writes: { offset: number; data: Buffer }[] = [];
     let tempWrites: { offset: number; data: Buffer }[] = [];
     while (pos + 12 <= walSize) {
@@ -193,7 +193,7 @@ export class WALManagerImpl implements WALManager {
       if (pos + size + marker.length > walSize) break;
       const check: number = this.checksumCalculator(data);
       if (check !== checksum) {
-        console.log('All previous commits to the WAL were corrupted, sorry... :(( \nFlusing...');
+        console.log("All previous commits to the WAL were corrupted, sorry... :(( \nFlusing...");
         writes = [];
         break;
       }
@@ -226,21 +226,21 @@ export class WALManagerImpl implements WALManager {
         return;
       }
 
-      console.log('A crash has been detected. Trying to recover WAL...');
+      console.log("A crash has been detected. Trying to recover WAL...");
 
       const journalBuffer: Buffer = Buffer.alloc(journalSize);
       await this.walFile.read(journalBuffer, { position: 0 });
       const journalContents: string = journalBuffer.toString();
 
-      if (!journalContents.includes('COMMIT')) {
-        console.log('No committed changes detected. Flushing...');
+      if (!journalContents.includes("COMMIT")) {
+        console.log("No committed changes detected. Flushing...");
         await this.walFile.truncate(0);
         return;
       }
 
-      console.log('Recovering committed WAL...');
+      console.log("Recovering committed WAL...");
       await this.checkpointInternal();
-      console.log('Committed changes succesfully recovered.');
+      console.log("Committed changes succesfully recovered.");
       await this.walFile.truncate(0);
     });
   }

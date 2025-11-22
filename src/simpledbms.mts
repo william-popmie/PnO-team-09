@@ -74,8 +74,8 @@ export interface Query {
  * Serializes a field value for use as a B+ Tree key.
  * Ensures proper ordering: numbers, strings, booleans, null, bigint.
  *
- * @param value The value to serialize
- * @returns A string representation that maintains sort order
+ * @param {unknown} value The value to serialize
+ * @returns {string} A string representation that maintains sort order
  */
 export function serializeFieldValue(value: unknown): string {
   if (value === null || value === undefined) return 'null';
@@ -118,8 +118,8 @@ export function serializeFieldValue(value: unknown): string {
 /**
  * Deserializes a field value from its B+ Tree key representation.
  *
- * @param serialized The serialized string
- * @returns The original value
+ * @param {string} serialized The serialized string
+ * @returns {DocumentValue} The original value
  */
 export function deserializeFieldValue(serialized: string): DocumentValue {
   if (serialized === '' || serialized === 'null') return null;
@@ -170,7 +170,11 @@ export function deserializeFieldValue(serialized: string): DocumentValue {
   return serialized;
 }
 
-// Helper: check if field is indexable
+/**
+ * Helper: check if field is indexable
+ * @param {string} fieldName The field name to check
+ * @returns {boolean} True if the field is indexable
+ */
 export function isIndexableField(fieldName: string): boolean {
   return !fieldName.startsWith('_') && fieldName !== 'id';
 }
@@ -197,8 +201,9 @@ export class Collection {
 
   /**
    * Creates a secondary index on a field.
-   * @param fieldName The field to index
-   * @param storage The storage to use for the index B+ Tree
+   * @param {string} fieldName The field to index
+   * @param {FBNodeStorage<string, string>} storage The storage to use for the index B+ Tree
+   * @returns {Promise<void>} A promise that resolves when the index is created
    */
   async createIndex(fieldName: string, storage: FBNodeStorage<string, string>): Promise<void> {
     if (!isIndexableField(fieldName)) {
@@ -232,7 +237,8 @@ export class Collection {
 
   /**
    * Drops a secondary index.
-   * @param fieldName The field to drop the index for
+   * @param {string} fieldName The field to drop the index for
+   * @returns {Promise<void>} A promise that resolves when the index is dropped
    */
   async dropIndex(fieldName: string): Promise<void> {
     this.secondaryIndexes.delete(fieldName);
@@ -270,8 +276,8 @@ export class Collection {
   /**
    * Inserts a document into the collection.
    * If the document does not have an id, one will be generated.
-   * @param doc The document to insert.
-   * @returns The inserted document.
+   * @param {Omit<Document, 'id'> & { id?: string }} doc The document to insert.
+   * @returns {Promise<Document>} The inserted document.
    */
   async insert(doc: Omit<Document, 'id'> & { id?: string }): Promise<Document> {
     const id = doc.id ?? randomUUID();
@@ -298,8 +304,8 @@ export class Collection {
 
   /**
    * Applies filter operators to get matching document IDs using indexes.
-   * @param filterOps The filter operators to apply.
-   * @returns A set of document IDs that match the query, or null if no index is available.
+   * @param {FilterOperators} filterOps The filter operators to apply.
+   * @returns {Promise<Set<string> | null>} A set of document IDs that match the query, or null if no index is available.
    */
   private async applyFilterOps(filterOps: FilterOperators): Promise<Set<string> | null> {
     let bestField: string | null = null;
@@ -384,8 +390,8 @@ export class Collection {
 
   /**
    * Finds documents in the collection.
-   * @param query The query options.
-   * @returns An array of documents matching the query.
+   * @param {Query} query The query options.
+   * @returns {Promise<Document[]>} An array of documents matching the query.
    */
   async find(query: Query = {}): Promise<Document[]> {
     let results: Document[] = [];
@@ -540,6 +546,16 @@ export class Collection {
   /**
    * Performs aggregation on the collection.
    * Uses secondary indexes when available for efficient grouping (O(log n + k)).
+   * @param {object} options The aggregation options.
+   * @param {string} options.groupBy The field to group by.
+   * @param {object} options.operations The aggregation operations to perform.
+   * @param {string} [options.operations.count] Optional field name to store count.
+   * @param {Array<{ field: string; as: string }>} [options.operations.sum] Optional sum operations.
+   * @param {Array<{ field: string; as: string }>} [options.operations.avg] Optional average operations.
+   * @param {Array<{ field: string; as: string }>} [options.operations.min] Optional min operations.
+   * @param {Array<{ field: string; as: string }>} [options.operations.max] Optional max operations.
+   * @param {(doc: Document) => boolean} [options.filter] Optional filter function to apply before aggregation.
+   * @returns {Promise<Document[]>} The aggregation results.
    */
   async aggregate(options: {
     groupBy: string;
@@ -684,8 +700,8 @@ export class Collection {
 
   /**
    * Retrieves a document by its ID.
-   * @param id The ID of the document.
-   * @returns The document, or null if not found.
+   * @param {string} id The ID of the document.
+   * @returns {Promise<Document | null>} The document, or null if not found.
    */
   async findById(id: string): Promise<Document | null> {
     return await this.primaryTree.search(id);
@@ -693,9 +709,9 @@ export class Collection {
 
   /**
    * Updates a document in the collection.
-   * @param id The ID of the document to update.
-   * @param updates Partial document with updates.
-   * @returns The updated document, or null if not found.
+   * @param {string} id The ID of the document to update.
+   * @param {Partial<Document>} updates Partial document with updates.
+   * @returns {Promise<Document | null>} The updated document, or null if not found.
    */
   async update(id: string, updates: Partial<Document>): Promise<Document | null> {
     const existing = await this.primaryTree.search(id);
@@ -732,8 +748,8 @@ export class Collection {
 
   /**
    * Deletes a document from the collection.
-   * @param id The ID of the document to delete.
-   * @returns True if the document was deleted, false if not found.
+   * @param {string} id The ID of the document to delete.
+   * @returns {Promise<boolean>} True if the document was deleted, false if not found.
    */
   async delete(id: string): Promise<boolean> {
     const existing = await this.primaryTree.search(id);
@@ -771,15 +787,19 @@ export class SimpleDBMS {
     this.fbFile = fbFile;
   }
 
+  /**
+   * Gets the FreeBlockFile instance.
+   * @returns {FreeBlockFile} The FreeBlockFile instance.
+   */
   public getFreeBlockFile(): FreeBlockFile {
     return this.fbFile;
   }
 
   /**
    * Creates a new database.
-   * @param file The file to use for the database.
-   * @param walFile The file to use for the write-ahead log.
-   * @returns A new SimpleDBMS instance.
+   * @param {File} file The file to use for the database.
+   * @param {File} walFile The file to use for the write-ahead log.
+   * @returns {Promise<SimpleDBMS>} A new SimpleDBMS instance.
    */
   static async create(file: File, walFile: File): Promise<SimpleDBMS> {
     const walManager = new WALManagerImpl(walFile, file);
@@ -795,9 +815,9 @@ export class SimpleDBMS {
 
   /**
    * Opens an existing database.
-   * @param file The file to use for the database.
-   * @param walFile The file to use for the write-ahead log.
-   * @returns A SimpleDBMS instance.
+   * @param {File} file The file to use for the database.
+   * @param {File} walFile The file to use for the write-ahead log.
+   * @returns {Promise<SimpleDBMS>} A SimpleDBMS instance.
    */
   static async open(file: File, walFile: File): Promise<SimpleDBMS> {
     const walManager = new WALManagerImpl(walFile, file);
@@ -879,8 +899,8 @@ export class SimpleDBMS {
 
   /**
    * Gets a collection.
-   * @param name The name of the collection.
-   * @returns The collection.
+   * @param {string} name The name of the collection.
+   * @returns {Promise<Collection>} The collection.
    */
   async getCollection(name: string): Promise<Collection> {
     if (this.collections.has(name)) {
@@ -947,6 +967,12 @@ export class SimpleDBMS {
   /**
    * Performs a natural join between two collections on a common field.
    * Uses hash join algorithm for O(n + m) performance.
+   * @param {object} options The join options.
+   * @param {string} options.leftCollection The left collection name.
+   * @param {string} options.rightCollection The right collection name.
+   * @param {string} options.on The field to join on.
+   * @param {'inner' | 'left' | 'right'} [options.type='inner'] The type of join.
+   * @returns {Promise<Document[]>} The joined documents.
    */
   async join(options: {
     leftCollection: string;
@@ -1031,6 +1057,11 @@ export class SimpleDBMS {
 
   /**
    * Saves index metadata for a collection.
+   *
+   * @param {string} collectionName The name of the collection.
+   * @param {string} field The indexed field.
+   * @param {number} rootBlockId The root block ID of the index B+ Tree.
+   * @returns {Promise<void>} A promise that resolves when the metadata is saved.
    */
   async saveIndexMetadata(collectionName: string, field: string, rootBlockId: number): Promise<void> {
     if (!this.dbHeader.collections[collectionName]) {
@@ -1042,6 +1073,9 @@ export class SimpleDBMS {
 
   /**
    * Removes index metadata for a collection.
+   * @param {string} collectionName The name of the collection.
+   * @param {string} field The indexed field.
+   * @returns {Promise<void>} A promise that resolves when the metadata is removed.
    */
   async removeIndexMetadata(collectionName: string, field: string): Promise<void> {
     if (this.dbHeader.collections[collectionName]?.indexes) {

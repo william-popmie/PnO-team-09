@@ -98,8 +98,8 @@ export interface AtomicFile {
   commitDataToWal(): Promise<void>;
   checkpoint(): Promise<void>;
   recover(): Promise<void>;
-  open(): Promise<void>;
-  close(): Promise<void>;
+  abort(): Promise<void>;
+  safeShutdown(): Promise<void>;
 }
 
 /**
@@ -123,7 +123,6 @@ export class AtomicFileImpl implements AtomicFile {
    */
   private async ensureOpen(): Promise<void> {
     if (this.opened) return;
-    await this.dbFile.open();
     await this.wal.openWAL();
     this.opened = true;
   }
@@ -231,7 +230,6 @@ export class AtomicFileImpl implements AtomicFile {
     return this.mutex.runExclusive(async () => {
       await this.dbFile.sync();
       await this.wal.sync();
-      await this.dbFile.close();
       await this.wal.closeWAL();
       this.opened = false;
       this.inTransaction = false;

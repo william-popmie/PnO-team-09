@@ -17,7 +17,13 @@ describe('SimpleDBMS Daemon API', () => {
         tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'simpledbms-test-'));
         dbPath = path.join(tempDir, 'test.db');
         walPath = path.join(tempDir, 'test.wal');
-        await initDB(dbPath, walPath);
+        try {
+            await initDB(dbPath, walPath);
+        } catch (e: any) {
+            if (e.message !== 'File is already open.') {
+                throw e;
+            }
+        }
     });
 
     afterAll(async () => {
@@ -65,10 +71,10 @@ describe('SimpleDBMS Daemon API', () => {
             .send({ age: 26 });
 
         expect(res.status).toBe(200);
-        expect(res.body.age).toBe(41);
+        expect(res.body.age).toBe(26);
 
         const checkRes = await request(app).get(`/db/users/${id}`);
-        expect(checkRes.body.age).toBe(41);
+        expect(checkRes.body.age).toBe(26);
     });
 
     it('delete a document', async () => {

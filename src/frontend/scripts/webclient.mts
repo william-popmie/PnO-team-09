@@ -5,31 +5,28 @@
 
 const API_BASE = 'http://localhost:3000';
 
-console.log('🖥️ WebClient loading...', 'API:', API_BASE);
-
-function getEl<T extends HTMLElement>(id: string): T {
-  const el = document.getElementById(id);
-  if (!el) throw new Error(`Missing element with id="${id}"`);
-  return el as T;
-}
-
 // DOM elements
-const collectionSearch = getEl<HTMLInputElement>('collectionSearch');
-const collectionsList = getEl<HTMLDivElement>('collectionsList');
-const refreshCollections = getEl<HTMLButtonElement>('refreshCollections');
-const createCollectionButton = getEl<HTMLButtonElement>('createCollection');
-const selectedCount = getEl<HTMLSpanElement>('selectedCount');
-const deleteSelected = getEl<HTMLButtonElement>('deleteSelected');
-const confirmCreate = getEl<HTMLButtonElement>('confirmCreate');
-const confirmDelete = getEl<HTMLButtonElement>('confirmDelete');
-const collectionNameInput = getEl<HTMLInputElement>('collectionNameInput');
-const errorDiv = getEl<HTMLDivElement>('error');
+const collectionSearch = document.getElementById('collectionSearch') as HTMLInputElement;
+const collectionsList = document.getElementById('collectionsList') as HTMLDivElement;
+const refreshCollections = document.getElementById('refreshCollections') as HTMLButtonElement;
+const createCollectionButton = document.getElementById('createCollection') as HTMLButtonElement;
+const selectedCount = document.getElementById('selectedCount') as HTMLSpanElement;
+const deleteSelected = document.getElementById('deleteSelected') as HTMLButtonElement;
+const confirmCreate = document.getElementById('confirmCreate') as HTMLButtonElement;
+const confirmDelete = document.getElementById('confirmDelete') as HTMLButtonElement;
+const collectionNameInput = document.getElementById('collectionNameInput') as HTMLInputElement;
+const errorDiv = document.getElementById('error') as HTMLDivElement;
 
-// State management -- moet nog let worden maar pas na de implementatie van de functies
+// State management
 const selectedCollections = new Set<string>();
-const allCollections: string[] = [];
+let allCollections: string[] = [];
 
 // Utility functions
+/**
+ * Displays an error message that auto-clears after 5 seconds
+ * @param {string} msg - The error message to display
+ * @return {void}
+ */
 function showError(msg: string) {
   errorDiv.textContent = msg;
   setTimeout(() => {
@@ -37,110 +34,250 @@ function showError(msg: string) {
   }, 5000);
 }
 
+/**
+ * Immediately clears any displayed error message
+ * @return {void}
+ */
 function clearError() {
   errorDiv.textContent = '';
 }
 
+/**
+ * Extracts error message from unknown error type
+ * @param {unknown} e - Error object or value of unknown type
+ * @return {string} Error message string or stringified value
+ */
 function getErrorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/**
+ * Updates the UI to reflect current collection selection state
+ * Shows/hides selection count and delete button based on selected items
+ * @return {void}
+ */
 function updateSelectionUI() {
   const count = selectedCollections.size;
   selectedCount.textContent = count > 0 ? `${count} selected` : '';
   deleteSelected.style.display = count > 0 ? 'block' : 'none';
 }
 
-function getCollectionName(name: string): string {
-  return name.trim().toLowerCase();
-}
-
 // API functions
+/**
+ * Fetches all collection names from the backend API
+ * @return {Promise<string[]>} Promise resolving to array of collection names
+ * @throws {Error} When API request fails or returns non-ok response
+ */
 async function fetchCollections(): Promise<string[]> {
-  // TODO: Fetch collections from API endpoint
-  // GET ${API_BASE}/collections
-  // Handle errors and return empty array on failure
-  return Promise.resolve([]);
+  try {
+    console.log('🔄 Fetching collections from API...');
+    const response = await fetch(`${API_BASE}/collections`);
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const collections = (await response.json()) as string[];
+    console.log('✅ Collections received:', collections);
+    return collections;
+  } catch (error) {
+    console.error('❌ Failed to fetch collections:', error);
+    throw error;
+  }
 }
 
+/**
+ * Creates a new collection via API and refreshes the collections list
+ * @param {string} name - Name of the collection to create
+ * @return {Promise<boolean>} Promise resolving to true if creation successful
+ * @throws {Error} When API request fails or collection name is invalid
+ */
 async function createCollection(name: string): Promise<boolean> {
-  console.log('Creating collection:', name);
-  // Mock implementation
-  allCollections.push(getCollectionName(name));
-  renderCollections(allCollections);
-  return Promise.resolve(true);
+  try {
+    console.log('🔧 Creating collection via API:', name);
+    const response = await fetch(`${API_BASE}/collections`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ name }),
+    });
+
+    if (!response.ok) {
+      const errorData = (await response.json()) as { message?: string };
+      throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const result = (await response.json()) as { success: boolean; name: string };
+    console.log('✅ Collection created:', result);
+
+    // Refresh the collections list after successful creation
+    await handleRefreshCollections();
+    return true;
+  } catch (error) {
+    console.error('❌ Failed to create collection:', error);
+    throw error;
+  }
 }
 
+/**
+ * Deletes multiple collections via API using parallel requests
+ * @param {string[]} names - Array of collection names to delete
+ * @return {Promise<boolean>} Promise resolving to true if all deletions successful
+ * @throws {Error} When any collection deletion fails
+ */
 async function deleteCollections(names: string[]): Promise<boolean> {
-  console.log('Deleting collections:', names);
-  // Mock implementation
-  names.forEach((name) => {
-    const index = allCollections.indexOf(name);
-    if (index > -1) allCollections.splice(index, 1);
-  });
-  selectedCollections.clear();
-  renderCollections(allCollections);
-  updateSelectionUI();
-  return Promise.resolve(true);
+  try {
+    console.log('🗑️ Deleting collections via API:', names);
+
+    // Delete each collection via API
+    const deletePromises = names.map(async (name) => {
+      const response = await fetch(`${API_BASE}/collections/${encodeURIComponent(name)}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        const errorData = (await response.json()) as { message?: string };
+        throw new Error(errorData.message || `Failed to delete collection ${name}: HTTP ${response.status}`);
+      }
+
+      return response.json() as Promise<{ success: boolean }>;
+    });
+
+    await Promise.all(deletePromises);
+    console.log('✅ All collections deleted successfully');
+
+    // Clear selection and refresh the collections list
+    selectedCollections.clear();
+    await handleRefreshCollections();
+    return true;
+  } catch (error) {
+    console.error('❌ Failed to delete collections:', error);
+    throw error;
+  }
 }
 
 // Rendering functions
+/**
+ * Renders the collections list in the UI with checkboxes and clickable names
+ * @param {string[]} collections - Array of collection names to render
+ * @return {void}
+ */
 function renderCollections(collections: string[]) {
   collectionsList.innerHTML = '';
 
   if (collections.length === 0) {
-    collectionsList.innerHTML = '<div style="color: var(--muted);">No collections found</div>';
+    collectionsList.innerHTML = '<div class="no-results">No collections found</div>';
     return;
   }
 
   collections.forEach((name) => {
     const item = document.createElement('div');
     item.className = 'collection-item';
-    item.innerHTML = `
-      <input type="checkbox" class="collection-checkbox" data-name="${name}">
-      <span class="collection-name">${name}</span>
-    `;
 
-    const checkbox = item.querySelector('.collection-checkbox') as HTMLInputElement;
-    const nameSpan = item.querySelector('.collection-name') as HTMLSpanElement;
-
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'collection-checkbox';
+    checkbox.checked = selectedCollections.has(name);
     checkbox.addEventListener('change', () => {
       toggleCollectionSelection(name, checkbox, item);
     });
 
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'collection-name';
+    nameSpan.textContent = name;
     nameSpan.addEventListener('click', () => {
-      selectCollection(name);
+      void selectCollection(name);
     });
 
+    item.appendChild(checkbox);
+    item.appendChild(nameSpan);
     collectionsList.appendChild(item);
   });
 }
 
-function selectCollection(name: string) {
-  console.log('Selecting collection:', name);
-  window.location.href = `documents.html?collection=${encodeURIComponent(name)}`;
+/**
+ * Selects a collection and navigates to documents page after verifying existence
+ * @param {string} name - Name of the collection to select
+ * @return {void}
+ * @throws {Error} Handled internally with fallback navigation to documents page
+ */
+async function selectCollection(name: string) {
+  try {
+    console.log('📂 Selecting collection via API:', name);
+
+    // First, verify the collection exists and optionally get document count
+    const response = await fetch(`${API_BASE}/collections/${encodeURIComponent(name)}/info`);
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        showError(`Collection '${name}' not found`);
+        return;
+      }
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const collectionInfo = (await response.json()) as {
+      name: string;
+      documentCount?: number;
+      exists: boolean;
+    };
+
+    if (collectionInfo.exists) {
+      console.log(`✅ Collection '${name}' exists with ${collectionInfo.documentCount || 0} documents`);
+      // Navigate to documents page with collection parameter
+      window.location.href = `documents.html?collection=${encodeURIComponent(name)}`;
+    } else {
+      showError(`Collection '${name}' does not exist`);
+    }
+  } catch (error) {
+    console.error('❌ Failed to select collection:', error);
+    // Fallback - still navigate to documents page
+    console.log('📄 Falling back to direct navigation');
+    window.location.href = `documents.html?collection=${encodeURIComponent(name)}`;
+  }
 }
 
-function toggleCollectionSelection(name: string, checkbox: HTMLElement, item: HTMLElement) {
-  const isChecked = (checkbox as HTMLInputElement).checked;
-
-  if (isChecked) {
+/**
+ * Toggles selection state for a collection and updates UI accordingly
+ * @param {string} name - Name of the collection to toggle
+ * @param {HTMLInputElement} checkbox - The checkbox element that was clicked
+ * @param {HTMLElement} item - The collection item container element
+ * @return {void}
+ */
+function toggleCollectionSelection(name: string, checkbox: HTMLInputElement, item: HTMLElement) {
+  if (checkbox.checked) {
     selectedCollections.add(name);
     item.classList.add('selected');
   } else {
     selectedCollections.delete(name);
     item.classList.remove('selected');
   }
-
   updateSelectionUI();
 }
 
 // Event handlers
+/**
+ * Handles refresh collections button click - loads collections from API and renders them
+ * @return {void}
+ * @throws {Error} Handled internally and displayed to user via showError
+ */
 async function handleRefreshCollections() {
-  // TODO: Refresh collections list
-  // Call fetchCollections() and renderCollections()
+  try {
+    clearError();
+    const collections = await fetchCollections();
+    allCollections = collections;
+    renderCollections(collections);
+  } catch (error) {
+    showError('Failed to refresh collections: ' + getErrorMessage(error));
+  }
 }
 
+/**
+ * Handles create collection form submission - validates input and creates collection via API
+ * @return {void}
+ * @throws {Error} Handled internally and displayed to user via showError
+ */
 async function handleCreateCollection() {
   const name = collectionNameInput.value.trim();
   if (!name) {
@@ -157,10 +294,15 @@ async function handleCreateCollection() {
       showError('Failed to create collection');
     }
   } catch (error) {
-    showError(getErrorMessage(error));
+    showError('Error creating collection: ' + getErrorMessage(error));
   }
 }
 
+/**
+ * Handles delete selected collections button click - deletes all selected collections via API
+ * @return {void}
+ * @throws {Error} Handled internally and displayed to user via showError
+ */
 async function handleDeleteSelected() {
   const selected = Array.from(selectedCollections);
   if (selected.length === 0) {
@@ -176,10 +318,14 @@ async function handleDeleteSelected() {
       showError('Failed to delete collections');
     }
   } catch (error) {
-    showError(getErrorMessage(error));
+    showError('Error deleting collections: ' + getErrorMessage(error));
   }
 }
 
+/**
+ * Handles search input changes - filters collections list based on search query
+ * @return {void}
+ */
 function handleSearchCollections() {
   const query = collectionSearch.value.toLowerCase();
   const filtered = allCollections.filter((name) => name.toLowerCase().includes(query));
@@ -187,31 +333,42 @@ function handleSearchCollections() {
 }
 
 // Event listeners
+// Refresh collections list when refresh button is clicked
 refreshCollections.addEventListener('click', () => {
   void handleRefreshCollections();
 });
+
+// Open create collection modal when create button is clicked
 createCollectionButton.addEventListener('click', () => {
   /* Modal will open automatically via HTML */
 });
+
+// Create new collection when modal confirm button is clicked
 confirmCreate.addEventListener('click', () => {
   void handleCreateCollection();
 });
+
+// Delete selected collections when modal confirm button is clicked
 confirmDelete.addEventListener('click', () => {
   void handleDeleteSelected();
 });
+
+// Filter collections list in real-time as user types in search box
 collectionSearch.addEventListener('input', () => {
-  void handleSearchCollections();
+  handleSearchCollections();
 });
 
-// Initialize page with demo data
+// Initialize page
 void (async () => {
   try {
-    const collections = await fetchCollections();
-    renderCollections(collections);
-  } catch (_error) {
-    console.log('API not available, using demo data');
-    // Demo collections
-    allCollections.push('Users', 'Orders', 'Products', 'Categories');
+    console.log('🚀 Initializing webclient...');
+    await handleRefreshCollections();
+  } catch (error) {
+    console.error('❌ Failed to initialize webclient:', error);
+    showError('Failed to load collections. Using offline mode.');
+
+    // Fallback to demo data
+    allCollections = ['users', 'sessions', 'products', 'orders'];
     renderCollections(allCollections);
   }
 })();

@@ -6,23 +6,10 @@
 const API_BASE = 'http://localhost:3000';
 
 // Types
-export interface User {
-  id: string;
-  username: string;
-  passwordHash: string;
-}
 
-export interface Session {
-  id: string;
-  userId: string;
-  createdAt: string;
-  expiresAt: string;
-}
-
-export interface RegisterRequest {
+export interface LoginRequest {
   username: string;
   password: string;
-  confirmPassword: string;
 }
 
 export interface SignupResponse {
@@ -40,20 +27,39 @@ const signupBtn = document.getElementById('signupBtn') as HTMLButtonElement;
 const errorDiv = document.getElementById('error') as HTMLDivElement;
 
 // Utility functions
+/**
+ * Displays an error message to the user in red text
+ * @param {string} message - The error message to display
+ * @return {void}
+ */
 function showError(message: string) {
   errorDiv.style.color = 'var(--error, #ef4444)';
   errorDiv.textContent = message;
 }
 
+/**
+ * Displays a success message to the user in green text
+ * @param {string} message - The success message to display
+ * @return {void}
+ */
 function showSuccess(message: string) {
   errorDiv.style.color = 'var(--success, #22c55e)';
   errorDiv.textContent = message;
 }
 
+/**
+ * Clears any displayed error or success message
+ * @return {void}
+ */
 function clearError() {
   errorDiv.innerHTML = '&nbsp;';
 }
 
+/**
+ * Validates username according to business rules
+ * @param {string} username - The username to validate
+ * @return {boolean} True if username is 3-20 chars and contains only letters, numbers, underscores
+ */
 export function isValidUsername(username: string): boolean {
   // Username validation: 3-20 characters, alphanumeric and underscore only
   if (!username || username.length < 3 || username.length > 20) {
@@ -64,6 +70,11 @@ export function isValidUsername(username: string): boolean {
   return /^[a-zA-Z0-9_]+$/.test(username);
 }
 
+/**
+ * Validates password according to security requirements
+ * @param {string} password - The password to validate
+ * @return {boolean} True if password is at least 8 chars with letters and numbers
+ */
 export function isValidPassword(password: string): boolean {
   // Password validation: minimum 8 characters with complexity requirements
   if (!password || password.length < 8) {
@@ -77,12 +88,21 @@ export function isValidPassword(password: string): boolean {
   return hasLetter && hasNumber;
 }
 
+/**
+ * Validates that all required signup form fields are filled
+ * @return {boolean} True if username, password, and confirm password fields are not empty
+ */
 function allRequiredFields(): boolean {
   return (usernameInput.value.trim() && passwordInput.value && confirmPasswordInput.value) !== '';
 }
 
-// API function to call signup endpoint
-async function signupUser(request: RegisterRequest): Promise<SignupResponse> {
+/**
+ * Calls the backend API to register a new user account
+ * @param {LoginRequest} request - Object containing username, password, confirmPassword
+ * @return {Promise<SignupResponse>} Promise resolving to signup result with success status and message
+ * @throws {Error} When API request fails or returns error response
+ */
+async function signupUser(request: LoginRequest): Promise<SignupResponse> {
   const response = await fetch(`${API_BASE}/auth/signup`, {
     method: 'POST',
     headers: {
@@ -100,7 +120,7 @@ async function signupUser(request: RegisterRequest): Promise<SignupResponse> {
   return data;
 }
 
-// Event handler
+// Handle signup form submission with validation and user registration
 signupForm.addEventListener('submit', (e) => {
   void (async () => {
     e.preventDefault();
@@ -141,7 +161,6 @@ signupForm.addEventListener('submit', (e) => {
       const result = await signupUser({
         username,
         password,
-        confirmPassword,
       });
 
       if (result.success) {

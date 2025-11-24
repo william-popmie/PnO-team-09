@@ -61,9 +61,7 @@ export class Database {
       const recordPosition = listBuffer.readUint32LE(i * 8 + 4);
       const recordBuffer = Buffer.allocUnsafe(recordSize);
       await this.file.read(recordBuffer, { position: recordPosition });
-      const decodedBuffer = this.encryptionService
-        ? this.encryptionService.decrypt(recordBuffer)
-        : recordBuffer;
+      const decodedBuffer = this.encryptionService ? this.encryptionService.decrypt(recordBuffer) : recordBuffer;
       const recordString = decodedBuffer.toString();
       result.push(JSON.parse(recordString));
     }
@@ -73,20 +71,18 @@ export class Database {
   async insertRecord(index: number, record: unknown) {
     assert(0 <= index && index <= this.recordsCount);
     const encodedRecord = Buffer.from(JSON.stringify(record));
-    
-    const recordToStore = this.encryptionService
-      ? this.encryptionService.encrypt(encodedRecord)
-      : encodedRecord;
-    
+
+    const recordToStore = this.encryptionService ? this.encryptionService.encrypt(encodedRecord) : encodedRecord;
+
     const recordPosition = await this.append(recordToStore);
-    
+
     const oldListBuffer = await this.getRecordsList();
     const newListBuffer = Buffer.allocUnsafe(oldListBuffer.length + 8);
     oldListBuffer.copy(newListBuffer, 0, 0, index * 8);
-    
+
     newListBuffer.writeUint32LE(recordToStore.length, index * 8);
     newListBuffer.writeUInt32LE(recordPosition, index * 8 + 4);
-    
+
     oldListBuffer.copy(newListBuffer, index * 8 + 8, index * 8, this.recordsCount * 8);
     const newRecordsListPosition = await this.append(newListBuffer);
     this.recordsCount++;

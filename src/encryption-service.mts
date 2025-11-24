@@ -50,10 +50,7 @@ export class EncryptionService {
     const cipher = crypto.createCipheriv(ALGORITHM, this.masterKey, iv);
 
     // Versleutel data
-    const encrypted = Buffer.concat([
-      cipher.update(data),
-      cipher.final(),
-    ]);
+    const encrypted = Buffer.concat([cipher.update(data), cipher.final()]);
 
     // Haal authenticatie tag op (prove integriteit)
     const authTag = cipher.getAuthTag();
@@ -79,10 +76,7 @@ export class EncryptionService {
 
     try {
       // Ontsleutel & verifieer authenticiteit
-      const decrypted = Buffer.concat([
-        decipher.update(ciphertext),
-        decipher.final(),
-      ]);
+      const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
       return decrypted;
     } catch (error) {
       throw new Error(`Decryption failed: ${(error as Error).message}`);

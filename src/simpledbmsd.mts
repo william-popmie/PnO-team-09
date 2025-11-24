@@ -514,6 +514,73 @@ app.post('/db/:collection/join', async (req, res) => {
   }
 });
 
+// ...existing code...
+
+/**
+ * @swagger
+ * /api/signup:
+ *   post:
+ *     summary: Register a new user
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               username:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *     responses:
+ *       201:
+ *         description: User created
+ *       400:
+ *         description: Invalid input or user already exists
+ */
+app.post('/api/signup', async (req, res) => {
+  try {
+    const { username, password } = req.body as { username?: string; password?: string };
+
+    // Validate input
+    if (!username || !password) {
+      res.status(400).json({ success: false, message: 'Username and password are required' });
+      return;
+    }
+
+    // Get users collection (this internally uses db.getCollection())
+    const usersCollection = await db.getCollection('users');
+
+    // Check if user already exists
+    const existingUsers = await usersCollection.find();
+    const userExists = existingUsers.some((user) => {
+      const userData = user as unknown as { username: string };
+      return userData.username.toLowerCase() === username.toLowerCase();
+    });
+
+    if (userExists) {
+      res.status(400).json({ success: false, message: 'Username already exists' });
+      return;
+    }
+
+    // Create new user (this internally calls collection.insert())
+    const newUser = await usersCollection.insert({
+      username,
+      password, // TODO: Hash this in production!
+      createdAt: new Date().toISOString(),
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'User created successfully',
+      userId: newUser.id,
+    });
+  } catch (error) {
+    console.error('Signup error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // Start server
 if (process.env['NODE_ENV'] !== 'test') {
   initDB()

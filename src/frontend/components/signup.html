@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sign Up - SimpleDBMS Team 9</title>
+    <link rel="stylesheet" href="../styles/styles.css" />
+  </head>
+  <body>
+    <div class="login-container">
+      <div class="card login-card">
+        <div class="login-header">
+          <div class="logo" style="margin: 0 auto 16px auto">DB9</div>
+          <h1>Create Account</h1>
+          <p class="lead">Join SimpleDBMS Team 9</p>
+        </div>
+
+        <form id="signupForm" class="login-form">
+          <div class="form-group">
+            <label for="username">Username</label>
+            <input id="username" type="text" placeholder="Enter your username" required />
+          </div>
+
+          <div class="form-group">
+            <label for="password">Password</label>
+            <input id="password" type="password" placeholder="Enter your password" required />
+          </div>
+
+          <div class="form-group">
+            <label for="confirmPassword">Confirm Password</label>
+            <input id="confirmPassword" type="password" placeholder="Enter your password again" required />
+          </div>
+
+          <div class="form-actions">
+            <button id="signupBtn" type="submit" class="btn btn-primary">Sign Up</button>
+          </div>
+
+          <div class="toggle-form">
+            <span>Already have an account?</span>
+            <a href="login.html" class="toggle-link">Return to Login</a>
+          </div>
+        </form>
+
+        <div class="spacer-md"></div>
+        <div id="error">&nbsp;</div>
+      </div>
+    </div>
+
+    <script>
+      // Simpele signup functionaliteit
+      document.getElementById('signupForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        const username = document.getElementById('username').value;
+        const password = document.getElementById('password').value;
+        const confirmPassword = document.getElementById('confirmPassword').value;
+        
+        // Basis validatie
+        if (!username || !password || !confirmPassword) {
+          document.getElementById('error').textContent = 'Vul alle velden in';
+          return;
+        }
+        
+        if (password !== confirmPassword) {
+          document.getElementById('error').textContent = 'Wachtwoorden komen niet overeen';
+          return;
+        }
+        
+        // Demo signup - accepteert alles
+        console.log('Signup poging:', username);
+        
+        // Sla gebruiker op
+        localStorage.setItem('currentUser', username);
+        localStorage.setItem('sessionToken', 'session_' + Date.now());
+        
+        // Direct doorsturen naar dashboard
+        window.location.href = 'simpledbmswebclient.html';
+      });
+    </script>
+  </body>
+</html>

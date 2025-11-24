@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SimpleDBMS Team 9</title>
+    <link rel="stylesheet" href="../styles/styles.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <div class="logo">DB9</div>
+        <div>
+          <h1>SimpleDBMS Team 9</h1>
+        </div>
+        <div class="header-user">
+          <span id="welcomeUser" class="welcome-text">Welcome, User</span>
+          <button id="logoutBtn" class="btn btn-ghost">Logout</button>
+        </div>
+      </header>
+
+      <div class="card">
+        <div class="collections-header">
+          <div class="meta"><h1>Collections Overview</h1></div>
+          <div class="header-buttons">
+            <span id="selectedCount" class="selected-count" style="display: none">0 selected</span>
+            <button id="deleteSelected" class="btn btn-ghost" style="display: none">Delete Selected</button>
+            <button id="refreshCollections" class="btn btn-ghost">Refresh</button>
+            <button id="createCollection" class="btn btn-primary">Create Collection</button>
+          </div>
+        </div>
+
+        <label for="collectionSearch">Search Collection</label>
+        <input id="collectionSearch" type="text" placeholder="Search a collection" />
+        <div class="spacer"></div>
+        <div id="collectionsList" class="listbox">
+          <!-- collections rendered here -->
+          <div style="color: var(--muted); font-size: 13px; padding: 6px">No collections loaded.</div>
+        </div>
+
+        <div class="spacer-md"></div>
+        <div class="meta">Errors</div>
+        <div id="error">&nbsp;</div>
+      </div>
+    </div>
+
+    <!-- Modal for creating collection -->
+    <div id="modalOverlay" class="modal-overlay">
+      <div class="modal-content">
+        <h2 class="modal-title">Create New Collection</h2>
+        <label for="collectionNameInput">Collection Name</label>
+        <input id="collectionNameInput" type="text" placeholder="Enter collection name" />
+        <div class="actions">
+          <button id="cancelCreate" class="btn btn-ghost">Cancel</button>
+          <button id="confirmCreate" class="btn btn-primary">Create</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // Check login status first
+      document.addEventListener('DOMContentLoaded', () => {
+        const loggedInUser = localStorage.getItem('currentUser');
+        const userSession = localStorage.getItem('sessionToken');
+        
+        if (!loggedInUser || !userSession) {
+          // Geen geldige sessie, terug naar login
+          window.location.href = 'login.html';
+          return;
+        }
+        
+        // Toon welkomstbericht
+        const welcomeText = document.querySelector('.welcome-text');
+        if (welcomeText) {
+          welcomeText.textContent = `Welkom, ${loggedInUser}!`;
+        }
+        
+        console.log('Dashboard geladen voor:', loggedInUser);
+        
+        // Modal functionality for create form
+        const createBtn = document.getElementById('createCollection');
+        const modalOverlay = document.getElementById('modalOverlay');
+        const cancelBtn = document.getElementById('cancelCreate');
+        const nameInput = document.getElementById('collectionNameInput');
+        const logoutBtn = document.getElementById('logoutBtn');
+        const welcomeUser = document.getElementById('welcomeUser');
+
+        // Check if user is logged in
+        const sessionToken = localStorage.getItem('sessionToken');
+        const username = localStorage.getItem('username');
+
+        if (!sessionToken || !username) {
+          // Not logged in, redirect to login
+          window.location.href = 'login.html';
+          return;
+        }
+
+        // Set welcome message
+        if (welcomeUser) {
+          welcomeUser.textContent = `Welcome, ${username}`;
+        }
+
+        // Logout functionality
+        logoutBtn?.addEventListener('click', () => {
+          localStorage.removeItem('sessionToken');
+          localStorage.removeItem('username');
+          window.location.href = 'login.html';
+        });
+
+        createBtn?.addEventListener('click', () => {
+          modalOverlay?.classList.add('show');
+          nameInput?.focus();
+        });
+
+        cancelBtn?.addEventListener('click', () => {
+          modalOverlay?.classList.remove('show');
+          if (nameInput) nameInput.value = '';
+        });
+
+        // Close modal when clicking overlay
+        modalOverlay?.addEventListener('click', (e) => {
+          if (e.target === modalOverlay) {
+            modalOverlay.classList.remove('show');
+            if (nameInput) nameInput.value = '';
+          }
+        });
+
+        // Close modal on Escape key
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape' && modalOverlay?.classList.contains('show')) {
+            modalOverlay.classList.remove('show');
+            if (nameInput) nameInput.value = '';
+          }
+        });
+      });
+    </script>
+  </body>
+</html>

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { FBChildCursor, FBNodeStorage } from './fb-node-storage.mjs';
 import { FreeBlockFile, NO_BLOCK } from '../freeblockfile.mjs';
-import { MockFile } from '../mockfile.mjs';
+import { MockFile } from '../file/mockfile.mjs';
 
 /**
  * Small TestAtomicFile wrapper used by FreeBlockFile in your test harness.

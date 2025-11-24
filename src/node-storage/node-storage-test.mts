@@ -3,7 +3,7 @@
 
 import { FBNodeStorage, FBInternalNode } from './fb-node-storage.mjs';
 import { FreeBlockFile, NO_BLOCK } from '../freeblockfile.mjs';
-import { MockFile } from '../mockfile.mjs';
+import { MockFile } from '../file/mockfile.mjs';
 
 class TestAtomicFile {
   file: MockFile;

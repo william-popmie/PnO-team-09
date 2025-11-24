@@ -5,7 +5,7 @@ import { BPlusTree } from './b-plus-tree.mjs';
 import { TrivialNodeStorage, TrivialLeafNode, TrivialInternalNode } from './node-storage/trivial-node-storage.mjs';
 import { FBNodeStorage, FBLeafNode, FBInternalNode } from './node-storage/fb-node-storage.mjs';
 import { FreeBlockFile } from './freeblockfile.mjs';
-import { MockFile } from './mockfile.mjs';
+import { MockFile } from './file/mockfile.mjs';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

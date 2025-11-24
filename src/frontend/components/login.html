@@ -41,30 +41,6 @@
       </div>
     </div>
 
-    <script>
-      // Simpele login functionaliteit
-      document.getElementById('authForm').addEventListener('submit', function(e) {
-        e.preventDefault();
-        
-        const username = document.getElementById('username').value;
-        const password = document.getElementById('password').value;
-        
-        // Basis validatie
-        if (!username || !password) {
-          document.getElementById('error').textContent = 'Vul alle velden in';
-          return;
-        }
-        
-        // Demo login - accepteert elke combinatie
-        console.log('Login poging:', username);
-        
-        // Sla gebruiker op in localStorage
-        localStorage.setItem('currentUser', username);
-        localStorage.setItem('sessionToken', 'session_' + Date.now());
-        
-        // Doorsturen naar dashboard
-        window.location.href = 'simpledbmswebclient.html';
-      });
-    </script>
+    <script src="../scripts/login.mjs"></script>
   </body>
 </html>

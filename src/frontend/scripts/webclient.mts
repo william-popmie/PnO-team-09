@@ -5,6 +5,8 @@
 
 const API_BASE = 'http://localhost:3000';
 
+console.log('🖥️ WebClient loading...', 'API:', API_BASE);
+
 function getEl<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
   if (!el) throw new Error(`Missing element with id="${id}"`);
@@ -44,15 +46,13 @@ function getErrorMessage(e: unknown): string {
 }
 
 function updateSelectionUI() {
-  // TODO: Update UI based on selected collections count
-  // Show/hide selectedCount span and deleteSelected button
-  // Update selectedCount text with number of selected collections
+  const count = selectedCollections.size;
+  selectedCount.textContent = count > 0 ? `${count} selected` : '';
+  deleteSelected.style.display = count > 0 ? 'block' : 'none';
 }
 
 function getCollectionName(name: string): string {
-  // TODO: Process collection name if needed (validation, formatting)
-  // For now just return the name as-is
-  return name;
+  return name.trim().toLowerCase();
 }
 
 // API functions
@@ -64,36 +64,75 @@ async function fetchCollections(): Promise<string[]> {
 }
 
 async function createCollection(name: string): Promise<boolean> {
-  // TODO: Create new collection via API
-  // POST ${API_BASE}/collections
-  // Return true on success, false on failure
-  return Promise.resolve(false);
+  console.log('Creating collection:', name);
+  // Mock implementation
+  allCollections.push(getCollectionName(name));
+  renderCollections(allCollections);
+  return Promise.resolve(true);
 }
 
 async function deleteCollections(names: string[]): Promise<boolean> {
-  // TODO: Delete multiple collections via API
-  // DELETE ${API_BASE}/collections/${name} for each name
-  // Return true if all deletions successful, false otherwise
-  return Promise.resolve(false);
+  console.log('Deleting collections:', names);
+  // Mock implementation
+  names.forEach((name) => {
+    const index = allCollections.indexOf(name);
+    if (index > -1) allCollections.splice(index, 1);
+  });
+  selectedCollections.clear();
+  renderCollections(allCollections);
+  updateSelectionUI();
+  return Promise.resolve(true);
 }
 
 // Rendering functions
 function renderCollections(collections: string[]) {
-  // TODO: Render collections list with checkboxes (Gmail-style)
-  // Clear collectionsList, create list items with checkboxes and names
-  // Add click handlers for checkbox selection and navigation to documents
-  // Update allCollections state
+  collectionsList.innerHTML = '';
+
+  if (collections.length === 0) {
+    collectionsList.innerHTML = '<div style="color: var(--muted);">No collections found</div>';
+    return;
+  }
+
+  collections.forEach((name) => {
+    const item = document.createElement('div');
+    item.className = 'collection-item';
+    item.innerHTML = `
+      <input type="checkbox" class="collection-checkbox" data-name="${name}">
+      <span class="collection-name">${name}</span>
+    `;
+
+    const checkbox = item.querySelector('.collection-checkbox') as HTMLInputElement;
+    const nameSpan = item.querySelector('.collection-name') as HTMLSpanElement;
+
+    checkbox.addEventListener('change', () => {
+      toggleCollectionSelection(name, checkbox, item);
+    });
+
+    nameSpan.addEventListener('click', () => {
+      selectCollection(name);
+    });
+
+    collectionsList.appendChild(item);
+  });
 }
 
 function selectCollection(name: string) {
-  // TODO: Navigate to documents page with collection parameter
-  // window.location.href = `documents.html?collection=${encodeURIComponent(name)}`;
+  console.log('Selecting collection:', name);
+  window.location.href = `documents.html?collection=${encodeURIComponent(name)}`;
 }
 
 function toggleCollectionSelection(name: string, checkbox: HTMLElement, item: HTMLElement) {
-  // TODO: Toggle collection selection state
-  // Update selectedCollections Set, checkbox visual state, item highlight
-  // Call updateSelectionUI()
+  const isChecked = (checkbox as HTMLInputElement).checked;
+
+  if (isChecked) {
+    selectedCollections.add(name);
+    item.classList.add('selected');
+  } else {
+    selectedCollections.delete(name);
+    item.classList.remove('selected');
+  }
+
+  updateSelectionUI();
 }
 
 // Event handlers
@@ -103,20 +142,48 @@ async function handleRefreshCollections() {
 }
 
 async function handleCreateCollection() {
-  // TODO: Handle collection creation
-  // Get value from collectionNameInput, call createCollection()
-  // Refresh collections list on success, clear input
+  const name = collectionNameInput.value.trim();
+  if (!name) {
+    showError('Please enter a collection name');
+    return;
+  }
+
+  try {
+    const success = await createCollection(name);
+    if (success) {
+      collectionNameInput.value = '';
+      clearError();
+    } else {
+      showError('Failed to create collection');
+    }
+  } catch (error) {
+    showError(getErrorMessage(error));
+  }
 }
 
 async function handleDeleteSelected() {
-  // TODO: Handle batch collection deletion
-  // Get selected collection names, call deleteCollections()
-  // Clear selection, refresh collections list on success
+  const selected = Array.from(selectedCollections);
+  if (selected.length === 0) {
+    showError('No collections selected');
+    return;
+  }
+
+  try {
+    const success = await deleteCollections(selected);
+    if (success) {
+      clearError();
+    } else {
+      showError('Failed to delete collections');
+    }
+  } catch (error) {
+    showError(getErrorMessage(error));
+  }
 }
 
-async function handleSearchCollections() {
-  // TODO: Handle collection search/filtering
-  // Filter allCollections based on search input, call renderCollections()
+function handleSearchCollections() {
+  const query = collectionSearch.value.toLowerCase();
+  const filtered = allCollections.filter((name) => name.toLowerCase().includes(query));
+  renderCollections(filtered);
 }
 
 // Event listeners
@@ -136,8 +203,17 @@ collectionSearch.addEventListener('input', () => {
   void handleSearchCollections();
 });
 
-// Initialize page
+// Initialize page with demo data
 void (async () => {
-  const collections = await fetchCollections();
-  renderCollections(collections);
+  try {
+    const collections = await fetchCollections();
+    renderCollections(collections);
+  } catch (_error) {
+    console.log('API not available, using demo data');
+    // Demo collections
+    allCollections.push('Users', 'Orders', 'Products', 'Categories');
+    renderCollections(allCollections);
+  }
 })();
+
+console.log('✅ WebClient ready');

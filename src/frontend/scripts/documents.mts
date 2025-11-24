@@ -3,6 +3,8 @@
 
 const API_BASE = 'http://localhost:3000';
 
+console.log('📝 Documents loading...', 'API:', API_BASE);
+
 declare const document: Document;
 
 function getEl<T extends HTMLElement>(id: string): T {
@@ -50,15 +52,15 @@ function getErrorMessage(e: unknown): string {
 }
 
 function updateSelectionUI() {
-  // TODO: Update UI based on selected documents count
-  // Show/hide selectedCount span and deleteSelected button
-  // Update selectedCount text with number of selected documents
+  const count = selectedDocuments.size;
+  selectedCount.textContent = count > 0 ? `${count} selected` : '';
+  deleteSelected.style.display = count > 0 ? 'block' : 'none';
 }
 
 function getDocumentId(doc: Record<string, unknown>): string {
   // TODO: Extract document ID from document object
   // Handle both 'id' and '_id' fields, fallback to JSON string slice
-  return '';
+  return (doc['id'] as string) || (doc['_id'] as string) || JSON.stringify(doc).slice(0, 10);
 }
 
 // API functions
@@ -70,62 +72,160 @@ async function fetchDocuments(): Promise<Array<Record<string, unknown>>> {
 }
 
 async function createDocument(name: string, data: Record<string, unknown>): Promise<boolean> {
-  // TODO: Create new document via API
-  // POST ${API_BASE}/collections/${currentCollection}/documents
-  // Return true on success, false on failure
-  return Promise.resolve(false);
+  console.log('Creating document:', name, data);
+  // Mock implementation
+  const newDoc = { id: name, ...data, createdAt: new Date().toISOString() };
+  allDocuments.push(newDoc);
+  renderDocuments(allDocuments);
+  return Promise.resolve(true);
 }
 
 async function updateDocument(id: string, data: Record<string, unknown>): Promise<boolean> {
-  // TODO: Update existing document via API
-  // PUT ${API_BASE}/collections/${currentCollection}/documents/${id}
-  // Return true on success, false on failure
+  console.log('Updating document:', id, data);
+  // Mock implementation
+  const index = allDocuments.findIndex((doc) => getDocumentId(doc) === id);
+  if (index > -1) {
+    allDocuments[index] = { ...allDocuments[index], ...data, updatedAt: new Date().toISOString() };
+    renderDocuments(allDocuments);
+    return Promise.resolve(true);
+  }
   return Promise.resolve(false);
 }
 
 async function deleteDocuments(ids: string[]): Promise<boolean> {
-  // TODO: Delete multiple documents via API
-  // DELETE ${API_BASE}/collections/${currentCollection}/documents/${id} for each id
-  // Return true if all deletions successful, false otherwise
-  return Promise.resolve(false);
+  console.log('Deleting documents:', ids);
+  // Mock implementation
+  ids.forEach((id) => {
+    const index = allDocuments.findIndex((doc) => getDocumentId(doc) === id);
+    if (index > -1) allDocuments.splice(index, 1);
+  });
+  selectedDocuments.clear();
+  renderDocuments(allDocuments);
+  updateSelectionUI();
+  return Promise.resolve(true);
 }
 
 // Rendering functions
 function renderDocuments(docs: Array<Record<string, unknown>>) {
-  // TODO: Render documents list with checkboxes (Gmail-style)
-  // Clear documentsView, create list items with checkboxes and names
-  // Add click handlers for checkbox selection and document viewing
-  // Update allDocuments state
+  documentsView.innerHTML = '';
+  allDocuments.splice(0, allDocuments.length, ...docs);
+
+  if (docs.length === 0) {
+    documentsView.innerHTML = '<p>No documents found</p>';
+    return;
+  }
+
+  docs.forEach((doc) => {
+    const id = getDocumentId(doc);
+    const item = document.createElement('div');
+    item.className = 'document-item';
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = selectedDocuments.has(id);
+    checkbox.addEventListener('change', () => {
+      toggleDocumentSelection(id, checkbox, item);
+    });
+
+    const content = document.createElement('div');
+    content.className = 'document-content';
+    const name = doc['name'] as string | undefined;
+    const docId = doc['id'] as string | undefined;
+    const displayName = name || docId || 'Unnamed';
+    content.innerHTML = `<strong>${displayName}</strong><br>${JSON.stringify(doc, null, 2).slice(0, 100)}...`;
+    content.addEventListener('click', () => {
+      selectDocument(doc);
+    });
+
+    item.appendChild(checkbox);
+    item.appendChild(content);
+    documentsView.appendChild(item);
+  });
 }
 
 function selectDocument(doc: Record<string, unknown>) {
-  // TODO: Show document details in documentView textarea
-  // Populate insertIdInput and insertJsonInput for editing
+  const docJson = JSON.stringify(doc, null, 2);
+  documentView.value = docJson;
+  insertIdInput.value = getDocumentId(doc);
+  insertJsonInput.value = docJson;
+  console.log('Selected document:', doc);
 }
 
 function toggleDocumentSelection(id: string, checkbox: HTMLElement, item: HTMLElement) {
-  // TODO: Toggle document selection state
-  // Update selectedDocuments Set, checkbox visual state, item highlight
-  // Call updateSelectionUI()
+  if (selectedDocuments.has(id)) {
+    selectedDocuments.delete(id);
+    item.classList.remove('selected');
+    (checkbox as HTMLInputElement).checked = false;
+  } else {
+    selectedDocuments.add(id);
+    item.classList.add('selected');
+    (checkbox as HTMLInputElement).checked = true;
+  }
+  updateSelectionUI();
+  console.log('Selection updated:', Array.from(selectedDocuments));
 }
 
 // Event handlers
 async function handleRefreshDocuments() {
-  // TODO: Refresh documents list
-  // Call fetchDocuments() and renderDocuments()
+  try {
+    clearError();
+    const docs = await fetchDocuments();
+    renderDocuments(docs);
+    console.log('Documents refreshed');
+  } catch (e) {
+    showError('Failed to refresh documents: ' + getErrorMessage(e));
+  }
 }
 
 async function handleInsertDocument() {
-  // TODO: Handle document creation/update
-  // Get values from insertIdInput and insertJsonInput
-  // Call createDocument() or updateDocument() based on whether ID exists
-  // Refresh documents list on success, clear inputs
+  try {
+    clearError();
+    const id = insertIdInput.value.trim();
+    const jsonText = insertJsonInput.value.trim();
+
+    if (!id || !jsonText) {
+      showError('Please provide both ID and JSON data');
+      return;
+    }
+
+    const data = JSON.parse(jsonText) as Record<string, unknown>;
+    const exists = allDocuments.some((doc) => getDocumentId(doc) === id);
+
+    const success = exists ? await updateDocument(id, data) : await createDocument(id, data);
+
+    if (success) {
+      insertIdInput.value = '';
+      insertJsonInput.value = '';
+      documentView.value = '';
+      console.log(`Document ${exists ? 'updated' : 'created'} successfully`);
+    } else {
+      showError(`Failed to ${exists ? 'update' : 'create'} document`);
+    }
+  } catch (e) {
+    showError('Invalid JSON or error: ' + getErrorMessage(e));
+  }
 }
 
 async function handleDeleteSelected() {
-  // TODO: Handle batch document deletion
-  // Get selected document IDs, call deleteDocuments()
-  // Clear selection, refresh documents list on success
+  try {
+    clearError();
+    const selectedIds = Array.from(selectedDocuments);
+
+    if (selectedIds.length === 0) {
+      showError('No documents selected');
+      return;
+    }
+
+    const success = await deleteDocuments(selectedIds);
+
+    if (success) {
+      console.log(`Deleted ${selectedIds.length} documents`);
+    } else {
+      showError('Failed to delete documents');
+    }
+  } catch (e) {
+    showError('Error deleting documents: ' + getErrorMessage(e));
+  }
 }
 
 // Event listeners

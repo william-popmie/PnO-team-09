@@ -2,7 +2,7 @@
 // @date 2025-11-15
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { MockFile } from '../mockfile.mjs';
+import { MockFile } from '../file/mockfile.mjs';
 import { WALManagerImpl } from './wal-manager.mjs';
 
 describe('AtomicFile + WALManager integration (concurrency safe skeleton)', () => {

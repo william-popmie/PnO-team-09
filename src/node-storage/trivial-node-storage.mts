@@ -1,5 +1,5 @@
 // @author Mathias Bouhon Keulen
-// @date 2025-11-05
+// @date 2025-11-13
 
 import type {
   NodeStorage,
@@ -8,7 +8,7 @@ import type {
   InternalNodeStorage,
   LeafCursor,
   ChildCursor,
-} from './node-storage.mts';
+} from './node-storage.mjs';
 
 /**
  * TrivialNodeStorage is a simple in-memory implementation of the NodeStorage interface.
@@ -33,15 +33,15 @@ export class TrivialNodeStorage<KeysType, ValuesType>
     return Promise.resolve(this.createLeaf());
   }
 
-  createLeaf(): TrivialLeafNode<KeysType, ValuesType> {
-    return new TrivialLeafNode(this);
+  async createLeaf(): Promise<TrivialLeafNode<KeysType, ValuesType>> {
+    return Promise.resolve(new TrivialLeafNode(this));
   }
 
-  createInternalNode(
+  async createInternalNode(
     children: (TrivialLeafNode<KeysType, ValuesType> | TrivialInternalNode<KeysType, ValuesType>)[],
     keys: KeysType[],
-  ): TrivialInternalNode<KeysType, ValuesType> {
-    return new TrivialInternalNode(this, children, keys);
+  ): Promise<TrivialInternalNode<KeysType, ValuesType>> {
+    return Promise.resolve(new TrivialInternalNode(this, children, keys));
   }
 
   async allocateInternalNodeStorage(
@@ -82,10 +82,12 @@ export abstract class TrivialNodeBase<KeysType, ValuesType>
     return false;
   }
 
-  mergeWithNext(
+  async mergeWithNext(
     _key: KeysType,
     _nextNode: TrivialLeafNode<KeysType, ValuesType> | TrivialInternalNode<KeysType, ValuesType>,
-  ): void {}
+  ): Promise<void> {
+    return Promise.resolve();
+  }
 }
 
 /**
@@ -109,6 +111,7 @@ export class TrivialLeafNode<KeysType, ValuesType>
   values: ValuesType[] = [];
 
   nextLeaf: TrivialLeafNode<KeysType, ValuesType> | null = null;
+  prevLeaf: TrivialLeafNode<KeysType, ValuesType> | null = null;
 
   constructor(storage: TrivialNodeStorage<KeysType, ValuesType>) {
     super(storage);
@@ -129,6 +132,10 @@ export class TrivialLeafNode<KeysType, ValuesType>
     return Promise.resolve(this.nextLeaf);
   }
 
+  async getPrevLeaf(): Promise<TrivialLeafNode<KeysType, ValuesType> | null> {
+    return Promise.resolve(this.prevLeaf);
+  }
+
   override canMergeWithNext(
     _key: KeysType,
     _nextNode: TrivialLeafNode<KeysType, ValuesType> | TrivialInternalNode<KeysType, ValuesType>,
@@ -136,14 +143,21 @@ export class TrivialLeafNode<KeysType, ValuesType>
     return this.keys.length + (_nextNode.isLeaf ? _nextNode.keys.length : 0) <= Number.MAX_SAFE_INTEGER;
   }
 
-  override mergeWithNext(
+  override async mergeWithNext(
     _key: KeysType,
     nextNode: TrivialLeafNode<KeysType, ValuesType> | TrivialInternalNode<KeysType, ValuesType>,
-  ): void {
+  ): Promise<void> {
+    await Promise.resolve();
     if (nextNode.isLeaf) {
       this.keys.push(...nextNode.keys);
       this.values.push(...nextNode.values);
-      this.nextLeaf = nextNode.nextLeaf;
+
+      const successor = nextNode.nextLeaf ?? null;
+      this.nextLeaf = successor;
+
+      if (successor) {
+        successor.prevLeaf = this;
+      }
     }
   }
 }
@@ -237,10 +251,11 @@ export class TrivialInternalNode<KeysType, ValuesType>
     return this.keys.length + (_nextNode.isLeaf ? 0 : _nextNode.keys.length) <= Number.MAX_SAFE_INTEGER;
   }
 
-  override mergeWithNext(
+  override async mergeWithNext(
     key: KeysType,
     nextNode: TrivialLeafNode<KeysType, ValuesType> | TrivialInternalNode<KeysType, ValuesType>,
-  ): void {
+  ): Promise<void> {
+    await Promise.resolve();
     if (!nextNode.isLeaf) {
       this.keys.push(key, ...nextNode.keys);
       this.children.push(...nextNode.children);

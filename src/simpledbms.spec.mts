@@ -1,4 +1,4 @@
-// @author MaartenHaine
+// @author MaartenHaine, Jari Daemen
 // @date 2025-11-22
 
 import { describe, it, expect, beforeEach } from 'vitest';

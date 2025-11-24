@@ -1,4 +1,4 @@
-// @author MaartenHaine
+// @author MaartenHaine, Jari Daemen
 // used Claude for debugging
 // @date 2025-11-22
 

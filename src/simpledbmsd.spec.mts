@@ -1,4 +1,4 @@
-// @author MaartenHaine
+// @author MaartenHaine, Jari Daemen
 // @date 2025-11-22
 
 import request from 'supertest';

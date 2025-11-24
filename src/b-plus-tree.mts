@@ -1,7 +1,7 @@
 // @author Mathias Bouhon Keulen, Frederick Hillen
 // @date 2025-11-10
 
-import type { NodeStorage, LeafNodeStorage, InternalNodeStorage } from './node-storage.mjs';
+import type { NodeStorage, LeafNodeStorage, InternalNodeStorage } from './node-storage/node-storage.mjs';
 
 /**
  * A B+ tree implementation.
@@ -50,6 +50,24 @@ export class BPlusTree<
   }
 
   /**
+   * Loads the B+ tree from an existing root node.
+   *
+   * @param {LeafNodeStorageType | InternalNodeStorageType} root - The root node to load.
+   */
+  load(root: LeafNodeStorageType | InternalNodeStorageType): void {
+    this.root = root;
+  }
+
+  /**
+   * Gets the current root node of the B+ tree.
+   *
+   * @returns {LeafNodeStorageType | InternalNodeStorageType} The root node.
+   */
+  getRoot(): LeafNodeStorageType | InternalNodeStorageType {
+    return this.root;
+  }
+
+  /**
    * Inserts a key-value pair into the B+ tree.
    *
    * @param {KeysType} key - The key to insert.
@@ -57,13 +75,21 @@ export class BPlusTree<
    * @returns {Promise<void>} A promise that resolves when the insertion is complete.
    */
   async insert(key: KeysType, value: ValuesType): Promise<void> {
-    const leaf = await this.findLeaf(key);
+    const { leaf, parents, parentIndices } = await this.findLeafWithPath(key);
+
     await this.insertInLeaf(leaf, key, value);
 
     if (leaf.keys.length > this.order) {
-      const redistributed = await this.tryRedistributeLeafBeforeSplit(leaf);
+      const parent = parents.length > 0 ? parents[parents.length - 1] : null;
+      const idx = parentIndices.length > 0 ? parentIndices[parentIndices.length - 1] : -1;
+
+      const redistributed = await this.tryRedistributeLeafBeforeSplit(
+        leaf,
+        parent ?? undefined,
+        idx >= 0 ? idx : undefined,
+      );
       if (!redistributed) {
-        await this.splitLeaf(leaf);
+        await this.splitLeaf(leaf, parents, parentIndices);
       }
     }
   }
@@ -91,7 +117,8 @@ export class BPlusTree<
    * @returns {Promise<void>} A promise that resolves when the deletion is complete.
    */
   async delete(key: KeysType): Promise<void> {
-    const leaf = await this.findLeaf(key);
+    const { leaf, parents, parentIndices } = await this.findLeafWithPath(key);
+
     const { cursor, isAtKey } = await leaf.getCursorBeforeKey(key);
     if (!isAtKey) return;
 
@@ -101,13 +128,13 @@ export class BPlusTree<
 
     if (leaf === this.root) {
       if (leaf.keys.length === 0) {
-        this.root = this.storage.createLeaf();
+        this.root = await this.storage.createLeaf();
       }
       return;
     }
 
     if (leaf.keys.length < minKeys) {
-      await this.handleUnderflow(leaf);
+      await this.handleUnderflow(leaf, parents, parentIndices);
     }
   }
 
@@ -274,6 +301,26 @@ export class BPlusTree<
   }
 
   /**
+   * Returns an async generator that yields all key-value pairs in the B+ tree in reverse order.
+   *
+   * @returns {AsyncGenerator<{ key: KeysType; value: ValuesType }, void, unknown>} An async generator yielding key-value pairs in reverse order.
+   */
+  public async *reverseEntries(): AsyncGenerator<{ key: KeysType; value: ValuesType }, void, unknown> {
+    if (!this.root) return;
+    let leaf = await this.getRightmostLeaf();
+    while (leaf) {
+      for (let i = leaf.keys.length - 1; i >= 0; i--) {
+        yield { key: leaf.keys[i], value: leaf.values[i] };
+      }
+      if (leaf.prevLeaf) {
+        leaf = leaf.prevLeaf;
+      } else {
+        break;
+      }
+    }
+  }
+
+  /**
    * Returns an async iterator that yields all key-value pairs in the B+ tree in order.
    *
    * @returns {AsyncGenerator<{ key: KeysType; value: ValuesType }, void, unknown>} An async generator yielding key-value pairs.
@@ -405,19 +452,59 @@ export class BPlusTree<
   }
 
   /**
+   * Retrieves the rightmost leaf node of the B+ tree.
+   *
+   * @returns {Promise<LeafNodeStorageType>} A promise that resolves to the rightmost leaf node.
+   * @throws {Error} If the tree is not initialized.
+   */
+  private async getRightmostLeaf(): Promise<LeafNodeStorageType> {
+    if (!this.root) throw new Error('Tree is not initialized');
+    let node: LeafNodeStorageType | InternalNodeStorageType = this.root;
+    while (!node.isLeaf) {
+      const internal = node;
+      node = internal.children[internal.children.length - 1];
+    }
+    return Promise.resolve(node);
+  }
+
+  /**
    * Handles underflow in a node by borrowing or merging with siblings.
    *
+   * Accepts optional parent stack (parents from root..parent and parentIndices) to avoid repeated findParent calls.
+   *
    * @param {LeafNodeStorageType | InternalNodeStorageType} node - The node that is underflowing.
+   * @param {InternalNodeStorageType[] | undefined} parents - Optional parent stack (root..parent of node).
+   * @param {number[] | undefined} parentIndices - Optional indices for each parent in the stack.
    * @returns {Promise<void>} A promise that resolves when the underflow is handled.
    * @throws {Error} If the parent does not contain the node in its children.
    */
-  private async handleUnderflow(node: LeafNodeStorageType | InternalNodeStorageType): Promise<void> {
-    const parent = await this.findParent(node);
+  private async handleUnderflow(
+    node: LeafNodeStorageType | InternalNodeStorageType,
+    parents?: InternalNodeStorageType[],
+    parentIndices?: number[],
+  ): Promise<void> {
+    let parent: InternalNodeStorageType | undefined;
+    if (parents && parents.length > 0) {
+      parent = parents[parents.length - 1];
+    } else {
+      parent = await this.findParent(node);
+    }
+
     if (!parent) {
       return;
     }
 
-    const index = parent.children.indexOf(node);
+    let index: number;
+    if (parentIndices && parentIndices.length > 0) {
+      const stackIdx = parentIndices[parentIndices.length - 1];
+      if (stackIdx >= 0 && parent.children[stackIdx] === node) {
+        index = stackIdx;
+      } else {
+        index = parent.children.indexOf(node);
+      }
+    } else {
+      index = parent.children.indexOf(node);
+    }
     if (index === -1) throw new Error('Parent does not contain node in children');
 
     const leftSibling = index > 0 ? parent.children[index - 1] : null;
@@ -467,12 +554,12 @@ export class BPlusTree<
 
     if (leftSibling) {
       const separatorKey = parent.keys[index - 1];
-      leftSibling.mergeWithNext(separatorKey, node);
+      await leftSibling.mergeWithNext(separatorKey, node);
       parent.keys.splice(index - 1, 1);
       parent.children.splice(index, 1);
     } else if (rightSibling) {
       const separatorKey = parent.keys[index];
-      node.mergeWithNext(separatorKey, rightSibling);
+      await node.mergeWithNext(separatorKey, rightSibling);
       parent.keys.splice(index, 1);
       parent.children.splice(index + 1, 1);
     }
@@ -485,40 +572,76 @@ export class BPlusTree<
     }
 
     if (parent.keys.length < minKeys) {
-      await this.handleUnderflow(parent);
+      if (parents && parents.length > 0) {
+        const parentsUp = parents.slice(0, -1);
+        const parentIndicesUp = parentIndices ? parentIndices.slice(0, -1) : undefined;
+        await this.handleUnderflow(parent, parentsUp, parentIndicesUp);
+      } else {
+        await this.handleUnderflow(parent);
+      }
     }
   }
 
   /**
    * Finds the leaf node that should contain the specified key.
    *
+   * This function is kept for simple calls, but the preferred fast variant returning the parent path
+   * is findLeafWithPath (used on insert to avoid repeated parent searches).
+   *
    * @param {KeysType} key - The key to find the leaf for.
    * @returns {Promise<LeafNodeStorageType>} A promise that resolves to the leaf node.
    * @throws {Error} If the child node cannot be found while descending.
    */
   private async findLeaf(key: KeysType): Promise<LeafNodeStorageType> {
+    const { leaf } = await this.findLeafWithPath(key);
+    return leaf;
+  }
+
+  /**
+   * Finds the leaf node and returns the path (parents and indices) from the root to that leaf.
+   *
+   * This avoids calling findParent repeatedly. Each parent in `parents` corresponds to the index
+   * in `parentIndices` for the child used to descend.
+   */
+  private async findLeafWithPath(key: KeysType): Promise<{
+    leaf: LeafNodeStorageType;
+    parents: InternalNodeStorageType[];
+    parentIndices: number[];
+  }> {
+    if (!this.root) throw new Error('Tree is not initialized');
+    const parents: InternalNodeStorageType[] = [];
+    const parentIndices: number[] = [];
+
     let node: LeafNodeStorageType | InternalNodeStorageType = this.root;
     while (!node.isLeaf) {
       const internal = node;
       const { cursor } = await internal.getChildCursorAtKey(key);
       const child = await cursor.getChild();
       if (!child) throw new Error('Child not found while descending');
+
+      const idx = internal.children.indexOf(child);
+      parents.push(internal);
+      parentIndices.push(idx);
+
       node = child;
     }
-    return node;
+
+    return { leaf: node, parents, parentIndices };
   }
 
   /**
    * Finds the parent of a given node.
    *
+   * Kept as a fallback for places that don't have the path handy; avoid calling this from hot paths.
+   *
    * @param {LeafNodeStorageType | InternalNodeStorageType} child - The child node whose parent is to be found.
-   * @returns {Promise<InternalNodeStorageType | null>} A promise that resolves to the parent node, or null if the child is the root.
+   * @returns {Promise<InternalNodeStorageType | undefined>} A promise that resolves to the parent node, or null if the child is the root.
    */
   private async findParent(
     child: LeafNodeStorageType | InternalNodeStorageType,
-  ): Promise<InternalNodeStorageType | null> {
-    if (child === this.root) return null;
-    if (this.root.isLeaf) return null;
+  ): Promise<InternalNodeStorageType | undefined> {
+    if (child === this.root) return undefined;
+    if (this.root.isLeaf) return undefined;
     return this.findParentRecursive(this.root, child);
   }
 
@@ -527,12 +650,12 @@ export class BPlusTree<
    *
    * @param {InternalNodeStorageType} node - The current node to search from.
    * @param {LeafNodeStorageType | InternalNodeStorageType} child - The child node whose parent is to be found.
-   * @returns {Promise<InternalNodeStorageType | null>} A promise that resolves to the parent node, or null if not found.
+   * @returns {Promise<InternalNodeStorageType | undefined>} A promise that resolves to the parent node, or undefined if not found.
    */
   private async findParentRecursive(
     node: InternalNodeStorageType,
     child: LeafNodeStorageType | InternalNodeStorageType,
-  ): Promise<InternalNodeStorageType | null> {
+  ): Promise<InternalNodeStorageType | undefined> {
     const cursor = await node.getChildCursorAtFirstChild();
 
     // eslint-disable-next-line @typescript-eslint/prefer-for-of
@@ -547,7 +670,7 @@ export class BPlusTree<
       }
       cursor.moveNext();
     }
-    return null;
+    return undefined;
   }
 
   /**
@@ -568,25 +691,42 @@ export class BPlusTree<
    * Attempt to redistribute keys from an overfull leaf into an adjacent sibling
    * so we can avoid splitting the leaf. Returns true when redistribution happened.
    *
+   * Accepts an optional parent and index (index of leaf inside parent.children) to avoid a findParent call.
+   *
    * @param {LeafNodeStorageType} leaf - The leaf node to redistribute from.
+   * @param {InternalNodeStorageType | undefined} parent - Optional parent of the leaf.
+   * @param {number | undefined} idx - Optional index of the leaf inside parent's children.
    * @returns {Promise<boolean>} A promise that resolves to true if redistribution occurred, false otherwise.
    */
-  private async tryRedistributeLeafBeforeSplit(leaf: LeafNodeStorageType): Promise<boolean> {
-    const parent = await this.findParent(leaf);
-    if (!parent) return false;
+  private async tryRedistributeLeafBeforeSplit(
+    leaf: LeafNodeStorageType,
+    parent?: InternalNodeStorageType,
+    idx?: number,
+  ): Promise<boolean> {
+    if (!parent) {
+      parent = await this.findParent(leaf);
+      if (!parent) return false;
+      idx = parent.children.indexOf(leaf);
+      if (idx === -1) throw new Error('Parent does not contain leaf in children');
+    } else {
+      if (idx === undefined) {
+        idx = parent.children.indexOf(leaf);
+        if (idx === -1) throw new Error('Parent does not contain leaf in children');
+      }
+    }
 
-    const idx = parent.children.indexOf(leaf);
-    if (idx === -1) throw new Error('Parent does not contain leaf in children');
+    const childIndex = idx;
 
-    const left = idx > 0 ? (parent.children[idx - 1] as LeafNodeStorageType) : null;
-    const right = idx < parent.children.length - 1 ? (parent.children[idx + 1] as LeafNodeStorageType) : null;
+    const left = childIndex > 0 ? (parent.children[childIndex - 1] as LeafNodeStorageType) : null;
+    const right =
+      childIndex < parent.children.length - 1 ? (parent.children[childIndex + 1] as LeafNodeStorageType) : null;
 
     if (left && left.keys.length < this.order) {
       const movedKey = leaf.keys.shift() as KeysType;
       const movedVal = leaf.values.shift() as ValuesType;
       left.keys.push(movedKey);
       left.values.push(movedVal);
-      parent.keys[idx - 1] = leaf.keys[0];
+      parent.keys[childIndex - 1] = leaf.keys[0];
       return true;
     }
 
@@ -595,7 +735,7 @@ export class BPlusTree<
       const movedVal = leaf.values.pop() as ValuesType;
       right.keys.unshift(movedKey);
       right.values.unshift(movedVal);
-      parent.keys[idx] = right.keys[0];
+      parent.keys[childIndex] = right.keys[0];
       return true;
     }
 
@@ -605,36 +745,67 @@ export class BPlusTree<
   /**
    * Splits a leaf node that has exceeded the maximum number of keys.
    *
+   * Accepts optional parent stack (parents, parentIndices) to avoid repeated findParent calls.
+   *
    * @param {LeafNodeStorageType} leaf - The leaf node to split.
+   * @param {InternalNodeStorageType[] | undefined} parents - Optional parent stack (root..parent).
+   * @param {number[] | undefined} parentIndices - Optional indices for each parent.
    * @returns {Promise<void>} A promise that resolves when the split is complete.
    */
-  private async splitLeaf(leaf: LeafNodeStorageType): Promise<void> {
+  private async splitLeaf(
+    leaf: LeafNodeStorageType,
+    parents?: InternalNodeStorageType[],
+    parentIndices?: number[],
+  ): Promise<void> {
     const mid = Math.ceil(leaf.keys.length / 2);
-    const newLeaf = this.storage.createLeaf();
+    const newLeaf = await this.storage.createLeaf();
 
     newLeaf.keys = leaf.keys.splice(mid);
     newLeaf.values = leaf.values.splice(mid);
 
     newLeaf.nextLeaf = leaf.nextLeaf;
+    newLeaf.prevLeaf = leaf;
     leaf.nextLeaf = newLeaf;
 
+    if (newLeaf.nextLeaf) {
+      newLeaf.nextLeaf.prevLeaf = newLeaf;
+    }
+
     const promotedKey = newLeaf.keys[0];
-    await this.insertInParent(leaf, promotedKey, newLeaf);
+
+    const parent = parents && parents.length > 0 ? parents[parents.length - 1] : undefined;
+    const idx = parentIndices && parentIndices.length > 0 ? parentIndices[parentIndices.length - 1] : undefined;
+
+    await this.insertInParent(leaf, promotedKey, newLeaf, parent, idx);
   }
 
   /**
    * Attempt to redistribute children from an overfull internal node into an adjacent sibling
    * so we can avoid splitting the internal node. Returns true when redistribution happened.
    *
+   * This function still uses findParent if parent is not provided.
+   *
    * @param {InternalNodeStorageType} internal - The internal node to redistribute from.
+   * @param {InternalNodeStorageType | undefined} parent - Optional parent of `internal`.
+   * @param {number | undefined} idx - Optional index of `internal` in parent's children.
    * @returns {Promise<boolean>} A promise that resolves to true if redistribution occurred, false otherwise.
    */
-  private async tryRedistributeInternalBeforeSplit(internal: InternalNodeStorageType): Promise<boolean> {
-    const parent = await this.findParent(internal);
-    if (!parent) return false;
-
-    const idx = parent.children.indexOf(internal);
-    if (idx === -1) throw new Error('Parent does not contain internal node in children');
+  private async tryRedistributeInternalBeforeSplit(
+    internal: InternalNodeStorageType,
+    parent?: InternalNodeStorageType,
+    idx?: number,
+  ): Promise<boolean> {
+    if (!parent) {
+      parent = await this.findParent(internal);
+      if (!parent) return false;
+      idx = parent.children.indexOf(internal);
+      if (idx === -1) throw new Error('Parent does not contain internal node in children');
+    } else {
+      if (idx === undefined) {
+        idx = parent.children.indexOf(internal);
+        if (idx === -1) throw new Error('Parent does not contain internal node in children');
+      }
+    }
 
     const left = idx > 0 ? (parent.children[idx - 1] as InternalNodeStorageType) : null;
     const right = idx < parent.children.length - 1 ? (parent.children[idx + 1] as InternalNodeStorageType) : null;
@@ -684,7 +855,7 @@ export class BPlusTree<
     internal.keys = leftKeys;
     internal.children = leftChildren;
 
-    const newInternal = this.storage.createInternalNode(rightChildren, rightKeys);
+    const newInternal = await this.storage.createInternalNode(rightChildren, rightKeys);
 
     await this.insertInParent(internal, promotedKey, newInternal);
   }
@@ -692,9 +863,13 @@ export class BPlusTree<
   /**
    * Inserts a promoted key and new node into the parent of a given node.
    *
+   * Accepts optional parent and idx so callers that already have the parent/path don't need to call findParent.
+   *
    * @param {LeafNodeStorageType | InternalNodeStorageType} node - The node whose parent will receive the promoted key and new node.
    * @param {KeysType} promotedKey - The key to promote to the parent.
    * @param {LeafNodeStorageType | InternalNodeStorageType} newNode - The new node to insert into the parent.
+   * @param {InternalNodeStorageType | undefined} parent - Optional parent of node.
+   * @param {number | undefined} idx - Optional index of node in parent.children.
    * @returns {Promise<void>} A promise that resolves when the insertion is complete.
    * @throws {Error} If the parent node cannot be found.
    * @throws {Error} If the parent does not contain the node as a child.
@@ -703,21 +878,31 @@ export class BPlusTree<
     node: LeafNodeStorageType | InternalNodeStorageType,
     promotedKey: KeysType,
     newNode: LeafNodeStorageType | InternalNodeStorageType,
+    parent?: InternalNodeStorageType,
+    idx?: number,
   ): Promise<void> {
     if (node === this.root) {
-      const newRoot = this.storage.createInternalNode([node, newNode], [promotedKey]);
+      const newRoot = await this.storage.createInternalNode([node, newNode], [promotedKey]);
       this.root = newRoot;
       return;
     }
 
-    const parent = await this.findParent(node);
-    if (!parent) throw new Error('Parent not found while inserting in parent');
+    if (!parent) {
+      parent = await this.findParent(node);
+      if (!parent) throw new Error('Parent not found while inserting in parent');
+      idx = parent.children.indexOf(node);
+      if (idx === -1) throw new Error('Parent does not contain node as child');
+    } else {
+      if (idx === undefined) {
+        idx = parent.children.indexOf(node);
+        if (idx === -1) throw new Error('Parent does not contain node as child');
+      }
+    }
 
-    const idx = parent.children.indexOf(node);
-    if (idx === -1) throw new Error('Parent does not contain node as child');
+    const childIndex = idx;
 
-    parent.keys.splice(idx, 0, promotedKey);
-    parent.children.splice(idx + 1, 0, newNode);
+    parent.keys.splice(childIndex, 0, promotedKey);
+    parent.children.splice(childIndex + 1, 0, newNode);
 
     if (parent.keys.length > this.order) {
       await this.splitInternalNode(parent);

@@ -1,5 +1,5 @@
 // @author Mathias Bouhon Keulen
-// @date 2025-11-05
+// @date 2025-11-13
 
 /**
  * NodeStorage defines the abstraction for storage and management of nodes in a tree structure.
@@ -26,11 +26,11 @@ export interface NodeStorage<
   readonly keySize: (key: KeysType) => number;
   getMaxKeySize(): number;
   createTree(): Promise<LeafNodeStorageType>;
-  createLeaf(): LeafNodeStorageType;
+  createLeaf(): Promise<LeafNodeStorageType>;
   createInternalNode(
     children: (LeafNodeStorageType | InternalNodeStorageType)[],
     keys: KeysType[],
-  ): InternalNodeStorageType;
+  ): Promise<InternalNodeStorageType>;
 
   allocateInternalNodeStorage(
     children: (LeafNodeStorageType | InternalNodeStorageType)[],
@@ -60,7 +60,7 @@ export interface NodeBaseStorage<
 > {
   readonly isLeaf: boolean;
   canMergeWithNext(key: KeysType, nextNode: LeafNodeStorageType | InternalNodeStorageType): boolean;
-  mergeWithNext(key: KeysType, nextNode: LeafNodeStorageType | InternalNodeStorageType): void;
+  mergeWithNext(key: KeysType, nextNode: LeafNodeStorageType | InternalNodeStorageType): Promise<void>;
 }
 
 /**
@@ -87,6 +87,7 @@ export interface LeafNodeStorage<
   keys: KeysType[];
   values: ValuesType[];
   nextLeaf: leafNodeStorageType | null;
+  prevLeaf: leafNodeStorageType | null;
 
   getCursorBeforeFirst(): LeafCursor<KeysType, ValuesType, leafNodeStorageType, InternalNodeStorageType>;
   getCursorBeforeKey(key: KeysType):
@@ -97,6 +98,7 @@ export interface LeafNodeStorage<
       }>;
 
   getNextLeaf(): Promise<LeafNodeStorage<KeysType, ValuesType, leafNodeStorageType, InternalNodeStorageType> | null>;
+  getPrevLeaf(): Promise<LeafNodeStorage<KeysType, ValuesType, leafNodeStorageType, InternalNodeStorageType> | null>;
 }
 
 /**

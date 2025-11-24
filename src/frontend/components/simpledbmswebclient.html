@@ -57,27 +57,11 @@
       </div>
     </div>
 
+    <!-- Module handles UI interactions; remove inline demo script to avoid accidental document loading -->
+    <script src="../scripts/webclient.mjs" defer></script>
     <script>
-      // Check login status first
+      // Modal functionality for create form
       document.addEventListener('DOMContentLoaded', () => {
-        const loggedInUser = localStorage.getItem('currentUser');
-        const userSession = localStorage.getItem('sessionToken');
-        
-        if (!loggedInUser || !userSession) {
-          // Geen geldige sessie, terug naar login
-          window.location.href = 'login.html';
-          return;
-        }
-        
-        // Toon welkomstbericht
-        const welcomeText = document.querySelector('.welcome-text');
-        if (welcomeText) {
-          welcomeText.textContent = `Welkom, ${loggedInUser}!`;
-        }
-        
-        console.log('Dashboard geladen voor:', loggedInUser);
-        
-        // Modal functionality for create form
         const createBtn = document.getElementById('createCollection');
         const modalOverlay = document.getElementById('modalOverlay');
         const cancelBtn = document.getElementById('cancelCreate');

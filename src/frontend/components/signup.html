@@ -46,36 +46,6 @@
       </div>
     </div>
 
-    <script>
-      // Simpele signup functionaliteit
-      document.getElementById('signupForm').addEventListener('submit', function(e) {
-        e.preventDefault();
-        
-        const username = document.getElementById('username').value;
-        const password = document.getElementById('password').value;
-        const confirmPassword = document.getElementById('confirmPassword').value;
-        
-        // Basis validatie
-        if (!username || !password || !confirmPassword) {
-          document.getElementById('error').textContent = 'Vul alle velden in';
-          return;
-        }
-        
-        if (password !== confirmPassword) {
-          document.getElementById('error').textContent = 'Wachtwoorden komen niet overeen';
-          return;
-        }
-        
-        // Demo signup - accepteert alles
-        console.log('Signup poging:', username);
-        
-        // Sla gebruiker op
-        localStorage.setItem('currentUser', username);
-        localStorage.setItem('sessionToken', 'session_' + Date.now());
-        
-        // Direct doorsturen naar dashboard
-        window.location.href = 'simpledbmswebclient.html';
-      });
-    </script>
+    <script src="../scripts/login.mjs" defer></script>
   </body>
 </html>

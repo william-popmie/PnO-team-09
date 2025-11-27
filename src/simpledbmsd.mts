@@ -514,7 +514,10 @@ app.post('/db/:collection/join', async (req, res) => {
   }
 });
 
-// ...existing code...
+/**
+ * William Ragnarsson
+ * Frontend webapp routing endpoints
+ */
 
 /**
  * @swagger
@@ -555,7 +558,7 @@ app.post('/api/signup', async (req, res) => {
     const existingUsers = await usersCollection.find();
     const userExists = existingUsers.some((user) => {
       const userData = user as unknown as { username: string };
-      return userData.username.toLowerCase() === username.toLowerCase();
+      return userData.username && userData.username.toLowerCase() === username.toLowerCase();
     });
 
     if (userExists) {
@@ -577,6 +580,86 @@ app.post('/api/signup', async (req, res) => {
     });
   } catch (error) {
     console.error('Signup error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/login:
+ *   post:
+ *     summary: Login a user
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               username:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Login successful
+ *       401:
+ *         description: Invalid credentials
+ */
+app.post('/api/login', async (req, res) => {
+  try {
+    const { username, password } = req.body as { username?: string; password?: string };
+
+    // Validate input
+    if (!username || !password) {
+      res.status(400).json({ success: false, message: 'Username and password are required' });
+      return;
+    }
+
+    // Get users collection
+    const usersCollection = await db.getCollection('users');
+    const users = await usersCollection.find();
+
+    // Find user
+    const user = users.find((u) => {
+      const userData = u as unknown as { username?: string };
+      return userData.username && userData.username.toLowerCase() === username.toLowerCase();
+    }) as { id: string; username: string; password: string } | undefined;
+
+    if (!user) {
+      res.status(401).json({ success: false, message: 'Invalid username or password' });
+      return;
+    }
+
+    // Check password (plain text for now - TODO: use bcrypt.compare() in production)
+    if (user.password !== password) {
+      res.status(401).json({ success: false, message: 'Invalid username or password' });
+      return;
+    }
+
+    // Create session
+    const sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    const sessionsCollection = await db.getCollection('sessions');
+
+    await sessionsCollection.insert({
+      sessionId,
+      userId: user.id,
+      username: user.username,
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 hours
+    });
+
+    res.json({
+      success: true,
+      message: 'Login successful',
+      sessionId,
+      user: {
+        id: user.id,
+        username: user.username,
+      },
+    });
+  } catch (error) {
+    console.error('Login error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });

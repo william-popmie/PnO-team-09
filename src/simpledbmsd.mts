@@ -6,6 +6,7 @@ import express from 'express';
 import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
 import cors from 'cors';
+import jwt from 'jsonwebtoken';
 import { SimpleDBMS } from './simpledbms.mjs';
 import { RealFile } from './file/file.mjs';
 import path from 'path';
@@ -16,6 +17,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const port = 3000;
+const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key-change-in-production';
 
 app.use(cors());
 app.use(express.json());
@@ -573,10 +575,17 @@ app.post('/api/signup', async (req, res) => {
       createdAt: new Date().toISOString(),
     });
 
+    // Create JWT token (expires in 30 minutes)
+    const token = jwt.sign({ userId: newUser.id, username }, JWT_SECRET, { expiresIn: '30m' });
+
     res.status(201).json({
       success: true,
       message: 'User created successfully',
-      userId: newUser.id,
+      token,
+      user: {
+        id: newUser.id,
+        username,
+      },
     });
   } catch (error) {
     console.error('Signup error:', error);
@@ -608,7 +617,37 @@ app.post('/api/signup', async (req, res) => {
  */
 app.post('/api/login', async (req, res) => {
   try {
-    const { username, password } = req.body as { username?: string; password?: string };
+    const {
+      username,
+      password,
+      token: existingToken,
+    } = req.body as {
+      username?: string;
+      password?: string;
+      token?: string;
+    };
+
+    // If token is provided, validate it
+    if (existingToken) {
+      try {
+        const decoded = jwt.verify(existingToken, JWT_SECRET) as { userId: string; username: string };
+
+        // Token is valid, return user info
+        res.json({
+          success: true,
+          message: 'Already authenticated',
+          token: existingToken,
+          user: {
+            id: decoded.userId,
+            username: decoded.username,
+          },
+        });
+        return;
+      } catch (error) {
+        // Token invalid or expired, continue with username/password login
+        console.log('Token validation failed, proceeding with credentials');
+      }
+    }
 
     // Validate input
     if (!username || !password) {
@@ -637,22 +676,13 @@ app.post('/api/login', async (req, res) => {
       return;
     }
 
-    // Create session
-    const sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-    const sessionsCollection = await db.getCollection('sessions');
-
-    await sessionsCollection.insert({
-      sessionId,
-      userId: user.id,
-      username: user.username,
-      createdAt: new Date().toISOString(),
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 hours
-    });
+    // Create JWT token (expires in 30 minutes)
+    const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET, { expiresIn: '30m' });
 
     res.json({
       success: true,
       message: 'Login successful',
-      sessionId,
+      token,
       user: {
         id: user.id,
         username: user.username,

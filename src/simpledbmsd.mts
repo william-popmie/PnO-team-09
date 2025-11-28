@@ -539,7 +539,20 @@ app.post('/db/:collection/join', async (req, res) => {
  *                 type: string
  *     responses:
  *       201:
- *         description: User created
+ *         description: User created, returns JWT token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 token:
+ *                   type: string
+ *                 user:
+ *                   type: object
  *       400:
  *         description: Invalid input or user already exists
  */
@@ -609,6 +622,9 @@ app.post('/api/signup', async (req, res) => {
  *                 type: string
  *               password:
  *                 type: string
+ *               token:
+ *                 type: string
+ *                 description: Existing JWT token to validate (optional)
  *     responses:
  *       200:
  *         description: Login successful

@@ -641,6 +641,7 @@ export class Collection {
       if (operations.max) {
         for (const { field, as } of operations.max) {
           const values = docs.map((d) => d[field]).filter((v) => typeof v === 'number');
+          result[as] = values.length > 0 ? Math.max(...values) : null;
         }
       }
 

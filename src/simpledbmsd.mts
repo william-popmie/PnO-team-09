@@ -854,6 +854,261 @@ app.post('/api/collections', async (req, res) => {
   }
 });
 
+/**
+ * @swagger
+ * /api/collections:
+ *   get:
+ *     summary: Get all collections for the authenticated user
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: header
+ *         name: Authorization
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Bearer token (format - "Bearer YOUR_JWT_TOKEN")
+ *         example: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+ *     responses:
+ *       200:
+ *         description: List of user's collections with document counts
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 collections:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       name:
+ *                         type: string
+ *                         example: myTasks
+ *                       documentCount:
+ *                         type: number
+ *                         example: 5
+ *                 token:
+ *                   type: string
+ *                   description: New token if the old one was about to expire (within 5 minutes)
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ */
+app.get('/api/collections', async (req, res) => {
+  try {
+    const authHeader = req.headers['authorization'] || req.headers['Authorization'];
+    const authValue = typeof authHeader === 'string' ? authHeader : authHeader?.[0];
+    const token = authValue?.startsWith('Bearer ') ? authValue.substring(7) : null;
+
+    if (!token) {
+      res.status(401).json({ success: false, message: 'No token provided' });
+      return;
+    }
+
+    // Verify token and extract user info
+    let decoded: { userId: string; username: string; iat?: number; exp?: number };
+    try {
+      decoded = jwt.verify(token, JWT_SECRET) as { userId: string; username: string; iat?: number; exp?: number };
+    } catch (error) {
+      res.status(401).json({ success: false, message: 'Invalid or expired token' });
+      return;
+    }
+
+    // Get all collection names from the catalog
+    // We'll check the in-memory collections map and the database header
+    const collectionNames = new Set<string>();
+
+    // Add collections that are already loaded in memory
+    for (const name of db['collections'].keys()) {
+      collectionNames.add(name);
+    }
+
+    // For each collection, find documents belonging to this user
+    const userCollections: Array<{ name: string; documentCount: number }> = [];
+
+    for (const collectionName of collectionNames) {
+      const collection = await db.getCollection(collectionName);
+      const allDocs = await collection.find();
+
+      // Filter documents that belong to this user
+      const userDocs = allDocs.filter((doc) => {
+        const docData = doc as unknown as { userId?: string };
+        return docData.userId === decoded.userId;
+      });
+
+      // Only include collections where user has documents
+      if (userDocs.length > 0) {
+        userCollections.push({
+          name: collectionName,
+          documentCount: userDocs.length,
+        });
+      }
+    }
+
+    // Check if token is about to expire (5 minutes or less)
+    let newToken: string | undefined;
+    if (decoded.exp) {
+      const currentTime = Math.floor(Date.now() / 1000);
+      const timeUntilExpiry = decoded.exp - currentTime;
+
+      if (timeUntilExpiry <= 300) {
+        newToken = jwt.sign({ userId: decoded.userId, username: decoded.username }, JWT_SECRET, { expiresIn: '30m' });
+      }
+    }
+
+    const response: {
+      success: boolean;
+      collections: Array<{ name: string; documentCount: number }>;
+      token?: string;
+    } = {
+      success: true,
+      collections: userCollections,
+    };
+
+    if (newToken) {
+      response.token = newToken;
+    }
+
+    res.json(response);
+  } catch (error) {
+    console.error('Get collections error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/collections/all:
+ *   get:
+ *     summary: Get all collections with all documents for the authenticated user
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: header
+ *         name: Authorization
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Bearer token (format - "Bearer YOUR_JWT_TOKEN")
+ *         example: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+ *     responses:
+ *       200:
+ *         description: All user's collections with all their documents
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 collections:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       name:
+ *                         type: string
+ *                         example: myTasks
+ *                       documentCount:
+ *                         type: number
+ *                         example: 5
+ *                       documents:
+ *                         type: array
+ *                         items:
+ *                           type: object
+ *                         example: [{ "id": "abc123", "title": "Buy groceries", "completed": false, "userId": "user123" }]
+ *                 token:
+ *                   type: string
+ *                   description: New token if the old one was about to expire (within 5 minutes)
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ */
+app.get('/api/collections/all', async (req, res) => {
+  try {
+    const authHeader = req.headers['authorization'] || req.headers['Authorization'];
+    const authValue = typeof authHeader === 'string' ? authHeader : authHeader?.[0];
+    const token = authValue?.startsWith('Bearer ') ? authValue.substring(7) : null;
+
+    if (!token) {
+      res.status(401).json({ success: false, message: 'No token provided' });
+      return;
+    }
+
+    // Verify token and extract user info
+    let decoded: { userId: string; username: string; iat?: number; exp?: number };
+    try {
+      decoded = jwt.verify(token, JWT_SECRET) as { userId: string; username: string; iat?: number; exp?: number };
+    } catch (error) {
+      res.status(401).json({ success: false, message: 'Invalid or expired token' });
+      return;
+    }
+
+    // Get all collection names from the catalog
+    const collectionNames = new Set<string>();
+
+    // Add collections that are already loaded in memory
+    for (const name of db['collections'].keys()) {
+      collectionNames.add(name);
+    }
+
+    // For each collection, get all documents belonging to this user
+    const userCollections: Array<{ name: string; documentCount: number; documents: unknown[] }> = [];
+
+    for (const collectionName of collectionNames) {
+      const collection = await db.getCollection(collectionName);
+      const allDocs = await collection.find();
+
+      // Filter documents that belong to this user
+      const userDocs = allDocs.filter((doc) => {
+        const docData = doc as unknown as { userId?: string };
+        return docData.userId === decoded.userId;
+      });
+
+      // Only include collections where user has documents
+      if (userDocs.length > 0) {
+        userCollections.push({
+          name: collectionName,
+          documentCount: userDocs.length,
+          documents: userDocs,
+        });
+      }
+    }
+
+    // Check if token is about to expire (5 minutes or less)
+    let newToken: string | undefined;
+    if (decoded.exp) {
+      const currentTime = Math.floor(Date.now() / 1000);
+      const timeUntilExpiry = decoded.exp - currentTime;
+
+      if (timeUntilExpiry <= 300) {
+        newToken = jwt.sign({ userId: decoded.userId, username: decoded.username }, JWT_SECRET, { expiresIn: '30m' });
+      }
+    }
+
+    const response: {
+      success: boolean;
+      collections: Array<{ name: string; documentCount: number; documents: unknown[] }>;
+      token?: string;
+    } = {
+      success: true,
+      collections: userCollections,
+    };
+
+    if (newToken) {
+      response.token = newToken;
+    }
+
+    res.json(response);
+  } catch (error) {
+    console.error('Get all collections error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // Start server
 if (process.env['NODE_ENV'] !== 'test') {
   initDB()

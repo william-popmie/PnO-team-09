@@ -1,4 +1,4 @@
-// @author Maarten Haine, Jari Daemen
+// @author Maarten Haine, Jari Daemen, William Ragnarsson
 // also used Claude to help with debugging
 // @date 2025-11-22
 
@@ -36,6 +36,15 @@ const swaggerOptions = {
         url: `http://localhost:${port}`,
       },
     ],
+    components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+        },
+      },
+    },
   },
   apis: ['./src/simpledbmsd.mts'],
 };
@@ -706,6 +715,141 @@ app.post('/api/login', async (req, res) => {
     });
   } catch (error) {
     console.error('Login error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/collections:
+ *   post:
+ *     summary: Create a new collection linked to the authenticated user
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: header
+ *         name: Authorization
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Bearer token (format - "Bearer YOUR_JWT_TOKEN")
+ *         example: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - collectionName
+ *               - document
+ *             properties:
+ *               collectionName:
+ *                 type: string
+ *                 description: Name of the collection to create
+ *                 example: myTasks
+ *               document:
+ *                 type: object
+ *                 description: Initial document to insert into the collection
+ *                 example: { "title": "Buy groceries", "completed": false }
+ *     responses:
+ *       201:
+ *         description: Collection created and document inserted
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 collectionName:
+ *                   type: string
+ *                   example: myTasks
+ *                 document:
+ *                   type: object
+ *                   description: The created document with auto-generated id and userId
+ *                   example: { "id": "a7f3c9d2-...", "title": "Buy groceries", "completed": false, "userId": "user123" }
+ *                 token:
+ *                   type: string
+ *                   description: New token if the old one was about to expire (within 5 minutes)
+ *                   example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+ *       400:
+ *         description: Bad request - missing collectionName or document
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ */
+app.post('/api/collections', async (req, res) => {
+  try {
+    const authHeader = req.headers['authorization'] || req.headers['Authorization'];
+    const authValue = typeof authHeader === 'string' ? authHeader : authHeader?.[0];
+    const token = authValue?.startsWith('Bearer ') ? authValue.substring(7) : null;
+
+    if (!token) {
+      console.log('Authorization header:', req.headers['authorization']);
+      console.log('All headers:', req.headers);
+      res.status(401).json({ success: false, message: 'No token provided' });
+      return;
+    }
+
+    // Verify token and extract user info
+    let decoded: { userId: string; username: string; iat?: number; exp?: number };
+    try {
+      decoded = jwt.verify(token, JWT_SECRET) as { userId: string; username: string; iat?: number; exp?: number };
+    } catch (error) {
+      res.status(401).json({ success: false, message: 'Invalid or expired token' });
+      return;
+    }
+
+    const { collectionName, document } = req.body as { collectionName?: string; document?: unknown };
+
+    if (!collectionName || !document) {
+      res.status(400).json({ success: false, message: 'collectionName and document are required' });
+      return;
+    }
+
+    // Get or create the collection
+    const collection = await db.getCollection(collectionName);
+
+    // Add userId to the document to link it to the user
+    const docWithUser = {
+      ...(document as Omit<import('./simpledbms.mjs').Document, 'id'> & { id?: string }),
+      userId: decoded.userId,
+    };
+
+    // Insert the document
+    const newDoc = await collection.insert(docWithUser);
+
+    // Check if token is about to expire (5 minutes or less)
+    let newToken: string | undefined;
+    if (decoded.exp) {
+      const currentTime = Math.floor(Date.now() / 1000);
+      const timeUntilExpiry = decoded.exp - currentTime;
+
+      // If less than 5 minutes (300 seconds) remaining, issue new token
+      if (timeUntilExpiry <= 300) {
+        newToken = jwt.sign({ userId: decoded.userId, username: decoded.username }, JWT_SECRET, { expiresIn: '30m' });
+      }
+    }
+
+    const response: {
+      success: boolean;
+      collectionName: string;
+      document: import('./simpledbms.mjs').Document;
+      token?: string;
+    } = {
+      success: true,
+      collectionName,
+      document: newDoc,
+    };
+
+    if (newToken) {
+      response.token = newToken;
+    }
+
+    res.status(201).json(response);
+  } catch (error) {
+    console.error('Create collection error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });

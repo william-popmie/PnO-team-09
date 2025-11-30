@@ -32,7 +32,7 @@ const errorDiv = document.getElementById('error') as HTMLDivElement;
  * @param {string} message - The error message to display
  * @return {void}
  */
-function showError(message: string) {
+function showError(message: string): void {
   errorDiv.style.color = 'var(--error, #ef4444)';
   errorDiv.textContent = message;
 }
@@ -42,7 +42,7 @@ function showError(message: string) {
  * @param {string} message - The success message to display
  * @return {void}
  */
-function showSuccess(message: string) {
+function showSuccess(message: string): void {
   errorDiv.style.color = 'var(--success, #22c55e)';
   errorDiv.textContent = message;
 }
@@ -51,7 +51,7 @@ function showSuccess(message: string) {
  * Clears any displayed error or success message
  * @return {void}
  */
-function clearError() {
+function clearError(): void {
   errorDiv.innerHTML = '&nbsp;';
 }
 

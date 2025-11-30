@@ -41,7 +41,7 @@ collectionNameSpan.textContent = currentCollection;
  * @param {string} msg - The error message to display
  * @return {void}
  */
-function showError(msg: string) {
+function showError(msg: string): void {
   errorDiv.textContent = msg;
   setTimeout(() => {
     errorDiv.textContent = '';
@@ -52,7 +52,7 @@ function showError(msg: string) {
  * Immediately clears any displayed error message
  * @return {void}
  */
-function clearError() {
+function clearError(): void {
   errorDiv.textContent = '';
 }
 
@@ -70,7 +70,7 @@ function getErrorMessage(e: unknown): string {
  * Shows/hides selection count and delete button based on selected items
  * @return {void}
  */
-function updateSelectionUI() {
+function updateSelectionUI(): void {
   const count = selectedDocuments.size;
   selectedCount.textContent = count > 0 ? `${count} selected` : '';
   deleteSelected.style.display = count > 0 ? 'block' : 'none';
@@ -248,7 +248,7 @@ async function deleteDocuments(ids: string[]): Promise<boolean> {
  * @param {Array<Record<string, unknown>>} docs - Array of document objects to render
  * @return {void}
  */
-function renderDocuments(docs: Array<Record<string, unknown>>) {
+function renderDocuments(docs: Array<Record<string, unknown>>): void {
   documentsView.innerHTML = '';
   allDocuments.splice(0, allDocuments.length, ...docs);
 
@@ -290,7 +290,7 @@ function renderDocuments(docs: Array<Record<string, unknown>>) {
  * @param {Record<string, unknown>} doc - Document object to select
  * @return {void}
  */
-function selectDocument(doc: Record<string, unknown>) {
+function selectDocument(doc: Record<string, unknown>): void {
   const docJson = JSON.stringify(doc, null, 2);
   documentView.value = docJson;
   insertIdInput.value = getDocumentId(doc);
@@ -305,7 +305,7 @@ function selectDocument(doc: Record<string, unknown>) {
  * @param {HTMLElement} item - The document item container element
  * @return {void}
  */
-function toggleDocumentSelection(id: string, checkbox: HTMLElement, item: HTMLElement) {
+function toggleDocumentSelection(id: string, checkbox: HTMLElement, item: HTMLElement): void {
   if (selectedDocuments.has(id)) {
     selectedDocuments.delete(id);
     item.classList.remove('selected');
@@ -325,7 +325,7 @@ function toggleDocumentSelection(id: string, checkbox: HTMLElement, item: HTMLEl
  * @return {void}
  * @throws {Error} Handled internally and displayed to user via showError
  */
-async function handleRefreshDocuments() {
+async function handleRefreshDocuments(): Promise<void> {
   try {
     clearError();
     const docs = await fetchDocuments();
@@ -341,7 +341,7 @@ async function handleRefreshDocuments() {
  * @return {void}
  * @throws {Error} Handled internally and displayed to user via showError
  */
-async function handleInsertDocument() {
+async function handleInsertDocument(): Promise<void> {
   try {
     clearError();
     const id = insertIdInput.value.trim();

@@ -27,7 +27,7 @@ let allCollections: string[] = [];
  * @param {string} msg - The error message to display
  * @return {void}
  */
-function showError(msg: string) {
+function showError(msg: string): void {
   errorDiv.textContent = msg;
   setTimeout(() => {
     errorDiv.textContent = '';
@@ -38,7 +38,7 @@ function showError(msg: string) {
  * Immediately clears any displayed error message
  * @return {void}
  */
-function clearError() {
+function clearError(): void {
   errorDiv.textContent = '';
 }
 
@@ -56,7 +56,7 @@ function getErrorMessage(e: unknown): string {
  * Shows/hides selection count and delete button based on selected items
  * @return {void}
  */
-function updateSelectionUI() {
+function updateSelectionUI(): void {
   const count = selectedCollections.size;
   selectedCount.textContent = count > 0 ? `${count} selected` : '';
   deleteSelected.style.display = count > 0 ? 'block' : 'none';
@@ -163,7 +163,7 @@ async function deleteCollections(names: string[]): Promise<boolean> {
  * @param {string[]} collections - Array of collection names to render
  * @return {void}
  */
-function renderCollections(collections: string[]) {
+function renderCollections(collections: string[]): void {
   collectionsList.innerHTML = '';
 
   if (collections.length === 0) {
@@ -202,7 +202,7 @@ function renderCollections(collections: string[]) {
  * @return {void}
  * @throws {Error} Handled internally with fallback navigation to documents page
  */
-async function selectCollection(name: string) {
+async function selectCollection(name: string): Promise<void> {
   try {
     console.log('📂 Selecting collection via API:', name);
 
@@ -245,7 +245,7 @@ async function selectCollection(name: string) {
  * @param {HTMLElement} item - The collection item container element
  * @return {void}
  */
-function toggleCollectionSelection(name: string, checkbox: HTMLInputElement, item: HTMLElement) {
+function toggleCollectionSelection(name: string, checkbox: HTMLInputElement, item: HTMLElement): void {
   if (checkbox.checked) {
     selectedCollections.add(name);
     item.classList.add('selected');
@@ -262,7 +262,7 @@ function toggleCollectionSelection(name: string, checkbox: HTMLInputElement, ite
  * @return {void}
  * @throws {Error} Handled internally and displayed to user via showError
  */
-async function handleRefreshCollections() {
+async function handleRefreshCollections(): Promise<void> {
   try {
     clearError();
     const collections = await fetchCollections();
@@ -278,7 +278,7 @@ async function handleRefreshCollections() {
  * @return {void}
  * @throws {Error} Handled internally and displayed to user via showError
  */
-async function handleCreateCollection() {
+async function handleCreateCollection(): Promise<void> {
   const name = collectionNameInput.value.trim();
   if (!name) {
     showError('Please enter a collection name');
@@ -303,7 +303,7 @@ async function handleCreateCollection() {
  * @return {void}
  * @throws {Error} Handled internally and displayed to user via showError
  */
-async function handleDeleteSelected() {
+async function handleDeleteSelected(): Promise<void> {
   const selected = Array.from(selectedCollections);
   if (selected.length === 0) {
     showError('No collections selected');
@@ -326,7 +326,7 @@ async function handleDeleteSelected() {
  * Handles search input changes - filters collections list based on search query
  * @return {void}
  */
-function handleSearchCollections() {
+function handleSearchCollections(): void {
   const query = collectionSearch.value.toLowerCase();
   const filtered = allCollections.filter((name) => name.toLowerCase().includes(query));
   renderCollections(filtered);

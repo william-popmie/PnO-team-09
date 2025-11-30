@@ -6,6 +6,16 @@ import type { LoginRequest } from './signup.mjs';
 
 /// <reference lib="dom" />
 
+interface LoginResponse {
+  success: boolean;
+  message?: string;
+  sessionId?: string;
+}
+
+interface ErrorResponse {
+  message?: string;
+}
+
 // DOM elements from login.html
 //const formTitle = document.getElementById('formTitle') as HTMLHeadingElement;
 const authForm = document.getElementById('authForm') as HTMLFormElement;
@@ -21,7 +31,7 @@ const errorDiv = document.getElementById('error') as HTMLDivElement;
  * @param {string} message - The error message to display
  * @return {void}
  */
-function showError(message: string) {
+function showError(message: string): void {
   errorDiv.style.color = 'var(--error, #ef4444)';
   errorDiv.textContent = message;
 }
@@ -30,7 +40,7 @@ function showError(message: string) {
  * Clears any displayed error message by setting it to a non-breaking space
  * @return {void}
  */
-function clearError() {
+function clearError(): void {
   errorDiv.innerHTML = '&nbsp;';
 }
 
@@ -82,12 +92,12 @@ authForm.addEventListener('submit', (e) => {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData = (await response.json()) as ErrorResponse;
         showError(errorData.message || 'Login failed');
         return;
       }
 
-      const result = await response.json();
+      const result = (await response.json()) as LoginResponse;
       if (result.success && result.sessionId) {
         // Store session info
         localStorage.setItem('sessionToken', result.sessionId);

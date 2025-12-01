@@ -651,12 +651,38 @@ app.post('/api/login', async (req, res) => {
     // If token is provided, validate it
     if (existingToken) {
       try {
-        // Token is valid, return user info
-        res.json({
+        const decoded = jwt.verify(existingToken, JWT_SECRET) as {
+          userId: string;
+          username: string;
+          iat?: number;
+          exp?: number;
+        };
+
+        // Check if token is about to expire (5 minutes or less)
+        let newToken: string | undefined;
+        if (decoded.exp) {
+          const currentTime = Math.floor(Date.now() / 1000);
+          const timeUntilExpiry = decoded.exp - currentTime;
+
+          // If less than 5 minutes (300 seconds) remaining, issue new token
+          if (timeUntilExpiry <= 300) {
+            newToken = jwt.sign({ userId: decoded.userId, username: decoded.username }, JWT_SECRET, {
+              expiresIn: '30m',
+            });
+          }
+        }
+
+        // Token is valid
+        const response: { success: boolean; message: string; token?: string } = {
           success: true,
           message: 'Already authenticated',
-          token: existingToken,
-        });
+        };
+
+        if (newToken) {
+          response.token = newToken;
+        }
+
+        res.json(response);
         return;
       } catch (error) {
         // Token invalid or expired, continue with username/password login
@@ -692,12 +718,12 @@ app.post('/api/login', async (req, res) => {
     }
 
     // Create JWT token (expires in 30 minutes)
-    const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET, { expiresIn: '30m' });
+    const newToken = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET, { expiresIn: '30m' });
 
     res.json({
       success: true,
       message: 'Login successful',
-      token,
+      token: newToken,
     });
   } catch (error) {
     console.error('Login error:', error);

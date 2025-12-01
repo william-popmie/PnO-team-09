@@ -3,9 +3,16 @@
 
 /// <reference lib="dom" />
 
+// =========================
+// Constants & Initialization
+// =========================
+
 const API_BASE = 'http://localhost:3000';
 
-// DOM elements
+// =========================
+// DOM Element Selectors
+// =========================
+
 const collectionSearch = document.getElementById('collectionSearch') as HTMLInputElement;
 const collectionsList = document.getElementById('collectionsList') as HTMLDivElement;
 const refreshCollections = document.getElementById('refreshCollections') as HTMLButtonElement;
@@ -17,11 +24,17 @@ const confirmDelete = document.getElementById('confirmDelete') as HTMLButtonElem
 const collectionNameInput = document.getElementById('collectionNameInput') as HTMLInputElement;
 const errorDiv = document.getElementById('error') as HTMLDivElement;
 
-// State management
+// =========================
+// State Management
+// =========================
+
 const selectedCollections = new Set<string>();
 let allCollections: string[] = [];
 
-// Utility functions
+// =========================
+// Utility Functions
+// =========================
+
 /**
  * Displays an error message that auto-clears after 5 seconds
  * @param {string} msg - The error message to display
@@ -62,7 +75,10 @@ function updateSelectionUI(): void {
   deleteSelected.style.display = count > 0 ? 'block' : 'none';
 }
 
-// API functions
+// =========================
+// API Functions
+// =========================
+
 /**
  * Fetches all collection names from the backend API
  * @return {Promise<string[]>} Promise resolving to array of collection names
@@ -71,7 +87,13 @@ function updateSelectionUI(): void {
 async function fetchCollections(): Promise<string[]> {
   try {
     console.log('🔄 Fetching collections from API...');
-    const response = await fetch(`${API_BASE}/collections`);
+    const response = await fetch(`${API_BASE}/api/fetchCollections`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
+      },
+    });
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -95,12 +117,13 @@ async function fetchCollections(): Promise<string[]> {
 async function createCollection(name: string): Promise<boolean> {
   try {
     console.log('🔧 Creating collection via API:', name);
-    const response = await fetch(`${API_BASE}/collections`, {
+    const response = await fetch(`${API_BASE}/api/createCollection`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
       },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ collectionName: name }),
     });
 
     if (!response.ok) {
@@ -108,7 +131,7 @@ async function createCollection(name: string): Promise<boolean> {
       throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
     }
 
-    const result = (await response.json()) as { success: boolean; name: string };
+    const result = (await response.json()) as { success: boolean; message: string };
     console.log('✅ Collection created:', result);
 
     // Refresh the collections list after successful creation
@@ -132,8 +155,13 @@ async function deleteCollections(names: string[]): Promise<boolean> {
 
     // Delete each collection via API
     const deletePromises = names.map(async (name) => {
-      const response = await fetch(`${API_BASE}/collections/${encodeURIComponent(name)}`, {
+      const response = await fetch(`${API_BASE}/api/deleteCollection}`, {
         method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
+        },
+        body: JSON.stringify({ collectionName: name }),
       });
 
       if (!response.ok) {
@@ -157,7 +185,10 @@ async function deleteCollections(names: string[]): Promise<boolean> {
   }
 }
 
-// Rendering functions
+// =========================
+// Rendering & Selection
+// =========================
+
 /**
  * Renders the collections list in the UI with checkboxes and clickable names
  * @param {string[]} collections - Array of collection names to render
@@ -207,7 +238,14 @@ async function selectCollection(name: string): Promise<void> {
     console.log('📂 Selecting collection via API:', name);
 
     // First, verify the collection exists and optionally get document count
-    const response = await fetch(`${API_BASE}/collections/${encodeURIComponent(name)}/info`);
+    const response = await fetch(`${API_BASE}/api/getDocuments`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
+      },
+      body: JSON.stringify({ collectionName: name }),
+    });
 
     if (!response.ok) {
       if (response.status === 404) {
@@ -218,13 +256,13 @@ async function selectCollection(name: string): Promise<void> {
     }
 
     const collectionInfo = (await response.json()) as {
-      name: string;
-      documentCount?: number;
-      exists: boolean;
+      succes: boolean;
+      message: string;
+      documentNames: string[];
     };
 
-    if (collectionInfo.exists) {
-      console.log(`✅ Collection '${name}' exists with ${collectionInfo.documentCount || 0} documents`);
+    if (collectionInfo.succes) {
+      console.log(collectionInfo.message);
       // Navigate to documents page with collection parameter
       window.location.href = `documents.html?collection=${encodeURIComponent(name)}`;
     } else {
@@ -256,7 +294,10 @@ function toggleCollectionSelection(name: string, checkbox: HTMLInputElement, ite
   updateSelectionUI();
 }
 
-// Event handlers
+// =========================
+// Event Handlers
+// =========================
+
 /**
  * Handles refresh collections button click - loads collections from API and renders them
  * @return {void}
@@ -332,28 +373,26 @@ function handleSearchCollections(): void {
   renderCollections(filtered);
 }
 
-// Event listeners
-// Refresh collections list when refresh button is clicked
+// =========================
+// Event Listeners & Init
+// =========================
+
 refreshCollections.addEventListener('click', () => {
   void handleRefreshCollections();
 });
 
-// Open create collection modal when create button is clicked
 createCollectionButton.addEventListener('click', () => {
   /* Modal will open automatically via HTML */
 });
 
-// Create new collection when modal confirm button is clicked
 confirmCreate.addEventListener('click', () => {
   void handleCreateCollection();
 });
 
-// Delete selected collections when modal confirm button is clicked
 confirmDelete.addEventListener('click', () => {
   void handleDeleteSelected();
 });
 
-// Filter collections list in real-time as user types in search box
 collectionSearch.addEventListener('input', () => {
   handleSearchCollections();
 });

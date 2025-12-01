@@ -1,19 +1,23 @@
 // @author Tijn Gommers
 // @date 2025-19-11
 
+// =========================
+// Constants & Initialization
+// =========================
+
 const API_BASE = 'http://localhost:3000';
-
 console.log('📝 Documents loading...', 'API:', API_BASE);
-
 declare const document: Document;
 
+// =========================
+// DOM Element Selectors
+// =========================
 function getEl<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
   if (!el) throw new Error(`Missing element with id="${id}"`);
   return el as T;
 }
 
-// DOM elements
 const collectionNameSpan = getEl<HTMLSpanElement>('collectionName');
 const documentsView = getEl<HTMLDivElement>('documentsView');
 const refreshDocuments = getEl<HTMLButtonElement>('refreshDocuments');
@@ -27,15 +31,18 @@ const insertJsonInput = getEl<HTMLTextAreaElement>('insertJsonInput');
 const documentView = getEl<HTMLTextAreaElement>('documentView');
 const errorDiv = getEl<HTMLDivElement>('error');
 
-// State management -- moet nog let worden maar pas na de implementatie van de functies
+// =========================
+// State Management
+// =========================
 const selectedDocuments = new Set<string>();
 const allDocuments: Array<Record<string, unknown>> = [];
 const currentCollection = new URLSearchParams(window.location.search).get('collection') || 'unknown';
-
-// Initialize collection name
 collectionNameSpan.textContent = currentCollection;
 
-// Utility functions
+// =========================
+// Utility Functions
+// =========================
+
 /**
  * Displays an error message that auto-clears after 5 seconds
  * @param {string} msg - The error message to display
@@ -82,12 +89,13 @@ function updateSelectionUI(): void {
  * @return {string} Document ID string, using 'id', '_id', or JSON slice as fallback
  */
 function getDocumentId(doc: Record<string, unknown>): string {
-  // TODO: Extract document ID from document object
-  // Handle both 'id' and '_id' fields, fallback to JSON string slice
   return (doc['id'] as string) || (doc['_id'] as string) || JSON.stringify(doc).slice(0, 10);
 }
 
-// API functions
+// =========================
+// API Functions
+// =========================
+
 /**
  * Fetches all documents from the current collection via API
  * @return {Promise<Array<Record<string, unknown>>>} Promise resolving to array of document objects
@@ -96,7 +104,14 @@ function getDocumentId(doc: Record<string, unknown>): string {
 async function fetchDocuments(): Promise<Array<Record<string, unknown>>> {
   try {
     console.log('🔄 Fetching documents from API for collection:', currentCollection);
-    const response = await fetch(`${API_BASE}/db/${encodeURIComponent(currentCollection)}`);
+    const response = await fetch(`${API_BASE}/api/fetchDocuments`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
+      },
+      body: JSON.stringify({ collectionName: currentCollection }),
+    });
 
     if (!response.ok) {
       if (response.status === 404) {
@@ -106,9 +121,14 @@ async function fetchDocuments(): Promise<Array<Record<string, unknown>>> {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
 
-    const documents = (await response.json()) as Array<Record<string, unknown>>;
-    console.log('✅ Documents received:', documents.length, 'documents');
-    return documents;
+    const documents = (await response.json()) as {
+      success: boolean;
+      message: string;
+      documentNames: string[];
+    };
+    console.log(documents.message);
+    // Map document names to objects to satisfy the return type expected by the UI
+    return documents.documentNames.map((name) => ({ id: name, name: name }));
   } catch (error) {
     console.error('❌ Failed to fetch documents:', error);
     throw error;
@@ -118,36 +138,38 @@ async function fetchDocuments(): Promise<Array<Record<string, unknown>>> {
 /**
  * Creates a new document in the current collection via API
  * @param {string} id - Document ID to create
- * @param {Record<string, unknown>} data - Document data object
  * @return {Promise<boolean>} Promise resolving to true if creation successful
- * @throws {Error} When API request fails or document creation is rejected
+ * @throws {Error} When API request fails of document creation is rejected
  */
-async function createDocument(id: string, data: Record<string, unknown>): Promise<boolean> {
+async function createDocument(id: string): Promise<boolean> {
   try {
-    console.log('🔧 Creating document via API:', id, data);
-    const documentData = { id, ...data };
+    console.log('🔧 Creating document via API:', id);
 
-    const response = await fetch(`${API_BASE}/db/${encodeURIComponent(currentCollection)}`, {
+    const response = await fetch(`${API_BASE}/api/createDocument`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
       },
-      body: JSON.stringify(documentData),
+      body: JSON.stringify({
+        collectionName: currentCollection,
+        documentName: id,
+      }),
     });
 
     if (!response.ok) {
-      const errorData = (await response.json()) as { error?: string };
-      throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+      const errorData = (await response.json()) as { message?: string };
+      throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
     }
 
-    const result = (await response.json()) as Record<string, unknown>;
-    console.log('✅ Document created:', result);
+    const result = (await response.json()) as { success: boolean; message: string };
+    console.log('✅ Document created:', result.message);
 
     // Refresh documents list after creation
     const documents = await fetchDocuments();
     allDocuments.splice(0, allDocuments.length, ...documents);
     renderDocuments(allDocuments);
-    return true;
+    return result.success;
   } catch (error) {
     console.error('❌ Failed to create document:', error);
     throw error;
@@ -157,20 +179,25 @@ async function createDocument(id: string, data: Record<string, unknown>): Promis
 /**
  * Updates an existing document in the current collection via API
  * @param {string} id - Document ID to update
- * @param {Record<string, unknown>} data - Updated document data object
+ * @param {JSON} data - Updated document data object
  * @return {Promise<boolean>} Promise resolving to true if update successful
- * @throws {Error} When API request fails, document not found, or update is rejected
+ * @throws {Error} When API request fails, document not found, of update is rejected
  */
-async function updateDocument(id: string, data: Record<string, unknown>): Promise<boolean> {
+async function updateDocument(id: string, data: JSON): Promise<boolean> {
   try {
     console.log('🔧 Updating document via API:', id, data);
 
-    const response = await fetch(`${API_BASE}/db/${encodeURIComponent(currentCollection)}/${encodeURIComponent(id)}`, {
+    const response = await fetch(`${API_BASE}/api/updateDocument`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
+        Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
       },
-      body: JSON.stringify(data),
+      body: JSON.stringify({
+        collectionName: currentCollection,
+        documentData: data,
+        id: id,
+      }),
     });
 
     if (!response.ok) {
@@ -207,23 +234,28 @@ async function deleteDocuments(ids: string[]): Promise<boolean> {
 
     // Delete each document via API
     const deletePromises = ids.map(async (id) => {
-      const response = await fetch(
-        `${API_BASE}/db/${encodeURIComponent(currentCollection)}/${encodeURIComponent(id)}`,
-        {
-          method: 'DELETE',
+      const response = await fetch(`${API_BASE}/api/deleteDocument`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
         },
-      );
+        body: JSON.stringify({
+          collectionName: currentCollection,
+          documentName: id,
+        }),
+      });
 
       if (!response.ok) {
         if (response.status === 404) {
           console.warn(`Document ${id} not found (already deleted?)`);
-          return { success: true, id };
+          return { success: true, message: `Document ${id} not found (already deleted?)` };
         }
-        const errorData = (await response.json()) as { error?: string };
-        throw new Error(`Failed to delete ${id}: ${errorData.error || response.statusText}`);
+        const errorData = (await response.json()) as { message?: string };
+        throw new Error(`Failed to delete ${id}: ${errorData.message || response.statusText}`);
       }
 
-      return response.json() as Promise<{ success: boolean }>;
+      return response.json() as Promise<{ success: boolean; message: string }>;
     });
 
     await Promise.all(deletePromises);
@@ -242,7 +274,10 @@ async function deleteDocuments(ids: string[]): Promise<boolean> {
   }
 }
 
-// Rendering functions
+// =========================
+// Rendering & Selection
+// =========================
+
 /**
  * Renders the documents list in the UI with checkboxes and clickable content
  * @param {Array<Record<string, unknown>>} docs - Array of document objects to render
@@ -319,7 +354,10 @@ function toggleDocumentSelection(id: string, checkbox: HTMLElement, item: HTMLEl
   console.log('Selection updated:', Array.from(selectedDocuments));
 }
 
-// Event handlers
+// =========================
+// Event Handlers
+// =========================
+
 /**
  * Handles refresh documents button click - loads documents from API and renders them
  * @return {void}
@@ -352,10 +390,9 @@ async function handleInsertDocument(): Promise<void> {
       return;
     }
 
-    const data = JSON.parse(jsonText) as Record<string, unknown>;
+    const data = JSON.parse(jsonText) as JSON;
     const exists = allDocuments.some((doc) => getDocumentId(doc) === id);
-
-    const success = exists ? await updateDocument(id, data) : await createDocument(id, data);
+    const success = exists ? await updateDocument(id, data) : await createDocument(id);
 
     if (success) {
       insertIdInput.value = '';
@@ -375,7 +412,7 @@ async function handleInsertDocument(): Promise<void> {
  * @return {void}
  * @throws {Error} Handled internally and displayed to user via showError
  */
-async function handleDeleteSelected() {
+async function handleDeleteSelected(): Promise<void> {
   try {
     clearError();
     const selectedIds = Array.from(selectedDocuments);
@@ -397,25 +434,26 @@ async function handleDeleteSelected() {
   }
 }
 
-// Event listeners
-// Refresh documents list when refresh button is clicked
+// =========================
+// Event Listeners & Init
+// =========================
+
 refreshDocuments.addEventListener('click', () => {
   void handleRefreshDocuments();
 });
-// Open insert/update document modal when insert button is clicked
+
 insertDocument.addEventListener('click', () => {
   /* Modal will open automatically via HTML */
 });
-// Create or update document when modal confirm button is clicked
+
 confirmInsert.addEventListener('click', () => {
   void handleInsertDocument();
 });
-// Delete selected documents when modal confirm button is clicked
+
 confirmDelete.addEventListener('click', () => {
   void handleDeleteSelected();
 });
 
-// Initialize page
 void (async () => {
   try {
     console.log('🚀 Initializing documents page for collection:', currentCollection);
@@ -426,8 +464,6 @@ void (async () => {
   } catch (error) {
     console.error('❌ Failed to initialize documents page:', error);
     showError('Failed to load documents. Check if the collection exists and the server is running.');
-
-    // Show empty state
     documentsView.innerHTML = '<div class="no-results">Unable to load documents. Please try refreshing.</div>';
   }
 })();

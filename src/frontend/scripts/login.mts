@@ -1,9 +1,17 @@
 // @author Tijn Gommers
 // @date 2025-19-11
 
+// ==========================
+//   Imports
+// ==========================
+
 import { isValidUsername, isValidPassword } from './signup.mjs';
 
 /// <reference lib="dom" />
+
+// ==========================
+//   Types & Interfaces
+// ==========================
 
 interface LoginRequest {
   username: string;
@@ -21,15 +29,19 @@ interface ErrorResponse {
   message?: string;
 }
 
-// DOM elements from login.html
-//const formTitle = document.getElementById('formTitle') as HTMLHeadingElement;
+// ==========================
+//   DOM Elements
+// ==========================
+
 const authForm = document.getElementById('authForm') as HTMLFormElement;
 const usernameInput = document.getElementById('username') as HTMLInputElement;
 const passwordInput = document.getElementById('password') as HTMLInputElement;
 const submitBtn = document.getElementById('submitBtn') as HTMLButtonElement;
 const errorDiv = document.getElementById('error') as HTMLDivElement;
 
-// Utility functions
+// ==========================
+//   Utility Functions
+// ==========================
 
 /**
  * Displays an error message to the user in red text
@@ -57,7 +69,15 @@ function allRequiredFields(): boolean {
   return (usernameInput.value.trim() && passwordInput.value) !== '';
 }
 
-// Handle login form submission with validation and API authentication
+// ==========================
+//   Event Handlers
+// ==========================
+
+/**
+ * Handles login form submission, validates input, and authenticates via API
+ * @param {Event} e - The form submit event
+ * @return {Promise<void>}
+ */
 authForm.addEventListener('submit', (e) => {
   e.preventDefault();
 
@@ -128,5 +148,9 @@ authForm.addEventListener('submit', (e) => {
     }
   })(); // End async IIFE
 }); // End event listener
+
+// ==========================
+//   Init
+// ==========================
 
 console.log('✅ Login script loaded');

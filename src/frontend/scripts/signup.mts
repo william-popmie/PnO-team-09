@@ -1,11 +1,15 @@
 // @author Tijn Gommers
 // @date 2025-24-11
 
-/// <reference lib="dom" />
+// ==========================
+//   Constants
+// ==========================
 
 const API_BASE = 'http://localhost:3000';
 
-// Types
+// ==========================
+//   Types & Interfaces
+// ==========================
 
 export interface SignupRequest {
   username: string;
@@ -18,7 +22,10 @@ export interface SignupResponse {
   token: string;
 }
 
-// DOM Elements
+// ==========================
+//   DOM Elements
+// ==========================
+
 const signupForm = document.getElementById('signupForm') as HTMLFormElement;
 const usernameInput = document.getElementById('username') as HTMLInputElement;
 const passwordInput = document.getElementById('password') as HTMLInputElement;
@@ -26,7 +33,10 @@ const confirmPasswordInput = document.getElementById('confirmPassword') as HTMLI
 const signupBtn = document.getElementById('signupBtn') as HTMLButtonElement;
 const errorDiv = document.getElementById('error') as HTMLDivElement;
 
-// Utility functions
+// ==========================
+//   Utility Functions
+// ==========================
+
 /**
  * Displays an error message to the user in red text
  * @param {string} message - The error message to display
@@ -98,7 +108,7 @@ function allRequiredFields(): boolean {
 
 /**
  * Calls the backend API to register a new user account
- * @param {LoginRequest} request - Object containing username, password, confirmPassword
+ * @param {SignupRequest} request - Object containing username and password
  * @return {Promise<SignupResponse>} Promise resolving to signup result with success status and message
  * @throws {Error} When API request fails or returns error response
  */
@@ -127,7 +137,15 @@ async function signupUser(request: SignupRequest): Promise<SignupResponse> {
   return data;
 }
 
-// Handle signup form submission with validation and user registration
+// ==========================
+//   Event Handlers
+// ==========================
+
+/**
+ * Handles signup form submission, validates input, and registers user via API
+ * @param {Event} e - The form submit event
+ * @return {Promise<void>}
+ */
 signupForm.addEventListener('submit', (e) => {
   void (async () => {
     e.preventDefault();
@@ -190,5 +208,9 @@ signupForm.addEventListener('submit', (e) => {
     }
   })(); // End of async IIFE
 }); // End of event listener
+
+// ==========================
+//   Init
+// ==========================
 
 console.log('✅ Signup script loaded');

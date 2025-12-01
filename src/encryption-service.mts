@@ -10,7 +10,7 @@ export class EncryptionService {
   private masterKey: Buffer;
 
   private constructor(masterKey: Buffer) {
-    // Valideer key is 32 bytes (256 bits)
+    //key is 32 bytes (256 bits)
     if (masterKey.length !== 32) {
       throw new Error('Master key must be 32 bytes (256 bits)');
     }
@@ -31,8 +31,7 @@ export class EncryptionService {
   }
 
   /**
-   * Genereer random 256-bit master key (eenmalig!)
-   * Sla deze VEILIG op (bijv. in env var, KMS, vault)
+   * Genereer eenmalig random 256-bit master key
    */
   static generateMasterKey(): string {
     return crypto.randomBytes(32).toString('hex');
@@ -40,30 +39,19 @@ export class EncryptionService {
 
   /**
    * Versleutel data met AES-256-GCM
-   * Format: [IV (16 bytes)][AUTH_TAG (16 bytes)][CIPHERTEXT]
+   * Format: [IV (16 bytes)][AUTH_TAG (16 bytes)][CIPHERTEXT](variabel)
    */
   encrypt(data: Buffer): Buffer {
-    // Genereer random IV per record (belangrijk!)
     const iv = crypto.randomBytes(IV_SIZE);
-
-    // Maak cipher met AES-256-GCM
     const cipher = crypto.createCipheriv(ALGORITHM, this.masterKey, iv);
-
-    // Versleutel data
     const encrypted = Buffer.concat([cipher.update(data), cipher.final()]);
-
-    // Haal authenticatie tag op (prove integriteit)
     const authTag = cipher.getAuthTag();
 
     // Combineer: IV + AUTH_TAG + CIPHERTEXT
-    // IV moet vooraan zodat we het kunnen extraheren bij decryption
     return Buffer.concat([iv, authTag, encrypted]);
   }
 
-  /**
-   * Ontsleutel data
-   * Input format: [IV (16 bytes)][AUTH_TAG (16 bytes)][CIPHERTEXT]
-   */
+
   decrypt(encryptedData: Buffer): Buffer {
     // Extraheer componenten
     const iv = encryptedData.subarray(0, IV_SIZE);
@@ -75,7 +63,7 @@ export class EncryptionService {
     decipher.setAuthTag(authTag);
 
     try {
-      // Ontsleutel & verifieer authenticiteit
+      // Ontsleutel
       const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
       return decrypted;
     } catch (error) {

@@ -599,6 +599,7 @@ app.post('/api/signup', async (req, res) => {
     const newUser = await usersCollection.insert({
       username,
       password, // TODO: Hash this in production!
+      collections: [],
       createdAt: new Date().toISOString(),
     });
 
@@ -709,12 +710,12 @@ app.post('/api/login', async (req, res) => {
     }
 
     // Create JWT token (expires in 30 minutes)
-    const token = generateToken(user.id, user.username);
+    const newToken = generateToken(user.id, user.username);
 
     res.json({
       success: true,
       message: 'Login successful',
-      token,
+      newToken,
     });
   } catch (error) {
     console.error('Login error:', error);
@@ -782,12 +783,28 @@ app.post('/api/createCollection', authenticateToken, async (req: AuthenticatedRe
       return;
     }
 
-    // Get or create the collection
-    await db.getCollection(collectionName);
+    // Check if user already has this collection
+    const usersCollection = await db.getCollection('users');
+    const user = await usersCollection.findById(req.user!.userId);
+
+    if (user) {
+      const userData = user as unknown as { collections: string[] };
+
+      // Check if collection already exists for this user
+      if (userData.collections.includes(collectionName)) {
+        res.status(400).json({ success: false, message: 'Collection already exists' });
+        return;
+      }
+
+      // Create the collection and add to user's list
+      await db.getCollection(collectionName);
+      userData.collections.push(collectionName);
+      await usersCollection.update(req.user!.userId, { collections: userData.collections });
+    }
 
     const response = addTokenToResponse(req, {
       success: true,
-      collectionName: String,
+      collectionName,
     });
 
     res.status(201).json(response);

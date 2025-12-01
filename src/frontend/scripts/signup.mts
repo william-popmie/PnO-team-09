@@ -7,7 +7,7 @@ const API_BASE = 'http://localhost:3000';
 
 // Types
 
-export interface LoginRequest {
+export interface SignupRequest {
   username: string;
   password: string;
 }
@@ -15,7 +15,7 @@ export interface LoginRequest {
 export interface SignupResponse {
   success: boolean;
   message: string;
-  userId?: string;
+  token: string;
 }
 
 // DOM Elements
@@ -102,8 +102,8 @@ function allRequiredFields(): boolean {
  * @return {Promise<SignupResponse>} Promise resolving to signup result with success status and message
  * @throws {Error} When API request fails or returns error response
  */
-async function signupUser(request: LoginRequest): Promise<SignupResponse> {
-  const response = await fetch(`${API_BASE}/auth/signup`, {
+async function signupUser(request: SignupRequest): Promise<SignupResponse> {
+  const response = await fetch(`${API_BASE}/api/signup`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -115,6 +115,13 @@ async function signupUser(request: LoginRequest): Promise<SignupResponse> {
 
   if (!response.ok) {
     throw new Error(data.message || 'Signup failed');
+  }
+
+  if (data.success) {
+    // Store session info in cache (localStorage)
+    if (data.token && data.token.length > 0) {
+      localStorage.setItem('sessionToken', data.token);
+    }
   }
 
   return data;
@@ -164,7 +171,7 @@ signupForm.addEventListener('submit', (e) => {
       });
 
       if (result.success) {
-        showSuccess(result.message + ' Redirecting to login...');
+        showSuccess(result.message + ' Redirecting to collections...');
 
         // Redirect to collections page after successful signup
         setTimeout(() => {

@@ -2,9 +2,14 @@
 // @date 2025-19-11
 
 import { isValidUsername, isValidPassword } from './signup.mjs';
-import type { LoginRequest } from './signup.mjs';
 
 /// <reference lib="dom" />
+
+interface LoginRequest {
+  username: string;
+  password: string;
+  token: string;
+}
 
 interface LoginResponse {
   success: boolean;
@@ -83,7 +88,7 @@ authForm.addEventListener('submit', (e) => {
     submitBtn.textContent = 'Logging in...';
 
     try {
-      const response = await fetch('http://localhost:3000/auth/login', {
+      const response = await fetch('http://localhost:3000/api/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -51,7 +51,6 @@ export class EncryptionService {
     return Buffer.concat([iv, authTag, encrypted]);
   }
 
-
   decrypt(encryptedData: Buffer): Buffer {
     // Extraheer componenten
     const iv = encryptedData.subarray(0, IV_SIZE);

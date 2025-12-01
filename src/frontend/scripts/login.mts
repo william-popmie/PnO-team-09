@@ -13,8 +13,8 @@ interface LoginRequest {
 
 interface LoginResponse {
   success: boolean;
-  message?: string;
-  sessionId?: string;
+  message: string;
+  token?: string;
 }
 
 interface ErrorResponse {
@@ -83,6 +83,7 @@ authForm.addEventListener('submit', (e) => {
       );
       return;
     }
+    const token = localStorage.getItem('sessionToken') || '';
 
     submitBtn.disabled = true;
     submitBtn.textContent = 'Logging in...';
@@ -93,7 +94,7 @@ authForm.addEventListener('submit', (e) => {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ username, password } as LoginRequest),
+        body: JSON.stringify({ username, password, token } as LoginRequest),
       });
 
       if (!response.ok) {
@@ -103,10 +104,10 @@ authForm.addEventListener('submit', (e) => {
       }
 
       const result = (await response.json()) as LoginResponse;
-      if (result.success && result.sessionId) {
-        // Store session info
-        localStorage.setItem('sessionToken', result.sessionId);
-        localStorage.setItem('username', username);
+      if (result.success) {
+        if (result.token) {
+          localStorage.setItem('sessionToken', result.token);
+        }
 
         showError('Login successful! Redirecting...');
         errorDiv.style.color = 'var(--success, #22c55e)';

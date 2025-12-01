@@ -846,7 +846,7 @@ app.post('/api/createCollection', async (req, res) => {
 
 /**
  * @swagger
- * /api/collections:
+ * /api/fetchCollections:
  *   get:
  *     summary: Get all collections for the authenticated user
  *     security:
@@ -887,7 +887,7 @@ app.post('/api/createCollection', async (req, res) => {
  *       401:
  *         description: Unauthorized - invalid or missing token
  */
-app.get('/api/collections', async (req, res) => {
+app.get('/api/fetchCollections', async (req, res) => {
   try {
     const authHeader = req.headers['authorization'] || req.headers['Authorization'];
     const authValue = typeof authHeader === 'string' ? authHeader : authHeader?.[0];
@@ -908,7 +908,6 @@ app.get('/api/collections', async (req, res) => {
     }
 
     // Get all collection names from the catalog
-    // We'll check the in-memory collections map and the database header
     const collectionNames = new Set<string>();
 
     // Add collections that are already loaded in memory
@@ -916,27 +915,8 @@ app.get('/api/collections', async (req, res) => {
       collectionNames.add(name);
     }
 
-    // For each collection, find documents belonging to this user
-    const userCollections: Array<{ name: string; documentCount: number }> = [];
-
-    for (const collectionName of collectionNames) {
-      const collection = await db.getCollection(collectionName);
-      const allDocs = await collection.find();
-
-      // Filter documents that belong to this user
-      const userDocs = allDocs.filter((doc) => {
-        const docData = doc as unknown as { userId?: string };
-        return docData.userId === decoded.userId;
-      });
-
-      // Only include collections where user has documents
-      if (userDocs.length > 0) {
-        userCollections.push({
-          name: collectionName,
-          documentCount: userDocs.length,
-        });
-      }
-    }
+    // Get list of collections (just names)
+    const collections = Array.from(collectionNames);
 
     // Check if token is about to expire (5 minutes or less)
     let newToken: string | undefined;
@@ -951,11 +931,11 @@ app.get('/api/collections', async (req, res) => {
 
     const response: {
       success: boolean;
-      collections: Array<{ name: string; documentCount: number }>;
+      collections: string[];
       token?: string;
     } = {
       success: true,
-      collections: userCollections,
+      collections,
     };
 
     if (newToken) {

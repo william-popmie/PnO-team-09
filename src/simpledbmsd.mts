@@ -733,7 +733,7 @@ app.post('/api/login', async (req, res) => {
 
 /**
  * @swagger
- * /api/collections:
+ * /api/createCollection:
  *   post:
  *     summary: Create a new collection linked to the authenticated user
  *     security:
@@ -754,19 +754,14 @@ app.post('/api/login', async (req, res) => {
  *             type: object
  *             required:
  *               - collectionName
- *               - document
  *             properties:
  *               collectionName:
  *                 type: string
  *                 description: Name of the collection to create
  *                 example: myTasks
- *               document:
- *                 type: object
- *                 description: Initial document to insert into the collection
- *                 example: { "title": "Buy groceries", "completed": false }
  *     responses:
  *       201:
- *         description: Collection created and document inserted
+ *         description: Collection created successfully
  *         content:
  *           application/json:
  *             schema:
@@ -778,28 +773,22 @@ app.post('/api/login', async (req, res) => {
  *                 collectionName:
  *                   type: string
  *                   example: myTasks
- *                 document:
- *                   type: object
- *                   description: The created document with auto-generated id and userId
- *                   example: { "id": "a7f3c9d2-...", "title": "Buy groceries", "completed": false, "userId": "user123" }
  *                 token:
  *                   type: string
  *                   description: New token if the old one was about to expire (within 5 minutes)
  *                   example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
  *       400:
- *         description: Bad request - missing collectionName or document
+ *         description: Bad request - missing collectionName
  *       401:
  *         description: Unauthorized - invalid or missing token
  */
-app.post('/api/collections', async (req, res) => {
+app.post('/api/createCollection', async (req, res) => {
   try {
     const authHeader = req.headers['authorization'] || req.headers['Authorization'];
     const authValue = typeof authHeader === 'string' ? authHeader : authHeader?.[0];
     const token = authValue?.startsWith('Bearer ') ? authValue.substring(7) : null;
 
     if (!token) {
-      console.log('Authorization header:', req.headers['authorization']);
-      console.log('All headers:', req.headers);
       res.status(401).json({ success: false, message: 'No token provided' });
       return;
     }
@@ -813,24 +802,15 @@ app.post('/api/collections', async (req, res) => {
       return;
     }
 
-    const { collectionName, document } = req.body as { collectionName?: string; document?: unknown };
+    const { collectionName } = req.body as { collectionName?: string };
 
-    if (!collectionName || !document) {
-      res.status(400).json({ success: false, message: 'collectionName and document are required' });
+    if (!collectionName) {
+      res.status(400).json({ success: false, message: 'collectionName is required' });
       return;
     }
 
     // Get or create the collection
-    const collection = await db.getCollection(collectionName);
-
-    // Add userId to the document to link it to the user
-    const docWithUser = {
-      ...(document as Omit<import('./simpledbms.mjs').Document, 'id'> & { id?: string }),
-      userId: decoded.userId,
-    };
-
-    // Insert the document
-    const newDoc = await collection.insert(docWithUser);
+    await db.getCollection(collectionName);
 
     // Check if token is about to expire (5 minutes or less)
     let newToken: string | undefined;
@@ -847,12 +827,10 @@ app.post('/api/collections', async (req, res) => {
     const response: {
       success: boolean;
       collectionName: string;
-      document: import('./simpledbms.mjs').Document;
       token?: string;
     } = {
       success: true,
       collectionName,
-      document: newDoc,
     };
 
     if (newToken) {

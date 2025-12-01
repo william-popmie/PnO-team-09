@@ -6,18 +6,23 @@ import express from 'express';
 import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
 import cors from 'cors';
-import jwt from 'jsonwebtoken';
 import { SimpleDBMS } from './simpledbms.mjs';
 import { RealFile } from './file/file.mjs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import {
+  authenticateToken,
+  addTokenToResponse,
+  generateToken,
+  verifyToken,
+  type AuthenticatedRequest,
+} from './authentication.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const port = 3000;
-const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key-change-in-production';
 
 app.use(cors());
 app.use(express.json());
@@ -598,7 +603,7 @@ app.post('/api/signup', async (req, res) => {
     });
 
     // Create JWT token (expires in 30 minutes)
-    const token = jwt.sign({ userId: newUser.id, username }, JWT_SECRET, { expiresIn: '30m' });
+    const token = generateToken(newUser.id, username);
 
     res.status(201).json({
       success: true,
@@ -615,7 +620,7 @@ app.post('/api/signup', async (req, res) => {
  * @swagger
  * /api/login:
  *   post:
- *     summary: Login a user
+ *     summary: Login a user or validate existing token
  *     requestBody:
  *       required: true
  *       content:
@@ -632,9 +637,9 @@ app.post('/api/signup', async (req, res) => {
  *                 description: Existing JWT token to validate (optional)
  *     responses:
  *       200:
- *         description: Login successful
+ *         description: Login successful or token validated
  *       401:
- *         description: Invalid credentials
+ *         description: Invalid credentials or token
  */
 app.post('/api/login', async (req, res) => {
   try {
@@ -648,49 +653,35 @@ app.post('/api/login', async (req, res) => {
       token?: string;
     };
 
-    // If token is provided, validate it
+    // If token is provided, validate it for auto-login
     if (existingToken) {
-      try {
-        const decoded = jwt.verify(existingToken, JWT_SECRET) as {
-          userId: string;
-          username: string;
-          iat?: number;
-          exp?: number;
+      const decoded = verifyToken(existingToken);
+
+      if (decoded) {
+        // Token is valid - check if it needs refresh
+        const response: { success: boolean; message: string; token?: string } = {
+          success: true,
+          message: 'Already authenticated',
         };
 
         // Check if token is about to expire (5 minutes or less)
-        let newToken: string | undefined;
         if (decoded.exp) {
           const currentTime = Math.floor(Date.now() / 1000);
           const timeUntilExpiry = decoded.exp - currentTime;
 
           // If less than 5 minutes (300 seconds) remaining, issue new token
           if (timeUntilExpiry <= 300) {
-            newToken = jwt.sign({ userId: decoded.userId, username: decoded.username }, JWT_SECRET, {
-              expiresIn: '30m',
-            });
+            response.token = generateToken(decoded.userId, decoded.username);
           }
-        }
-
-        // Token is valid
-        const response: { success: boolean; message: string; token?: string } = {
-          success: true,
-          message: 'Already authenticated',
-        };
-
-        if (newToken) {
-          response.token = newToken;
         }
 
         res.json(response);
         return;
-      } catch (error) {
-        // Token invalid or expired, continue with username/password login
-        console.log('Token validation failed, proceeding with credentials');
       }
+      // Token invalid or expired, fall through to username/password login
     }
 
-    // Validate input
+    // Validate input for credential-based login
     if (!username || !password) {
       res.status(400).json({ success: false, message: 'Username and password are required' });
       return;
@@ -718,12 +709,12 @@ app.post('/api/login', async (req, res) => {
     }
 
     // Create JWT token (expires in 30 minutes)
-    const newToken = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET, { expiresIn: '30m' });
+    const token = generateToken(user.id, user.username);
 
     res.json({
       success: true,
       message: 'Login successful',
-      token: newToken,
+      token,
     });
   } catch (error) {
     console.error('Login error:', error);
@@ -782,26 +773,8 @@ app.post('/api/login', async (req, res) => {
  *       401:
  *         description: Unauthorized - invalid or missing token
  */
-app.post('/api/createCollection', async (req, res) => {
+app.post('/api/createCollection', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
-    const authHeader = req.headers['authorization'] || req.headers['Authorization'];
-    const authValue = typeof authHeader === 'string' ? authHeader : authHeader?.[0];
-    const token = authValue?.startsWith('Bearer ') ? authValue.substring(7) : null;
-
-    if (!token) {
-      res.status(401).json({ success: false, message: 'No token provided' });
-      return;
-    }
-
-    // Verify token and extract user info
-    let decoded: { userId: string; username: string; iat?: number; exp?: number };
-    try {
-      decoded = jwt.verify(token, JWT_SECRET) as { userId: string; username: string; iat?: number; exp?: number };
-    } catch (error) {
-      res.status(401).json({ success: false, message: 'Invalid or expired token' });
-      return;
-    }
-
     const { collectionName } = req.body as { collectionName?: string };
 
     if (!collectionName) {
@@ -812,30 +785,10 @@ app.post('/api/createCollection', async (req, res) => {
     // Get or create the collection
     await db.getCollection(collectionName);
 
-    // Check if token is about to expire (5 minutes or less)
-    let newToken: string | undefined;
-    if (decoded.exp) {
-      const currentTime = Math.floor(Date.now() / 1000);
-      const timeUntilExpiry = decoded.exp - currentTime;
-
-      // If less than 5 minutes (300 seconds) remaining, issue new token
-      if (timeUntilExpiry <= 300) {
-        newToken = jwt.sign({ userId: decoded.userId, username: decoded.username }, JWT_SECRET, { expiresIn: '30m' });
-      }
-    }
-
-    const response: {
-      success: boolean;
-      collectionName: string;
-      token?: string;
-    } = {
+    const response = addTokenToResponse(req, {
       success: true,
-      collectionName,
-    };
-
-    if (newToken) {
-      response.token = newToken;
-    }
+      collectionName: String,
+    });
 
     res.status(201).json(response);
   } catch (error) {
@@ -887,26 +840,8 @@ app.post('/api/createCollection', async (req, res) => {
  *       401:
  *         description: Unauthorized - invalid or missing token
  */
-app.get('/api/fetchCollections', async (req, res) => {
+app.get('/api/fetchCollections', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
-    const authHeader = req.headers['authorization'] || req.headers['Authorization'];
-    const authValue = typeof authHeader === 'string' ? authHeader : authHeader?.[0];
-    const token = authValue?.startsWith('Bearer ') ? authValue.substring(7) : null;
-
-    if (!token) {
-      res.status(401).json({ success: false, message: 'No token provided' });
-      return;
-    }
-
-    // Verify token and extract user info
-    let decoded: { userId: string; username: string; iat?: number; exp?: number };
-    try {
-      decoded = jwt.verify(token, JWT_SECRET) as { userId: string; username: string; iat?: number; exp?: number };
-    } catch (error) {
-      res.status(401).json({ success: false, message: 'Invalid or expired token' });
-      return;
-    }
-
     // Get all collection names from the catalog
     const collectionNames = new Set<string>();
 
@@ -918,29 +853,10 @@ app.get('/api/fetchCollections', async (req, res) => {
     // Get list of collections (just names)
     const collections = Array.from(collectionNames);
 
-    // Check if token is about to expire (5 minutes or less)
-    let newToken: string | undefined;
-    if (decoded.exp) {
-      const currentTime = Math.floor(Date.now() / 1000);
-      const timeUntilExpiry = decoded.exp - currentTime;
-
-      if (timeUntilExpiry <= 300) {
-        newToken = jwt.sign({ userId: decoded.userId, username: decoded.username }, JWT_SECRET, { expiresIn: '30m' });
-      }
-    }
-
-    const response: {
-      success: boolean;
-      collections: string[];
-      token?: string;
-    } = {
+    const response = addTokenToResponse(req, {
       success: true,
       collections,
-    };
-
-    if (newToken) {
-      response.token = newToken;
-    }
+    });
 
     res.json(response);
   } catch (error) {
@@ -997,26 +913,8 @@ app.get('/api/fetchCollections', async (req, res) => {
  *       401:
  *         description: Unauthorized - invalid or missing token
  */
-app.get('/api/collections/all', async (req, res) => {
+app.get('/api/collections/all', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
-    const authHeader = req.headers['authorization'] || req.headers['Authorization'];
-    const authValue = typeof authHeader === 'string' ? authHeader : authHeader?.[0];
-    const token = authValue?.startsWith('Bearer ') ? authValue.substring(7) : null;
-
-    if (!token) {
-      res.status(401).json({ success: false, message: 'No token provided' });
-      return;
-    }
-
-    // Verify token and extract user info
-    let decoded: { userId: string; username: string; iat?: number; exp?: number };
-    try {
-      decoded = jwt.verify(token, JWT_SECRET) as { userId: string; username: string; iat?: number; exp?: number };
-    } catch (error) {
-      res.status(401).json({ success: false, message: 'Invalid or expired token' });
-      return;
-    }
-
     // Get all collection names from the catalog
     const collectionNames = new Set<string>();
 
@@ -1035,7 +933,7 @@ app.get('/api/collections/all', async (req, res) => {
       // Filter documents that belong to this user
       const userDocs = allDocs.filter((doc) => {
         const docData = doc as unknown as { userId?: string };
-        return docData.userId === decoded.userId;
+        return docData.userId === req.user!.userId;
       });
 
       // Only include collections where user has documents
@@ -1048,29 +946,10 @@ app.get('/api/collections/all', async (req, res) => {
       }
     }
 
-    // Check if token is about to expire (5 minutes or less)
-    let newToken: string | undefined;
-    if (decoded.exp) {
-      const currentTime = Math.floor(Date.now() / 1000);
-      const timeUntilExpiry = decoded.exp - currentTime;
-
-      if (timeUntilExpiry <= 300) {
-        newToken = jwt.sign({ userId: decoded.userId, username: decoded.username }, JWT_SECRET, { expiresIn: '30m' });
-      }
-    }
-
-    const response: {
-      success: boolean;
-      collections: Array<{ name: string; documentCount: number; documents: unknown[] }>;
-      token?: string;
-    } = {
+    const response = addTokenToResponse(req, {
       success: true,
       collections: userCollections,
-    };
-
-    if (newToken) {
-      response.token = newToken;
-    }
+    });
 
     res.json(response);
   } catch (error) {

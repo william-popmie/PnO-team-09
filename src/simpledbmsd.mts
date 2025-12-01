@@ -604,10 +604,6 @@ app.post('/api/signup', async (req, res) => {
       success: true,
       message: 'User created successfully',
       token,
-      user: {
-        id: newUser.id,
-        username,
-      },
     });
   } catch (error) {
     console.error('Signup error:', error);
@@ -655,17 +651,11 @@ app.post('/api/login', async (req, res) => {
     // If token is provided, validate it
     if (existingToken) {
       try {
-        const decoded = jwt.verify(existingToken, JWT_SECRET) as { userId: string; username: string };
-
         // Token is valid, return user info
         res.json({
           success: true,
           message: 'Already authenticated',
           token: existingToken,
-          user: {
-            id: decoded.userId,
-            username: decoded.username,
-          },
         });
         return;
       } catch (error) {
@@ -708,10 +698,6 @@ app.post('/api/login', async (req, res) => {
       success: true,
       message: 'Login successful',
       token,
-      user: {
-        id: user.id,
-        username: user.username,
-      },
     });
   } catch (error) {
     console.error('Login error:', error);

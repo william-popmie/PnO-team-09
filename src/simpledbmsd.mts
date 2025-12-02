@@ -804,7 +804,7 @@ app.post('/api/createCollection', authenticateToken, async (req: AuthenticatedRe
 
     const response = addTokenToResponse(req, {
       success: true,
-      collectionName,
+      message: `Collection created succesfully and assigned to: ${req.user!.username}`,
     });
 
     res.status(201).json(response);

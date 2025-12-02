@@ -1311,6 +1311,126 @@ app.get('/api/fetchDocuments', authenticateToken, async (req: AuthenticatedReque
   }
 });
 
+/**
+ * @swagger
+ * /api/fetchDocumentContent:
+ *   get:
+ *     summary: Get the content of a specific document from a collection
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: header
+ *         name: Authorization
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Bearer token (format - "Bearer YOUR_JWT_TOKEN")
+ *         example: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+ *       - in: query
+ *         name: collectionName
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Name of the collection containing the document
+ *         example: myTasks
+ *       - in: query
+ *         name: documentName
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Name of the document to fetch
+ *         example: Buy groceries
+ *     responses:
+ *       200:
+ *         description: Document content retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Document content fetched successfully
+ *                 documentContent:
+ *                   type: object
+ *                   description: The full content of the document
+ *                   example: { "description": "Buy milk and eggs", "priority": "high", "completed": false, "createdAt": "2025-12-03T10:30:00.000Z" }
+ *                 token:
+ *                   type: string
+ *                   description: New token if the old one was about to expire (within 5 minutes)
+ *       400:
+ *         description: Bad request - missing required parameters or collection not found
+ *       404:
+ *         description: Document not found
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ */
+app.get('/api/fetchDocumentContent', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const collectionName = req.query['collectionName'] as string | undefined;
+    const documentName = req.query['documentName'] as string | undefined;
+
+    if (!collectionName || !documentName) {
+      res.status(400).json({ success: false, message: 'collectionName and documentName are required' });
+      return;
+    }
+
+    // Verify user has access to this collection
+    const usersCollection = await db.getCollection('users');
+    const user = await usersCollection.findById(req.user!.userId);
+
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    const userData = user as unknown as { collections?: string[] };
+
+    // Check if collection exists in user's list
+    if (!userData.collections || !userData.collections.includes(collectionName)) {
+      res.status(400).json({ success: false, message: 'Collection not found in user collections' });
+      return;
+    }
+
+    // Find the document in the collection
+    const collection = await db.getCollection(collectionName);
+    const allDocuments = await collection.find();
+
+    // Find the document by name and userId
+    const document = allDocuments.find((doc) => {
+      const docData = doc as unknown as { name?: string; userId?: string };
+      return docData.name === documentName && docData.userId === req.user!.userId;
+    });
+
+    if (!document) {
+      res.status(404).json({ success: false, message: 'Document not found' });
+      return;
+    }
+
+    // Extract document content (everything except id, name, and userId)
+    const { id, name, userId, ...documentContent } = document as unknown as {
+      id: string;
+      name: string;
+      userId: string;
+      [key: string]: unknown;
+    };
+
+    const response = addTokenToResponse(req, {
+      success: true,
+      message: 'Document content fetched successfully',
+      documentContent,
+    });
+
+    res.json(response);
+  } catch (error) {
+    console.error('Fetch document content error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // Start server
 if (process.env['NODE_ENV'] !== 'test') {
   initDB()

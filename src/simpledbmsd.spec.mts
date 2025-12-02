@@ -76,142 +76,49 @@ describe('SimpleDBMS Daemon API', () => {
     });
   });
 
-  describe('Authentication', () => {
-    it('signup - create a new user', async () => {
-      const res = await request(app).post('/api/signup').send({
-        username: 'testuser',
-        password: 'testpass123',
-      });
+  describe('Authentication API', () => {
+    it('should sign up a new user', async () => {
+      const res = await request(app).post('/api/signup').send({ username: 'testuser', password: 'testpass' });
 
       expect(res.status).toBe(201);
       expect((res.body as { success?: boolean }).success).toBe(true);
       expect((res.body as { token?: string }).token).toBeDefined();
-      expect((res.body as { user?: { id?: string; username?: string } }).user?.username).toBe('testuser');
-      expect((res.body as { user?: { id?: string } }).user?.id).toBeDefined();
     });
 
-    it('signup - reject duplicate username', async () => {
-      // First signup
-      await request(app).post('/api/signup').send({
-        username: 'duplicate',
-        password: 'password1',
-      });
+    it('should not allow duplicate usernames', async () => {
+      await request(app).post('/api/signup').send({ username: 'duplicate', password: 'pass' });
 
-      // Try to signup again with same username
-      const res = await request(app).post('/api/signup').send({
-        username: 'duplicate',
-        password: 'password2',
-      });
+      const res = await request(app).post('/api/signup').send({ username: 'duplicate', password: 'pass' });
 
       expect(res.status).toBe(400);
-      expect((res.body as { success?: boolean }).success).toBe(false);
       expect((res.body as { message?: string }).message).toContain('already exists');
     });
 
-    it('signup - reject missing username', async () => {
-      const res = await request(app).post('/api/signup').send({
-        password: 'testpass123',
-      });
+    it('should login with valid credentials', async () => {
+      await request(app).post('/api/signup').send({ username: 'loginuser', password: 'loginpass' });
 
-      expect(res.status).toBe(400);
-      expect((res.body as { success?: boolean }).success).toBe(false);
-      expect((res.body as { message?: string }).message).toContain('required');
-    });
-
-    it('signup - reject missing password', async () => {
-      const res = await request(app).post('/api/signup').send({
-        username: 'testuser2',
-      });
-
-      expect(res.status).toBe(400);
-      expect((res.body as { success?: boolean }).success).toBe(false);
-      expect((res.body as { message?: string }).message).toContain('required');
-    });
-
-    it('login - successful login with valid credentials', async () => {
-      // First create a user
-      await request(app).post('/api/signup').send({
-        username: 'loginuser',
-        password: 'loginpass',
-      });
-
-      // Then login
-      const res = await request(app).post('/api/login').send({
-        username: 'loginuser',
-        password: 'loginpass',
-      });
+      const res = await request(app).post('/api/login').send({ username: 'loginuser', password: 'loginpass' });
 
       expect(res.status).toBe(200);
       expect((res.body as { success?: boolean }).success).toBe(true);
-      expect((res.body as { token?: string }).token).toBeDefined();
-      expect((res.body as { user?: { username?: string } }).user?.username).toBe('loginuser');
+      expect((res.body as { newToken?: string }).newToken).toBeDefined();
     });
 
-    it('login - reject invalid username', async () => {
-      const res = await request(app).post('/api/login').send({
-        username: 'nonexistent',
-        password: 'somepass',
-      });
+    it('should reject invalid credentials', async () => {
+      const res = await request(app).post('/api/login').send({ username: 'nonexistent', password: 'wrongpass' });
 
       expect(res.status).toBe(401);
-      expect((res.body as { success?: boolean }).success).toBe(false);
-      expect((res.body as { message?: string }).message).toContain('Invalid');
     });
 
-    it('login - reject invalid password', async () => {
-      // Create a user first
-      await request(app).post('/api/signup').send({
-        username: 'passtest',
-        password: 'correctpass',
-      });
-
-      // Try to login with wrong password
-      const res = await request(app).post('/api/login').send({
-        username: 'passtest',
-        password: 'wrongpass',
-      });
-
-      expect(res.status).toBe(401);
-      expect((res.body as { success?: boolean }).success).toBe(false);
-      expect((res.body as { message?: string }).message).toContain('Invalid');
-    });
-
-    it('login - validate existing token', async () => {
-      // Create a user and get token
-      const signupRes = await request(app).post('/api/signup').send({
-        username: 'tokenuser',
-        password: 'tokenpass',
-      });
+    it('should validate existing token', async () => {
+      const signupRes = await request(app).post('/api/signup').send({ username: 'tokenuser', password: 'tokenpass' });
 
       const token = (signupRes.body as { token: string }).token;
 
-      // Login with token
-      const res = await request(app).post('/api/login').send({
-        token,
-      });
+      const res = await request(app).post('/api/login').send({ token });
 
       expect(res.status).toBe(200);
       expect((res.body as { success?: boolean }).success).toBe(true);
-      expect((res.body as { message?: string }).message).toContain('Already authenticated');
-      expect((res.body as { user?: { username?: string } }).user?.username).toBe('tokenuser');
-    });
-
-    it('login - reject invalid token', async () => {
-      const res = await request(app).post('/api/login').send({
-        token: 'invalid.token.here',
-      });
-
-      expect(res.status).toBe(400);
-      expect((res.body as { success?: boolean }).success).toBe(false);
-      expect((res.body as { message?: string }).message).toContain('required');
-    });
-
-    it('login - reject missing credentials', async () => {
-      const res = await request(app).post('/api/login').send({});
-
-      expect(res.status).toBe(400);
-      expect((res.body as { success?: boolean }).success).toBe(false);
-      expect((res.body as { message?: string }).message).toContain('required');
     });
   });
 

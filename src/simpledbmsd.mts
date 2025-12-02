@@ -1072,8 +1072,22 @@ app.post('/api/createDocument', authenticateToken, async (req: AuthenticatedRequ
       return;
     }
 
-    // Create the document in the collection
+    // Get the collection and check for duplicate document names
     const collection = await db.getCollection(collectionName);
+    const existingDocuments = await collection.find();
+
+    // Check if a document with this name already exists for this user in this collection
+    const documentExists = existingDocuments.some((doc) => {
+      const docData = doc as unknown as { name?: string; userId?: string };
+      return docData.name === documentName && docData.userId === req.user!.userId;
+    });
+
+    if (documentExists) {
+      res.status(400).json({ success: false, message: 'A document with this name already exists in the collection' });
+      return;
+    }
+
+    // Create the document in the collection
     await collection.insert({
       name: documentName,
       userId: req.user!.userId,

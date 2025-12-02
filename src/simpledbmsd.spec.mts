@@ -185,187 +185,152 @@ describe('SimpleDBMS Daemon API', () => {
     });
   });
 
-  describe('Collections API - GET /api/collections', () => {
+  describe('Document Management API', () => {
     let authToken: string;
-    let userId: string;
+    const collectionName = 'testDocs';
 
     beforeAll(async () => {
-      // Create a user and get auth token
-      const signupRes = await request(app).post('/api/signup').send({
-        username: 'getcollectionuser',
-        password: 'getcollectionpass',
-      });
-
+      const signupRes = await request(app).post('/api/signup').send({ username: 'docuser', password: 'pass' });
       authToken = (signupRes.body as { token: string }).token;
-      userId = (signupRes.body as { user: { id: string } }).user.id;
-
-      // Create multiple documents in different collections
-      await request(app)
-        .post('/api/collections')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({
-          collectionName: 'notes',
-          document: { content: 'Note 1' },
-        });
 
       await request(app)
-        .post('/api/collections')
+        .post('/api/createCollection')
         .set('Authorization', `Bearer ${authToken}`)
-        .send({
-          collectionName: 'notes',
-          document: { content: 'Note 2' },
-        });
-
-      await request(app)
-        .post('/api/collections')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({
-          collectionName: 'todos',
-          document: { task: 'Todo 1' },
-        });
+        .send({ collectionName });
     });
 
-    it('get all user collections with document counts', async () => {
-      const res = await request(app).get('/api/collections').set('Authorization', `Bearer ${authToken}`);
+    it('should create a document', async () => {
+      const res = await request(app)
+        .post('/api/createDocument')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          collectionName,
+          documentName: 'MyFirstDoc',
+          documentContent: { text: 'Hello World', priority: 'high' },
+        });
+
+      expect(res.status).toBe(201);
+      expect((res.body as { success?: boolean }).success).toBe(true);
+    });
+
+    it('should not allow duplicate document names', async () => {
+      await request(app)
+        .post('/api/createDocument')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          collectionName,
+          documentName: 'DuplicateDoc',
+          documentContent: { text: 'First' },
+        });
+
+      const res = await request(app)
+        .post('/api/createDocument')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          collectionName,
+          documentName: 'DuplicateDoc',
+          documentContent: { text: 'Second' },
+        });
+
+      expect(res.status).toBe(400);
+      expect((res.body as { message?: string }).message).toContain('already exists');
+    });
+
+    it('should fetch all document names', async () => {
+      const res = await request(app)
+        .get('/api/fetchDocuments')
+        .set('Authorization', `Bearer ${authToken}`)
+        .query({ collectionName });
 
       expect(res.status).toBe(200);
       expect((res.body as { success?: boolean }).success).toBe(true);
-      expect((res.body as { collections?: unknown[] }).collections).toBeDefined();
-      expect(Array.isArray((res.body as { collections?: unknown[] }).collections)).toBe(true);
-
-      const collections = (res.body as { collections: Array<{ name: string; documentCount: number }> }).collections;
-
-      // Find the notes collection
-      const notesCollection = collections.find((c) => c.name === 'notes');
-      expect(notesCollection).toBeDefined();
-      expect(notesCollection?.documentCount).toBeGreaterThanOrEqual(2);
-
-      // Find the todos collection
-      const todosCollection = collections.find((c) => c.name === 'todos');
-      expect(todosCollection).toBeDefined();
-      expect(todosCollection?.documentCount).toBeGreaterThanOrEqual(1);
+      expect(Array.isArray((res.body as { documentNames?: string[] }).documentNames)).toBe(true);
     });
 
-    it('reject missing token', async () => {
-      const res = await request(app).get('/api/collections');
-
-      expect(res.status).toBe(401);
-      expect((res.body as { success?: boolean }).success).toBe(false);
-      expect((res.body as { message?: string }).message).toContain('No token provided');
-    });
-
-    it('reject invalid token', async () => {
-      const res = await request(app).get('/api/collections').set('Authorization', 'Bearer invalid.token.here');
-
-      expect(res.status).toBe(401);
-      expect((res.body as { success?: boolean }).success).toBe(false);
-      expect((res.body as { message?: string }).message).toContain('Invalid or expired token');
-    });
-
-    it('only return collections for authenticated user', async () => {
-      // Create another user
-      const otherUserRes = await request(app).post('/api/signup').send({
-        username: 'otheruser',
-        password: 'otherpass',
-      });
-
-      const otherToken = (otherUserRes.body as { token: string }).token;
-
-      // Create a collection for the other user
+    it('should fetch document content', async () => {
       await request(app)
-        .post('/api/collections')
-        .set('Authorization', `Bearer ${otherToken}`)
-        .send({
-          collectionName: 'privateCollection',
-          document: { secret: 'data' },
-        });
-
-      // Get collections for the original user
-      const res = await request(app).get('/api/collections').set('Authorization', `Bearer ${authToken}`);
-
-      expect(res.status).toBe(200);
-      const collections = (res.body as { collections: Array<{ name: string }> }).collections;
-
-      // The original user should not see the other user's private collection
-      const hasPrivateCollection = collections.some((c) => c.name === 'privateCollection');
-      expect(hasPrivateCollection).toBe(false);
-    });
-  });
-
-  describe('Collections API - GET /api/collections/all', () => {
-    let authToken: string;
-    let userId: string;
-
-    beforeAll(async () => {
-      // Create a user and get auth token
-      const signupRes = await request(app).post('/api/signup').send({
-        username: 'getallcollectionuser',
-        password: 'getallcollectionpass',
-      });
-
-      authToken = (signupRes.body as { token: string }).token;
-      userId = (signupRes.body as { user: { id: string } }).user.id;
-
-      // Create some test data
-      await request(app)
-        .post('/api/collections')
+        .post('/api/createDocument')
         .set('Authorization', `Bearer ${authToken}`)
         .send({
-          collectionName: 'projects',
-          document: { name: 'Project A', status: 'active' },
+          collectionName,
+          documentName: 'ContentDoc',
+          documentContent: { description: 'Test content', value: 42 },
         });
 
-      await request(app)
-        .post('/api/collections')
+      const res = await request(app)
+        .get('/api/fetchDocumentContent')
         .set('Authorization', `Bearer ${authToken}`)
-        .send({
-          collectionName: 'projects',
-          document: { name: 'Project B', status: 'completed' },
-        });
-    });
-
-    it('get all collections with full documents', async () => {
-      const res = await request(app).get('/api/collections/all').set('Authorization', `Bearer ${authToken}`);
+        .query({ collectionName, documentName: 'ContentDoc' });
 
       expect(res.status).toBe(200);
       expect((res.body as { success?: boolean }).success).toBe(true);
-      expect((res.body as { collections?: unknown[] }).collections).toBeDefined();
-      expect(Array.isArray((res.body as { collections?: unknown[] }).collections)).toBe(true);
-
-      const collections = (
-        res.body as {
-          collections: Array<{ name: string; documentCount: number; documents: unknown[] }>;
-        }
-      ).collections;
-
-      // Each collection should have documents array
-      for (const collection of collections) {
-        expect(collection.name).toBeDefined();
-        expect(collection.documentCount).toBeGreaterThan(0);
-        expect(Array.isArray(collection.documents)).toBe(true);
-        expect(collection.documents.length).toBe(collection.documentCount);
-
-        // Each document should have userId matching our user
-        for (const doc of collection.documents) {
-          expect((doc as { userId?: string }).userId).toBe(userId);
-        }
-      }
+      expect((res.body as { documentContent?: { description?: string } }).documentContent?.description).toBe(
+        'Test content',
+      );
     });
 
-    it('reject missing token', async () => {
-      const res = await request(app).get('/api/collections/all');
+    it('should update document content', async () => {
+      await request(app)
+        .post('/api/createDocument')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          collectionName,
+          documentName: 'UpdateDoc',
+          documentContent: { status: 'draft' },
+        });
 
-      expect(res.status).toBe(401);
-      expect((res.body as { success?: boolean }).success).toBe(false);
-      expect((res.body as { message?: string }).message).toContain('No token provided');
+      const res = await request(app)
+        .put('/api/updateDocument')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          collectionName,
+          documentName: 'UpdateDoc',
+          newDocumentContent: { status: 'published', views: 100 },
+        });
+
+      expect(res.status).toBe(200);
+      expect((res.body as { success?: boolean }).success).toBe(true);
+
+      const checkRes = await request(app)
+        .get('/api/fetchDocumentContent')
+        .set('Authorization', `Bearer ${authToken}`)
+        .query({ collectionName, documentName: 'UpdateDoc' });
+
+      expect((checkRes.body as { documentContent?: { status?: string } }).documentContent?.status).toBe('published');
     });
 
-    it('reject invalid token', async () => {
-      const res = await request(app).get('/api/collections/all').set('Authorization', 'Bearer invalid.token.here');
+    it('should delete a document', async () => {
+      await request(app)
+        .post('/api/createDocument')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          collectionName,
+          documentName: 'DeleteDoc',
+          documentContent: { temp: true },
+        });
+
+      const res = await request(app)
+        .delete('/api/deleteDocument')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ collectionName, documentName: 'DeleteDoc' });
+
+      expect(res.status).toBe(200);
+      expect((res.body as { success?: boolean }).success).toBe(true);
+
+      const checkRes = await request(app)
+        .get('/api/fetchDocumentContent')
+        .set('Authorization', `Bearer ${authToken}`)
+        .query({ collectionName, documentName: 'DeleteDoc' });
+
+      expect(checkRes.status).toBe(404);
+    });
+
+    it('should reject unauthorized document operations', async () => {
+      const res = await request(app)
+        .post('/api/createDocument')
+        .send({ collectionName, documentName: 'Unauthorized', documentContent: {} });
 
       expect(res.status).toBe(401);
-      expect((res.body as { success?: boolean }).success).toBe(false);
-      expect((res.body as { message?: string }).message).toContain('Invalid or expired token');
     });
   });
 });

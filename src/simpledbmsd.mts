@@ -1445,6 +1445,134 @@ app.get('/api/fetchDocumentContent', authenticateToken, async (req: Authenticate
   }
 });
 
+/**
+ * @swagger
+ * /api/updateDocument:
+ *   put:
+ *     summary: Update the content of a document in a collection
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: header
+ *         name: Authorization
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Bearer token (format - "Bearer YOUR_JWT_TOKEN")
+ *         example: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - collectionName
+ *               - documentName
+ *               - newDocumentContent
+ *             properties:
+ *               collectionName:
+ *                 type: string
+ *                 description: Name of the collection containing the document
+ *                 example: myTasks
+ *               documentName:
+ *                 type: string
+ *                 description: Name of the document to update
+ *                 example: Buy groceries
+ *               newDocumentContent:
+ *                 type: object
+ *                 description: New content to replace the document's content
+ *                 example: { "description": "Buy milk, eggs, and bread", "priority": "urgent", "completed": true }
+ *     responses:
+ *       200:
+ *         description: Document updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Document updated successfully
+ *                 token:
+ *                   type: string
+ *                   description: New token if the old one was about to expire (within 5 minutes)
+ *       400:
+ *         description: Bad request - missing required fields or collection not found
+ *       404:
+ *         description: Document not found
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ */
+app.put('/api/updateDocument', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { collectionName, documentName, newDocumentContent } = req.body as {
+      collectionName?: string;
+      documentName?: string;
+      newDocumentContent?: Record<string, unknown>;
+    };
+
+    if (!collectionName || !documentName || !newDocumentContent) {
+      res
+        .status(400)
+        .json({ success: false, message: 'collectionName, documentName, and newDocumentContent are required' });
+      return;
+    }
+
+    // Verify user has access to this collection
+    const usersCollection = await db.getCollection('users');
+    const user = await usersCollection.findById(req.user!.userId);
+
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    const userData = user as unknown as { collections?: string[] };
+
+    // Check if collection exists in user's list
+    if (!userData.collections || !userData.collections.includes(collectionName)) {
+      res.status(400).json({ success: false, message: 'Collection not found in user collections' });
+      return;
+    }
+
+    // Find the document in the collection
+    const collection = await db.getCollection(collectionName);
+    const allDocuments = await collection.find();
+
+    // Find the document by name and userId
+    const document = allDocuments.find((doc) => {
+      const docData = doc as unknown as { name?: string; userId?: string };
+      return docData.name === documentName && docData.userId === req.user!.userId;
+    });
+
+    if (!document) {
+      res.status(404).json({ success: false, message: 'Document not found' });
+      return;
+    }
+
+    // Update the document with new content (keeping name, userId, and original createdAt)
+    await collection.update(document.id, {
+      ...newDocumentContent,
+      name: documentName, // Keep the original name
+      userId: req.user!.userId, // Keep the original userId
+    });
+
+    const response = addTokenToResponse(req, {
+      success: true,
+      message: `Document '${documentName}' updated successfully in collection '${collectionName}'`,
+    });
+
+    res.json(response);
+  } catch (error) {
+    console.error('Update document error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // Start server
 if (process.env['NODE_ENV'] !== 'test') {
   initDB()

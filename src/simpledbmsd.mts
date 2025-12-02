@@ -831,7 +831,7 @@ app.post('/api/createCollection', authenticateToken, async (req: AuthenticatedRe
  *         example: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
  *     responses:
  *       200:
- *         description: List of user's collections with document counts
+ *         description: List of user's collection names
  *         content:
  *           application/json:
  *             schema:
@@ -840,38 +840,42 @@ app.post('/api/createCollection', authenticateToken, async (req: AuthenticatedRe
  *                 success:
  *                   type: boolean
  *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: collections fetched successfully
  *                 collections:
  *                   type: array
  *                   items:
- *                     type: object
- *                     properties:
- *                       name:
- *                         type: string
- *                         example: myTasks
- *                       documentCount:
- *                         type: number
- *                         example: 5
+ *                     type: string
+ *                   example: ["myTasks", "myNotes", "todos"]
  *                 token:
  *                   type: string
  *                   description: New token if the old one was about to expire (within 5 minutes)
+ *       400:
+ *         description: Server error when fetching user collections
  *       401:
  *         description: Unauthorized - invalid or missing token
  */
 app.get('/api/fetchCollections', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
-    // Get all collection names from the catalog
-    const collectionNames = new Set<string>();
+    // Get user's collections list
+    const usersCollection = await db.getCollection('users');
+    const user = await usersCollection.findById(req.user!.userId);
 
-    // Add collections that are already loaded in memory
-    for (const name of db['collections'].keys()) {
-      collectionNames.add(name);
+    let collections: string[] = [];
+    if (user) {
+      const userData = user as unknown as { collections: string[] };
+      collections = userData.collections || null;
     }
 
-    // Get list of collections (just names)
-    const collections = Array.from(collectionNames);
+    if (!collections) {
+      res.status(400).json({ success: false, message: 'Server error when fetching usercollections' });
+      return;
+    }
 
     const response = addTokenToResponse(req, {
       success: true,
+      message: 'collections fetched succesfully',
       collections,
     });
 

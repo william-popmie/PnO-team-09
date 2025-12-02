@@ -888,9 +888,9 @@ app.get('/api/fetchCollections', authenticateToken, async (req: AuthenticatedReq
 
 /**
  * @swagger
- * /api/collections/all:
- *   get:
- *     summary: Get all collections with all documents for the authenticated user
+ * /api/deleteCollection:
+ *   delete:
+ *     summary: Delete a collection from the authenticated user
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -901,9 +901,22 @@ app.get('/api/fetchCollections', authenticateToken, async (req: AuthenticatedReq
  *           type: string
  *         description: Bearer token (format - "Bearer YOUR_JWT_TOKEN")
  *         example: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - collectionName
+ *             properties:
+ *               collectionName:
+ *                 type: string
+ *                 description: Name of the collection to delete
+ *                 example: myTasks
  *     responses:
  *       200:
- *         description: All user's collections with all their documents
+ *         description: Collection deleted successfully
  *         content:
  *           application/json:
  *             schema:
@@ -912,69 +925,55 @@ app.get('/api/fetchCollections', authenticateToken, async (req: AuthenticatedReq
  *                 success:
  *                   type: boolean
  *                   example: true
- *                 collections:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       name:
- *                         type: string
- *                         example: myTasks
- *                       documentCount:
- *                         type: number
- *                         example: 5
- *                       documents:
- *                         type: array
- *                         items:
- *                           type: object
- *                         example: [{ "id": "abc123", "title": "Buy groceries", "completed": false, "userId": "user123" }]
+ *                 message:
+ *                   type: string
+ *                   example: Collection deleted successfully
  *                 token:
  *                   type: string
  *                   description: New token if the old one was about to expire (within 5 minutes)
+ *       400:
+ *         description: Bad request - missing collectionName or collection not found
  *       401:
  *         description: Unauthorized - invalid or missing token
  */
-app.get('/api/collections/all', authenticateToken, async (req: AuthenticatedRequest, res) => {
+app.delete('/api/deleteCollection', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
-    // Get all collection names from the catalog
-    const collectionNames = new Set<string>();
+    const { collectionName } = req.body as { collectionName?: string };
 
-    // Add collections that are already loaded in memory
-    for (const name of db['collections'].keys()) {
-      collectionNames.add(name);
+    if (!collectionName) {
+      res.status(400).json({ success: false, message: 'collectionName is required' });
+      return;
     }
 
-    // For each collection, get all documents belonging to this user
-    const userCollections: Array<{ name: string; documentCount: number; documents: unknown[] }> = [];
+    // Get user document
+    const usersCollection = await db.getCollection('users');
+    const user = await usersCollection.findById(req.user!.userId);
 
-    for (const collectionName of collectionNames) {
-      const collection = await db.getCollection(collectionName);
-      const allDocs = await collection.find();
-
-      // Filter documents that belong to this user
-      const userDocs = allDocs.filter((doc) => {
-        const docData = doc as unknown as { userId?: string };
-        return docData.userId === req.user!.userId;
-      });
-
-      // Only include collections where user has documents
-      if (userDocs.length > 0) {
-        userCollections.push({
-          name: collectionName,
-          documentCount: userDocs.length,
-          documents: userDocs,
-        });
-      }
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
     }
+
+    const userData = user as unknown as { collections: string[] };
+
+    // Check if collection exists in user's list
+    if (!userData.collections.includes(collectionName)) {
+      res.status(400).json({ success: false, message: 'Collection not found in user collections' });
+      return;
+    }
+
+    // Remove collection from user's list
+    userData.collections = userData.collections.filter((name) => name !== collectionName);
+    await usersCollection.update(req.user!.userId, { collections: userData.collections });
 
     const response = addTokenToResponse(req, {
       success: true,
-      collections: userCollections,
+      message: `Collection '${collectionName}' deleted successfully`,
     });
 
     res.json(response);
   } catch (error) {
-    console.error('Get all collections error:', error);
+    console.error('Delete collection error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });

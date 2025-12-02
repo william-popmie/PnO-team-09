@@ -983,6 +983,116 @@ app.delete('/api/deleteCollection', authenticateToken, async (req: Authenticated
   }
 });
 
+/**
+ * @swagger
+ * /api/createDocument:
+ *   post:
+ *     summary: Create a new document in a collection for the authenticated user
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: header
+ *         name: Authorization
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Bearer token (format - "Bearer YOUR_JWT_TOKEN")
+ *         example: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - collectionName
+ *               - documentName
+ *             properties:
+ *               collectionName:
+ *                 type: string
+ *                 description: Name of the collection to add the document to
+ *                 example: myTasks
+ *               documentName:
+ *                 type: string
+ *                 description: Name of the document
+ *                 example: Buy groceries
+ *               documentContent:
+ *                 type: object
+ *                 description: Content of the document (JSON object)
+ *                 example: { "description": "Buy milk and eggs", "priority": "high", "completed": false }
+ *     responses:
+ *       201:
+ *         description: Document created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Document created successfully
+ *                 token:
+ *                   type: string
+ *                   description: New token if the old one was about to expire (within 5 minutes)
+ *       400:
+ *         description: Bad request - missing required fields or collection not found
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ */
+app.post('/api/createDocument', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { collectionName, documentName, documentContent } = req.body as {
+      collectionName?: string;
+      documentName?: string;
+      documentContent?: Record<string, unknown>;
+    };
+
+    if (!collectionName || !documentName) {
+      res.status(400).json({ success: false, message: 'collectionName and documentName are required' });
+      return;
+    }
+
+    // Verify user has access to this collection
+    const usersCollection = await db.getCollection('users');
+    const user = await usersCollection.findById(req.user!.userId);
+
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    const userData = user as unknown as { collections?: string[] };
+
+    // Check if collection exists in user's list
+    if (!userData.collections || !userData.collections.includes(collectionName)) {
+      res.status(400).json({ success: false, message: 'Collection not found in user collections' });
+      return;
+    }
+
+    // Create the document in the collection
+    const collection = await db.getCollection(collectionName);
+    await collection.insert({
+      name: documentName,
+      userId: req.user!.userId,
+      createdAt: new Date().toISOString(),
+      ...documentContent, // Spread the document content into the document
+    });
+
+    const response = addTokenToResponse(req, {
+      success: true,
+      message: `Document '${documentName}' created successfully in collection '${collectionName}'`,
+    });
+
+    res.status(201).json(response);
+  } catch (error) {
+    console.error('Create document error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // Start server
 if (process.env['NODE_ENV'] !== 'test') {
   initDB()

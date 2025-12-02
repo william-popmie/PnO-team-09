@@ -788,7 +788,12 @@ app.post('/api/createCollection', authenticateToken, async (req: AuthenticatedRe
     const user = await usersCollection.findById(req.user!.userId);
 
     if (user) {
-      const userData = user as unknown as { collections: string[] };
+      const userData = user as unknown as { collections?: string[] };
+
+      // Initialize collections array if it doesn't exist
+      if (!userData.collections) {
+        userData.collections = [];
+      }
 
       // Check if collection already exists for this user
       if (userData.collections.includes(collectionName)) {

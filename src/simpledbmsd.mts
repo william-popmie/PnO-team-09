@@ -1207,6 +1207,110 @@ app.delete('/api/deleteDocument', authenticateToken, async (req: AuthenticatedRe
   }
 });
 
+/**
+ * @swagger
+ * /api/fetchDocuments:
+ *   get:
+ *     summary: Get all documents from a collection for the authenticated user
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: header
+ *         name: Authorization
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Bearer token (format - "Bearer YOUR_JWT_TOKEN")
+ *         example: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+ *       - in: query
+ *         name: collectionName
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Name of the collection to fetch documents from
+ *         example: myTasks
+ *     responses:
+ *       200:
+ *         description: List of document names from the collection
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Documents fetched successfully
+ *                 documentNames:
+ *                   type: array
+ *                   items:
+ *                     type: string
+ *                   example: ["Buy groceries", "Clean house", "Call mom"]
+ *                 token:
+ *                   type: string
+ *                   description: New token if the old one was about to expire (within 5 minutes)
+ *       400:
+ *         description: Bad request - missing collectionName or collection not found
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ */
+app.get('/api/fetchDocuments', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const collectionName = req.query['collectionName'] as string | undefined;
+
+    if (!collectionName) {
+      res.status(400).json({ success: false, message: 'collectionName is required' });
+      return;
+    }
+
+    // Verify user has access to this collection
+    const usersCollection = await db.getCollection('users');
+    const user = await usersCollection.findById(req.user!.userId);
+
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    const userData = user as unknown as { collections?: string[] };
+
+    // Check if collection exists in user's list
+    if (!userData.collections || !userData.collections.includes(collectionName)) {
+      res.status(400).json({ success: false, message: 'Collection not found in user collections' });
+      return;
+    }
+
+    // Get all documents from the collection that belong to this user
+    const collection = await db.getCollection(collectionName);
+    const allDocuments = await collection.find();
+
+    // Filter documents by userId and extract names
+    const documentNames = allDocuments
+      .filter((doc) => {
+        const docData = doc as unknown as { userId?: string };
+        return docData.userId === req.user!.userId;
+      })
+      .map((doc) => {
+        const docData = doc as unknown as { name?: string };
+        return docData.name || '';
+      })
+      .filter((name) => name !== ''); // Remove empty names
+
+    const response = addTokenToResponse(req, {
+      success: true,
+      message: 'Documents fetched successfully',
+      documentNames,
+    });
+
+    res.json(response);
+  } catch (error) {
+    console.error('Fetch documents error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // Start server
 if (process.env['NODE_ENV'] !== 'test') {
   initDB()

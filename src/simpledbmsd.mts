@@ -1093,6 +1093,120 @@ app.post('/api/createDocument', authenticateToken, async (req: AuthenticatedRequ
   }
 });
 
+/**
+ * @swagger
+ * /api/deleteDocument:
+ *   delete:
+ *     summary: Delete a document from a collection for the authenticated user
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: header
+ *         name: Authorization
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Bearer token (format - "Bearer YOUR_JWT_TOKEN")
+ *         example: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - collectionName
+ *               - documentName
+ *             properties:
+ *               collectionName:
+ *                 type: string
+ *                 description: Name of the collection containing the document
+ *                 example: myTasks
+ *               documentName:
+ *                 type: string
+ *                 description: Name of the document to delete
+ *                 example: Buy groceries
+ *     responses:
+ *       200:
+ *         description: Document deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Document deleted successfully
+ *                 token:
+ *                   type: string
+ *                   description: New token if the old one was about to expire (within 5 minutes)
+ *       400:
+ *         description: Bad request - missing required fields or document not found
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ */
+app.delete('/api/deleteDocument', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { collectionName, documentName } = req.body as {
+      collectionName?: string;
+      documentName?: string;
+    };
+
+    if (!collectionName || !documentName) {
+      res.status(400).json({ success: false, message: 'collectionName and documentName are required' });
+      return;
+    }
+
+    // Verify user has access to this collection
+    const usersCollection = await db.getCollection('users');
+    const user = await usersCollection.findById(req.user!.userId);
+
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    const userData = user as unknown as { collections?: string[] };
+
+    // Check if collection exists in user's list
+    if (!userData.collections || !userData.collections.includes(collectionName)) {
+      res.status(400).json({ success: false, message: 'Collection not found in user collections' });
+      return;
+    }
+
+    // Find and delete the document
+    const collection = await db.getCollection(collectionName);
+    const documents = await collection.find();
+
+    // Find the document by name and userId
+    const document = documents.find((doc) => {
+      const docData = doc as unknown as { name?: string; userId?: string };
+      return docData.name === documentName && docData.userId === req.user!.userId;
+    });
+
+    if (!document) {
+      res.status(404).json({ success: false, message: 'Document not found' });
+      return;
+    }
+
+    // Delete the document
+    await collection.delete(document.id);
+
+    const response = addTokenToResponse(req, {
+      success: true,
+      message: `Document '${documentName}' deleted successfully from collection '${collectionName}'`,
+    });
+
+    res.json(response);
+  } catch (error) {
+    console.error('Delete document error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // Start server
 if (process.env['NODE_ENV'] !== 'test') {
   initDB()

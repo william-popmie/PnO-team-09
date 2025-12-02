@@ -122,89 +122,66 @@ describe('SimpleDBMS Daemon API', () => {
     });
   });
 
-  describe('Collections API - POST /api/collections', () => {
+  describe('Collection Management API', () => {
     let authToken: string;
-    let userId: string;
 
     beforeAll(async () => {
-      // Create a user and get auth token for collection tests
-      const signupRes = await request(app).post('/api/signup').send({
-        username: 'collectionuser',
-        password: 'collectionpass',
-      });
-
+      const signupRes = await request(app).post('/api/signup').send({ username: 'collectionuser', password: 'pass' });
       authToken = (signupRes.body as { token: string }).token;
-      userId = (signupRes.body as { user: { id: string } }).user.id;
     });
 
-    it('create collection with document', async () => {
+    it('should create a collection', async () => {
       const res = await request(app)
-        .post('/api/collections')
+        .post('/api/createCollection')
         .set('Authorization', `Bearer ${authToken}`)
-        .send({
-          collectionName: 'tasks',
-          document: {
-            title: 'Buy groceries',
-            completed: false,
-          },
-        });
+        .send({ collectionName: 'myNotes' });
 
       expect(res.status).toBe(201);
       expect((res.body as { success?: boolean }).success).toBe(true);
-      expect((res.body as { collectionName?: string }).collectionName).toBe('tasks');
-      expect((res.body as { document?: { id?: string; title?: string; userId?: string } }).document?.id).toBeDefined();
-      expect((res.body as { document?: { title?: string } }).document?.title).toBe('Buy groceries');
-      expect((res.body as { document?: { userId?: string } }).document?.userId).toBe(userId);
     });
 
-    it('reject missing token', async () => {
-      const res = await request(app)
-        .post('/api/collections')
-        .send({
-          collectionName: 'tasks',
-          document: { title: 'Test' },
-        });
-
-      expect(res.status).toBe(401);
-      expect((res.body as { success?: boolean }).success).toBe(false);
-      expect((res.body as { message?: string }).message).toContain('No token provided');
-    });
-
-    it('reject invalid token', async () => {
-      const res = await request(app)
-        .post('/api/collections')
-        .set('Authorization', 'Bearer invalid.token.here')
-        .send({
-          collectionName: 'tasks',
-          document: { title: 'Test' },
-        });
-
-      expect(res.status).toBe(401);
-      expect((res.body as { success?: boolean }).success).toBe(false);
-      expect((res.body as { message?: string }).message).toContain('Invalid or expired token');
-    });
-
-    it('reject missing collectionName', async () => {
-      const res = await request(app)
-        .post('/api/collections')
+    it('should not allow duplicate collections', async () => {
+      await request(app)
+        .post('/api/createCollection')
         .set('Authorization', `Bearer ${authToken}`)
-        .send({
-          document: { title: 'Test' },
-        });
+        .send({ collectionName: 'duplicateCollection' });
+
+      const res = await request(app)
+        .post('/api/createCollection')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ collectionName: 'duplicateCollection' });
 
       expect(res.status).toBe(400);
-      expect((res.body as { success?: boolean }).success).toBe(false);
-      expect((res.body as { message?: string }).message).toContain('required');
+      expect((res.body as { message?: string }).message).toContain('already exists');
     });
 
-    it('reject missing document', async () => {
-      const res = await request(app).post('/api/collections').set('Authorization', `Bearer ${authToken}`).send({
-        collectionName: 'tasks',
-      });
+    it('should fetch all collections', async () => {
+      const res = await request(app).get('/api/fetchCollections').set('Authorization', `Bearer ${authToken}`);
 
-      expect(res.status).toBe(400);
-      expect((res.body as { success?: boolean }).success).toBe(false);
-      expect((res.body as { message?: string }).message).toContain('required');
+      expect(res.status).toBe(200);
+      expect((res.body as { success?: boolean }).success).toBe(true);
+      expect(Array.isArray((res.body as { collections?: string[] }).collections)).toBe(true);
+    });
+
+    it('should delete a collection', async () => {
+      await request(app)
+        .post('/api/createCollection')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ collectionName: 'toDelete' });
+
+      const res = await request(app)
+        .delete('/api/deleteCollection')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ collectionName: 'toDelete' });
+
+      expect(res.status).toBe(200);
+      expect((res.body as { success?: boolean }).success).toBe(true);
+    });
+
+    it('should reject unauthorized collection creation', async () => {
+      const res = await request(app).post('/api/createCollection').send({ collectionName: 'unauthorized' });
+
+      expect(res.status).toBe(401);
     });
   });
 

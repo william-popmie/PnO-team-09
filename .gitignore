@@ -16,3 +16,8 @@ testdb
 
 mydb.db
 mydb.wal
+
+# Environment variables
+.env
+.env.local
+.env.*.local

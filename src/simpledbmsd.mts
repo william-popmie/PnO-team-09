@@ -533,42 +533,15 @@ app.post('/db/:collection/join', async (req, res) => {
 /**
  * William Ragnarsson
  * Frontend webapp routing endpoints
+ * Note: These endpoints are not included in public API documentation for security reasons
  */
 
 /**
- * @swagger
- * /api/signup:
- *   post:
- *     summary: Register a new user
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               username:
- *                 type: string
- *               password:
- *                 type: string
- *     responses:
- *       201:
- *         description: User created, returns JWT token
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 message:
- *                   type: string
- *                 token:
- *                   type: string
- *                 user:
- *                   type: object
- *       400:
- *         description: Invalid input or user already exists
+ * POST /api/signup
+ * Register a new user account
+ * @param {string} username - The desired username
+ * @param {string} password - The user's password (TODO: should be hashed)
+ * @returns {object} { success: boolean, message: string, token: string }
  */
 app.post('/api/signup', async (req, res) => {
   try {
@@ -618,29 +591,12 @@ app.post('/api/signup', async (req, res) => {
 });
 
 /**
- * @swagger
- * /api/login:
- *   post:
- *     summary: Login a user or validate existing token
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               username:
- *                 type: string
- *               password:
- *                 type: string
- *               token:
- *                 type: string
- *                 description: Existing JWT token to validate (optional)
- *     responses:
- *       200:
- *         description: Login successful or token validated
- *       401:
- *         description: Invalid credentials or token
+ * POST /api/login
+ * Authenticate a user with credentials or validate an existing token
+ * @param {string} [username] - Username for credential-based login
+ * @param {string} [password] - Password for credential-based login
+ * @param {string} [token] - Existing JWT token for validation
+ * @returns {object} { success: boolean, message: string, token?: string, newToken?: string }
  */
 app.post('/api/login', async (req, res) => {
   try {
@@ -724,55 +680,11 @@ app.post('/api/login', async (req, res) => {
 });
 
 /**
- * @swagger
- * /api/createCollection:
- *   post:
- *     summary: Create a new collection linked to the authenticated user
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: header
- *         name: Authorization
- *         required: true
- *         schema:
- *           type: string
- *         description: Bearer token (format - "Bearer YOUR_JWT_TOKEN")
- *         example: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - collectionName
- *             properties:
- *               collectionName:
- *                 type: string
- *                 description: Name of the collection to create
- *                 example: myTasks
- *     responses:
- *       201:
- *         description: Collection created successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 collectionName:
- *                   type: string
- *                   example: myTasks
- *                 token:
- *                   type: string
- *                   description: New token if the old one was about to expire (within 5 minutes)
- *                   example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
- *       400:
- *         description: Bad request - missing collectionName
- *       401:
- *         description: Unauthorized - invalid or missing token
+ * POST /api/createCollection
+ * Create a new collection for the authenticated user
+ * @requires Authentication - Bearer token in Authorization header
+ * @param {string} collectionName - Name of the collection to create
+ * @returns {object} { success: boolean, message: string, token?: string }
  */
 app.post('/api/createCollection', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
@@ -820,46 +732,10 @@ app.post('/api/createCollection', authenticateToken, async (req: AuthenticatedRe
 });
 
 /**
- * @swagger
- * /api/fetchCollections:
- *   get:
- *     summary: Get all collections for the authenticated user
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: header
- *         name: Authorization
- *         required: true
- *         schema:
- *           type: string
- *         description: Bearer token (format - "Bearer YOUR_JWT_TOKEN")
- *         example: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
- *     responses:
- *       200:
- *         description: List of user's collection names
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: collections fetched successfully
- *                 collections:
- *                   type: array
- *                   items:
- *                     type: string
- *                   example: ["myTasks", "myNotes", "todos"]
- *                 token:
- *                   type: string
- *                   description: New token if the old one was about to expire (within 5 minutes)
- *       400:
- *         description: Server error when fetching user collections
- *       401:
- *         description: Unauthorized - invalid or missing token
+ * GET /api/fetchCollections
+ * Retrieve all collections owned by the authenticated user
+ * @requires Authentication - Bearer token in Authorization header
+ * @returns {object} { success: boolean, message: string, collections: string[], token?: string }
  */
 app.get('/api/fetchCollections', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
@@ -892,54 +768,11 @@ app.get('/api/fetchCollections', authenticateToken, async (req: AuthenticatedReq
 });
 
 /**
- * @swagger
- * /api/deleteCollection:
- *   delete:
- *     summary: Delete a collection from the authenticated user
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: header
- *         name: Authorization
- *         required: true
- *         schema:
- *           type: string
- *         description: Bearer token (format - "Bearer YOUR_JWT_TOKEN")
- *         example: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - collectionName
- *             properties:
- *               collectionName:
- *                 type: string
- *                 description: Name of the collection to delete
- *                 example: myTasks
- *     responses:
- *       200:
- *         description: Collection deleted successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: Collection deleted successfully
- *                 token:
- *                   type: string
- *                   description: New token if the old one was about to expire (within 5 minutes)
- *       400:
- *         description: Bad request - missing collectionName or collection not found
- *       401:
- *         description: Unauthorized - invalid or missing token
+ * DELETE /api/deleteCollection
+ * Delete a collection from the authenticated user's account
+ * @requires Authentication - Bearer token in Authorization header
+ * @param {string} collectionName - Name of the collection to delete
+ * @returns {object} { success: boolean, message: string, token?: string }
  */
 app.delete('/api/deleteCollection', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
@@ -984,63 +817,13 @@ app.delete('/api/deleteCollection', authenticateToken, async (req: Authenticated
 });
 
 /**
- * @swagger
- * /api/createDocument:
- *   post:
- *     summary: Create a new document in a collection for the authenticated user
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: header
- *         name: Authorization
- *         required: true
- *         schema:
- *           type: string
- *         description: Bearer token (format - "Bearer YOUR_JWT_TOKEN")
- *         example: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - collectionName
- *               - documentName
- *             properties:
- *               collectionName:
- *                 type: string
- *                 description: Name of the collection to add the document to
- *                 example: myTasks
- *               documentName:
- *                 type: string
- *                 description: Name of the document
- *                 example: Buy groceries
- *               documentContent:
- *                 type: object
- *                 description: Content of the document (JSON object)
- *                 example: { "description": "Buy milk and eggs", "priority": "high", "completed": false }
- *     responses:
- *       201:
- *         description: Document created successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: Document created successfully
- *                 token:
- *                   type: string
- *                   description: New token if the old one was about to expire (within 5 minutes)
- *       400:
- *         description: Bad request - missing required fields or collection not found
- *       401:
- *         description: Unauthorized - invalid or missing token
+ * POST /api/createDocument
+ * Create a new document in a collection for the authenticated user
+ * @requires Authentication - Bearer token in Authorization header
+ * @param {string} collectionName - Name of the collection
+ * @param {string} documentName - Name of the document (must be unique per user per collection)
+ * @param {object} documentContent - JSON object containing the document data
+ * @returns {object} { success: boolean, message: string, token?: string }
  */
 app.post('/api/createDocument', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
@@ -1108,59 +891,12 @@ app.post('/api/createDocument', authenticateToken, async (req: AuthenticatedRequ
 });
 
 /**
- * @swagger
- * /api/deleteDocument:
- *   delete:
- *     summary: Delete a document from a collection for the authenticated user
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: header
- *         name: Authorization
- *         required: true
- *         schema:
- *           type: string
- *         description: Bearer token (format - "Bearer YOUR_JWT_TOKEN")
- *         example: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - collectionName
- *               - documentName
- *             properties:
- *               collectionName:
- *                 type: string
- *                 description: Name of the collection containing the document
- *                 example: myTasks
- *               documentName:
- *                 type: string
- *                 description: Name of the document to delete
- *                 example: Buy groceries
- *     responses:
- *       200:
- *         description: Document deleted successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: Document deleted successfully
- *                 token:
- *                   type: string
- *                   description: New token if the old one was about to expire (within 5 minutes)
- *       400:
- *         description: Bad request - missing required fields or document not found
- *       401:
- *         description: Unauthorized - invalid or missing token
+ * DELETE /api/deleteDocument
+ * Delete a document from a collection
+ * @requires Authentication - Bearer token in Authorization header
+ * @param {string} collectionName - Name of the collection
+ * @param {string} documentName - Name of the document to delete
+ * @returns {object} { success: boolean, message: string, token?: string }
  */
 app.delete('/api/deleteDocument', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
@@ -1222,53 +958,11 @@ app.delete('/api/deleteDocument', authenticateToken, async (req: AuthenticatedRe
 });
 
 /**
- * @swagger
- * /api/fetchDocuments:
- *   get:
- *     summary: Get all documents from a collection for the authenticated user
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: header
- *         name: Authorization
- *         required: true
- *         schema:
- *           type: string
- *         description: Bearer token (format - "Bearer YOUR_JWT_TOKEN")
- *         example: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
- *       - in: query
- *         name: collectionName
- *         required: true
- *         schema:
- *           type: string
- *         description: Name of the collection to fetch documents from
- *         example: myTasks
- *     responses:
- *       200:
- *         description: List of document names from the collection
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: Documents fetched successfully
- *                 documentNames:
- *                   type: array
- *                   items:
- *                     type: string
- *                   example: ["Buy groceries", "Clean house", "Call mom"]
- *                 token:
- *                   type: string
- *                   description: New token if the old one was about to expire (within 5 minutes)
- *       400:
- *         description: Bad request - missing collectionName or collection not found
- *       401:
- *         description: Unauthorized - invalid or missing token
+ * GET /api/fetchDocuments
+ * Retrieve all document names from a collection for the authenticated user
+ * @requires Authentication - Bearer token in Authorization header
+ * @param {string} collectionName - Name of the collection (query parameter)
+ * @returns {object} { success: boolean, message: string, documentNames: string[], token?: string }
  */
 app.get('/api/fetchDocuments', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
@@ -1326,61 +1020,12 @@ app.get('/api/fetchDocuments', authenticateToken, async (req: AuthenticatedReque
 });
 
 /**
- * @swagger
- * /api/fetchDocumentContent:
- *   get:
- *     summary: Get the content of a specific document from a collection
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: header
- *         name: Authorization
- *         required: true
- *         schema:
- *           type: string
- *         description: Bearer token (format - "Bearer YOUR_JWT_TOKEN")
- *         example: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
- *       - in: query
- *         name: collectionName
- *         required: true
- *         schema:
- *           type: string
- *         description: Name of the collection containing the document
- *         example: myTasks
- *       - in: query
- *         name: documentName
- *         required: true
- *         schema:
- *           type: string
- *         description: Name of the document to fetch
- *         example: Buy groceries
- *     responses:
- *       200:
- *         description: Document content retrieved successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: Document content fetched successfully
- *                 documentContent:
- *                   type: object
- *                   description: The full content of the document
- *                   example: { "description": "Buy milk and eggs", "priority": "high", "completed": false, "createdAt": "2025-12-03T10:30:00.000Z" }
- *                 token:
- *                   type: string
- *                   description: New token if the old one was about to expire (within 5 minutes)
- *       400:
- *         description: Bad request - missing required parameters or collection not found
- *       404:
- *         description: Document not found
- *       401:
- *         description: Unauthorized - invalid or missing token
+ * GET /api/fetchDocumentContent
+ * Retrieve the full content of a specific document
+ * @requires Authentication - Bearer token in Authorization header
+ * @param {string} collectionName - Name of the collection (query parameter)
+ * @param {string} documentName - Name of the document (query parameter)
+ * @returns {object} { success: boolean, message: string, documentContent: object, token?: string }
  */
 app.get('/api/fetchDocumentContent', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
@@ -1446,66 +1091,14 @@ app.get('/api/fetchDocumentContent', authenticateToken, async (req: Authenticate
 });
 
 /**
- * @swagger
- * /api/updateDocument:
- *   put:
- *     summary: Update the content of a document in a collection
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: header
- *         name: Authorization
- *         required: true
- *         schema:
- *           type: string
- *         description: Bearer token (format - "Bearer YOUR_JWT_TOKEN")
- *         example: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - collectionName
- *               - documentName
- *               - newDocumentContent
- *             properties:
- *               collectionName:
- *                 type: string
- *                 description: Name of the collection containing the document
- *                 example: myTasks
- *               documentName:
- *                 type: string
- *                 description: Name of the document to update
- *                 example: Buy groceries
- *               newDocumentContent:
- *                 type: object
- *                 description: New content to replace the document's content
- *                 example: { "description": "Buy milk, eggs, and bread", "priority": "urgent", "completed": true }
- *     responses:
- *       200:
- *         description: Document updated successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: Document updated successfully
- *                 token:
- *                   type: string
- *                   description: New token if the old one was about to expire (within 5 minutes)
- *       400:
- *         description: Bad request - missing required fields or collection not found
- *       404:
- *         description: Document not found
- *       401:
- *         description: Unauthorized - invalid or missing token
+ * PUT /api/updateDocument
+ * Update the content of an existing document
+ * @requires Authentication - Bearer token in Authorization header
+ * @param {string} collectionName - Name of the collection
+ * @param {string} documentName - Name of the document to update
+ * @param {object} newDocumentContent - New JSON object to replace the document content
+ * @returns {object} { success: boolean, message: string, token?: string }
+ * @note The name and userId fields are preserved during update
  */
 app.put('/api/updateDocument', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {

@@ -101,7 +101,7 @@ describe('SimpleDBMS Daemon API', () => {
 
       expect(res.status).toBe(200);
       expect((res.body as { success?: boolean }).success).toBe(true);
-      expect((res.body as { newToken?: string }).newToken).toBeDefined();
+      expect((res.body as { token?: string }).token).toBeDefined();
     });
 
     it('should reject invalid credentials', async () => {

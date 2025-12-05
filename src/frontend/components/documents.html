@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Documents - SimpleDBMS Team 9</title>
+    <link rel="stylesheet" href="../styles/styles.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <div class="logo">DB9</div>
+        <div>
+          <h1>Documents in <span id="collectionName">Collection</span></h1>
+          <p class="lead">
+            <a href="simpledbmswebclient.html" style="color: var(--accent); text-decoration: none"
+              >← Back to Collections</a
+            >
+          </p>
+        </div>
+      </header>
+
+      <div class="grid">
+        <div class="card">
+          <div class="collections-header">
+            <div class="meta">Documents List</div>
+            <div class="header-buttons">
+              <span id="selectedCount" class="selected-count" style="display: none">0 selected</span>
+              <button id="deleteSelected" class="btn btn-ghost" style="display: none">Delete Selected</button>
+              <button id="refreshDocuments" class="btn btn-ghost">Refresh</button>
+              <button id="insertDocument" class="btn btn-primary">Insert Document</button>
+            </div>
+          </div>
+          <div id="documentsView" aria-live="polite">Loading documents...</div>
+        </div>
+
+        <aside class="card">
+          <div class="meta">Document Details</div>
+          <label for="documentView">Selected document (read-only)</label>
+          <textarea
+            id="documentView"
+            readonly
+            placeholder="Select a document to view its data"
+            class="docview"
+          ></textarea>
+
+          <div class="spacer-md"></div>
+          <div class="meta">Errors</div>
+          <div id="error">&nbsp;</div>
+        </aside>
+      </div>
+    </div>
+
+    <!-- Modal for deleting documents -->
+    <div id="deleteModalOverlay" class="modal-overlay">
+      <div class="modal-content">
+        <h2 class="modal-title">Delete Documents</h2>
+        <p style="color: var(--muted); margin: 0 0 16px 0">
+          Are you sure you want to delete the selected document(s)? This action cannot be undone.
+        </p>
+        <div class="actions">
+          <button id="cancelDelete" class="btn btn-ghost">Cancel</button>
+          <button id="confirmDelete" class="btn btn-primary" style="background: #ef4444">Delete</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal for inserting document -->
+    <div id="insertModalOverlay" class="modal-overlay">
+      <div class="modal-content">
+        <h2 class="modal-title">Insert New Document</h2>
+        <label for="insertIdInput">Document name</label>
+        <input id="insertIdInput" type="text" placeholder="name of the document" />
+        <label for="insertJsonInput">Document JSON</label>
+        <textarea id="insertJsonInput" placeholder='{"name": "Alice", "age": 30}' style="min-height: 120px"></textarea>
+        <div class="actions">
+          <button id="cancelInsert" class="btn btn-ghost">Cancel</button>
+          <button id="confirmInsert" class="btn btn-primary">Insert</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="documents.mts" defer></script>
+    <script>
+      // Modal functionality for delete confirmation and insert
+      document.addEventListener('DOMContentLoaded', () => {
+        const deleteBtn = document.getElementById('deleteSelected');
+        const deleteModal = document.getElementById('deleteModalOverlay');
+        const cancelDeleteBtn = document.getElementById('cancelDelete');
+
+        const insertBtn = document.getElementById('insertDocument');
+        const insertModal = document.getElementById('insertModalOverlay');
+        const cancelInsertBtn = document.getElementById('cancelInsert');
+        const nameInput = document.getElementById('insertIdInput');
+        const jsonInput = document.getElementById('insertJsonInput');
+
+        // Delete modal
+        deleteBtn?.addEventListener('click', () => {
+          deleteModal?.classList.add('show');
+        });
+
+        cancelDeleteBtn?.addEventListener('click', () => {
+          deleteModal?.classList.remove('show');
+        });
+
+        // Insert modal
+        insertBtn?.addEventListener('click', () => {
+          insertModal?.classList.add('show');
+          nameInput?.focus();
+        });
+
+        cancelInsertBtn?.addEventListener('click', () => {
+          insertModal?.classList.remove('show');
+          if (nameInput) nameInput.value = '';
+          if (jsonInput) jsonInput.value = '';
+        });
+
+        // Close modals when clicking overlay
+        deleteModal?.addEventListener('click', (e) => {
+          if (e.target === deleteModal) {
+            deleteModal.classList.remove('show');
+          }
+        });
+
+        insertModal?.addEventListener('click', (e) => {
+          if (e.target === insertModal) {
+            insertModal.classList.remove('show');
+            if (nameInput) nameInput.value = '';
+            if (jsonInput) jsonInput.value = '';
+          }
+        });
+
+        // Close modals on Escape key
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') {
+            if (deleteModal?.classList.contains('show')) {
+              deleteModal.classList.remove('show');
+            }
+            if (insertModal?.classList.contains('show')) {
+              insertModal.classList.remove('show');
+              if (nameInput) nameInput.value = '';
+              if (jsonInput) jsonInput.value = '';
+            }
+          }
+        });
+      });
+    </script>
+  </body>
+</html>

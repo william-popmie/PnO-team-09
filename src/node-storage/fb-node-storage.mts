@@ -134,6 +134,7 @@ export class FBNodeStorage<Keystype, ValuesType>
       keys: node.keys.map((key) => serializeKey(key)),
       values: node.values.map((value) => serializeValue(value)),
       nextBlockId: node.nextBlockId ?? NO_BLOCK,
+      prevBlockId: node.prevBlockId ?? NO_BLOCK,
       version: 1,
     };
     const buffer = Buffer.from(JSON.stringify(payload), 'utf-8');
@@ -223,7 +224,13 @@ export class FBNodeStorage<Keystype, ValuesType>
 
     const raw = JSON.parse(buffer.toString('utf-8')) as unknown;
 
-    type LeafPayload = { type: 'leaf'; keys: SerializedKey[]; values: SerializedValue[]; nextBlockId?: number };
+    type LeafPayload = {
+      type: 'leaf';
+      keys: SerializedKey[];
+      values: SerializedValue[];
+      nextBlockId?: number;
+      prevBlockId?: number;
+    };
     type InternalPayload = { type: 'internal'; keys?: SerializedKey[]; childBlockIds?: number[] };
 
     function isLeafPayload(x: unknown): x is LeafPayload {
@@ -244,6 +251,8 @@ export class FBNodeStorage<Keystype, ValuesType>
       node.values = raw.values.map((sv) => deserializeValue(sv) as ValuesType);
       node.nextBlockId =
         typeof raw.nextBlockId === 'number' && raw.nextBlockId !== NO_BLOCK ? raw.nextBlockId : undefined;
+      node.prevBlockId =
+        typeof raw.prevBlockId === 'number' && raw.prevBlockId !== NO_BLOCK ? raw.prevBlockId : undefined;
       node.blockId = blockId;
       this.cache.set(blockId, node);
       return node;
@@ -329,7 +338,9 @@ export class FBLeafNode<Keystype, ValuesType>
   keys: Keystype[] = [];
   values: ValuesType[] = [];
   nextBlockId?: number;
+  prevBlockId?: number;
   nextLeaf: FBLeafNode<Keystype, ValuesType> | null = null;
+  prevLeaf: FBLeafNode<Keystype, ValuesType> | null = null;
 
   blockId?: number;
 
@@ -370,7 +381,24 @@ export class FBLeafNode<Keystype, ValuesType>
     const nextLeaf = await this.storage.loadNode(this.nextBlockId);
     if (!nextLeaf.isLeaf) throw new Error('Next leaf node is not a leaf');
     this.nextLeaf = nextLeaf;
+    if (this.nextLeaf) {
+      this.nextLeaf.prevLeaf = this;
+      this.nextLeaf.prevBlockId = this.blockId;
+    }
     return this.nextLeaf;
+  }
+
+  async getPrevLeaf(): Promise<FBLeafNode<Keystype, ValuesType> | null> {
+    if (this.prevLeaf) return this.prevLeaf;
+    if (this.prevBlockId === undefined || this.prevBlockId === NO_BLOCK) return null;
+    const prevLeaf = await this.storage.loadNode(this.prevBlockId);
+    if (!prevLeaf.isLeaf) throw new Error('Previous leaf node is not a leaf');
+    this.prevLeaf = prevLeaf;
+    if (this.prevLeaf) {
+      this.prevLeaf.nextLeaf = this;
+      this.prevLeaf.nextBlockId = this.blockId;
+    }
+    return this.prevLeaf;
   }
 
   canMergeWithNext(
@@ -397,6 +425,14 @@ export class FBLeafNode<Keystype, ValuesType>
 
     const mergedOld = await this.getStorage().persistLeaf(this);
     if (typeof mergedOld === 'number') this.getStorage().enqueueForReclaim(mergedOld);
+
+    if (this.nextLeaf) {
+      this.nextLeaf.prevBlockId = this.blockId;
+      this.nextLeaf.prevLeaf = this;
+      const succOld = await this.getStorage().persistLeaf(this.nextLeaf);
+      if (typeof succOld === 'number') this.getStorage().enqueueForReclaim(succOld);
+    }
+
     if (typeof nextLeaf.blockId === 'number' && nextLeaf.blockId !== NO_BLOCK) {
       this.getStorage().enqueueForReclaim(nextLeaf.blockId);
     }

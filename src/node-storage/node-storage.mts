@@ -87,6 +87,7 @@ export interface LeafNodeStorage<
   keys: KeysType[];
   values: ValuesType[];
   nextLeaf: leafNodeStorageType | null;
+  prevLeaf: leafNodeStorageType | null;
 
   getCursorBeforeFirst(): LeafCursor<KeysType, ValuesType, leafNodeStorageType, InternalNodeStorageType>;
   getCursorBeforeKey(key: KeysType):
@@ -97,6 +98,7 @@ export interface LeafNodeStorage<
       }>;
 
   getNextLeaf(): Promise<LeafNodeStorage<KeysType, ValuesType, leafNodeStorageType, InternalNodeStorageType> | null>;
+  getPrevLeaf(): Promise<LeafNodeStorage<KeysType, ValuesType, leafNodeStorageType, InternalNodeStorageType> | null>;
 }
 
 /**

@@ -3,15 +3,14 @@
 
 /**
  * INSTRUCTIONS TO USE ATOMIC-FILE:
- * On startup, run: 
+ * On startup, run:
     await atomic-file.recover();
-    
  * To commit data to the database:
     await atomic-file.begin();              //Start transaction
     await atomic-file.journalWrite(offset: number, data: Uint8Array);  //Do any
     .                                                                    number of
     .                                                                    writes
-    .                                                                    to WAL                                                                    
+    .                                                                    to WAL
     await atomic-file.commitDataToWal();   //Definitive commit to WAL
     .                                      //More journalWrites followed by
     .                                        by a commitDataToWAl() can be done
@@ -123,7 +122,6 @@ export class AtomicFileImpl implements AtomicFile {
    */
   private async ensureOpen(): Promise<void> {
     if (this.opened) return;
-    await this.dbFile.open();
     await this.wal.openWAL();
     this.opened = true;
   }
@@ -231,11 +229,37 @@ export class AtomicFileImpl implements AtomicFile {
     return this.mutex.runExclusive(async () => {
       await this.dbFile.sync();
       await this.wal.sync();
-      await this.dbFile.close();
       await this.wal.closeWAL();
       this.opened = false;
       this.inTransaction = false;
     });
+  }
+
+  /**
+   * Opens the atomic file (alias for ensureOpen).
+   */
+  public async open(): Promise<void> {
+    await this.ensureOpen();
+  }
+
+  /**
+   * Closes the atomic file (alias for safeShutdown).
+   */
+  public async close(): Promise<void> {
+    await this.safeShutdown();
+  }
+
+  /**
+   * Performs an atomic write of multiple buffers.
+   * @param writes Array of writes to perform.
+   */
+  public async atomicWrite(writes: { position: number; buffer: Buffer }[]): Promise<void> {
+    await this.begin();
+    for (const w of writes) {
+      await this.journalWrite(w.position, w.buffer);
+    }
+    await this.commitDataToWal();
+    await this.checkpoint();
   }
 
   // Helper functions for testing

@@ -111,6 +111,7 @@ export class TrivialLeafNode<KeysType, ValuesType>
   values: ValuesType[] = [];
 
   nextLeaf: TrivialLeafNode<KeysType, ValuesType> | null = null;
+  prevLeaf: TrivialLeafNode<KeysType, ValuesType> | null = null;
 
   constructor(storage: TrivialNodeStorage<KeysType, ValuesType>) {
     super(storage);
@@ -131,6 +132,10 @@ export class TrivialLeafNode<KeysType, ValuesType>
     return Promise.resolve(this.nextLeaf);
   }
 
+  async getPrevLeaf(): Promise<TrivialLeafNode<KeysType, ValuesType> | null> {
+    return Promise.resolve(this.prevLeaf);
+  }
+
   override canMergeWithNext(
     _key: KeysType,
     _nextNode: TrivialLeafNode<KeysType, ValuesType> | TrivialInternalNode<KeysType, ValuesType>,
@@ -146,7 +151,13 @@ export class TrivialLeafNode<KeysType, ValuesType>
     if (nextNode.isLeaf) {
       this.keys.push(...nextNode.keys);
       this.values.push(...nextNode.values);
-      this.nextLeaf = nextNode.nextLeaf;
+
+      const successor = nextNode.nextLeaf ?? null;
+      this.nextLeaf = successor;
+
+      if (successor) {
+        successor.prevLeaf = this;
+      }
     }
   }
 }

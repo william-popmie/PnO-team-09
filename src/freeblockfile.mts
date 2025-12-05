@@ -226,7 +226,13 @@ export class FreeBlockFile {
       const currentBlocks = Math.floor(st.size / this.blockSize);
       const need = count - allocated.length;
 
-      const base = currentBlocks === 0 ? 1 : currentBlocks;
+      let maxStaged = 0;
+      for (const id of this.stagedWrites.keys()) {
+        if (id > maxStaged) maxStaged = id;
+      }
+
+      const base = Math.max(currentBlocks, maxStaged + 1);
+
       for (let i = 0; i < need; i++) {
         const newId = base + i;
         const newBlock = Buffer.alloc(this.blockSize, 0);

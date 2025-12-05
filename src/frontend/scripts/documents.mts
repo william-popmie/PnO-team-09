@@ -125,8 +125,16 @@ async function fetchDocuments(): Promise<Array<Record<string, unknown>>> {
       success: boolean;
       message: string;
       documentNames: string[];
+      token?: string;
     };
     console.log(documents.message);
+
+    // If a new token is returned, update it in localStorage
+    if (documents.token && typeof documents.token === 'string' && documents.token.length > 0) {
+      localStorage.setItem('sessionToken', documents.token);
+      console.log('🔑 Session token refreshed and cached');
+    }
+
     // Map document names to objects to satisfy the return type expected by the UI
     return documents.documentNames.map((name) => ({ id: name, name: name }));
   } catch (error) {
@@ -162,8 +170,14 @@ async function createDocument(id: string): Promise<boolean> {
       throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
     }
 
-    const result = (await response.json()) as { success: boolean; message: string };
+    const result = (await response.json()) as { success: boolean; message: string; token?: string };
     console.log('✅ Document created:', result.message);
+
+    // If a new token is returned, update it in localStorage
+    if (result.token && typeof result.token === 'string' && result.token.length > 0) {
+      localStorage.setItem('sessionToken', result.token);
+      console.log('🔑 Session token refreshed and cached');
+    }
 
     // Refresh documents list after creation
     const documents = await fetchDocuments();
@@ -208,8 +222,14 @@ async function updateDocument(id: string, data: JSON): Promise<boolean> {
       throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
     }
 
-    const result = (await response.json()) as Record<string, unknown>;
+    const result = (await response.json()) as { success: boolean; message: string; token?: string };
     console.log('✅ Document updated:', result);
+
+    // If a new token is returned, update it in localStorage
+    if (result.token && typeof result.token === 'string' && result.token.length > 0) {
+      localStorage.setItem('sessionToken', result.token);
+      console.log('🔑 Session token refreshed and cached');
+    }
 
     // Refresh documents list after update
     const documents = await fetchDocuments();
@@ -255,7 +275,15 @@ async function deleteDocuments(ids: string[]): Promise<boolean> {
         throw new Error(`Failed to delete ${id}: ${errorData.message || response.statusText}`);
       }
 
-      return response.json() as Promise<{ success: boolean; message: string }>;
+      const result = (await response.json()) as { success: boolean; message: string; token?: string };
+      console.log('✅ Document deleted:', result.message);
+      // If a new token is returned, update it in localStorage
+      if (result.token && typeof result.token === 'string' && result.token.length > 0) {
+        localStorage.setItem('sessionToken', result.token);
+        console.log('🔑 Session token refreshed and cached');
+      }
+
+      return response.json() as Promise<{ success: boolean; message: string; token?: string }>;
     });
 
     await Promise.all(deletePromises);

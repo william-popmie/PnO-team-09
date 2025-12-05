@@ -99,9 +99,16 @@ async function fetchCollections(): Promise<string[]> {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
 
-    const collections = (await response.json()) as string[];
+    const collections = (await response.json()) as { collections: string[]; token?: string };
     console.log('✅ Collections received:', collections);
-    return collections;
+
+    // If a new token is returned, update it in localStorage
+    if (collections.token && typeof collections.token === 'string' && collections.token.length > 0) {
+      localStorage.setItem('sessionToken', collections.token);
+      console.log('🔑 Session token refreshed and cached');
+    }
+
+    return collections.collections;
   } catch (error) {
     console.error('❌ Failed to fetch collections:', error);
     throw error;
@@ -170,12 +177,20 @@ async function deleteCollections(names: string[]): Promise<boolean> {
         body: JSON.stringify({ collectionName: name }),
       });
 
+      const result = (await response.json()) as { success: boolean; message: string; token?: string };
+      console.log('✅ Document deleted:', result.message);
+      // If a new token is returned, update it in localStorage
+      if (result.token && typeof result.token === 'string' && result.token.length > 0) {
+        localStorage.setItem('sessionToken', result.token);
+        console.log('🔑 Session token refreshed and cached');
+      }
+
       if (!response.ok) {
         const errorData = (await response.json()) as { message?: string };
         throw new Error(errorData.message || `Failed to delete collection ${name}: HTTP ${response.status}`);
       }
 
-      return response.json() as Promise<{ success: boolean }>;
+      return response.json() as Promise<{ success: boolean; message: string; token?: string }>;
     });
 
     await Promise.all(deletePromises);
@@ -265,7 +280,14 @@ async function selectCollection(name: string): Promise<void> {
       succes: boolean;
       message: string;
       documentNames: string[];
+      token?: string;
     };
+
+    // If a new token is returned, update it in localStorage
+    if (collectionInfo.token && typeof collectionInfo.token === 'string' && collectionInfo.token.length > 0) {
+      localStorage.setItem('sessionToken', collectionInfo.token);
+      console.log('🔑 Session token refreshed and cached');
+    }
 
     if (collectionInfo.succes) {
       console.log(collectionInfo.message);

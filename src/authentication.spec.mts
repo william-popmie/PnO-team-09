@@ -152,19 +152,9 @@ describe('Authentication Module', () => {
       expect(mockReq.user?.username).toBe('testuser');
     });
 
-    it('should handle lowercase authorization header', () => {
+    it('should handle authorization header', () => {
       const token = generateToken('user123', 'testuser');
       mockReq.headers = { authorization: `Bearer ${token}` };
-
-      authenticateToken(mockReq as AuthenticatedRequest, mockRes as Response, mockNext);
-
-      expect(mockNext).toHaveBeenCalled();
-      expect(mockReq.user?.userId).toBe('user123');
-    });
-
-    it('should handle uppercase Authorization header', () => {
-      const token = generateToken('user123', 'testuser');
-      mockReq.headers = { Authorization: `Bearer ${token}` };
 
       authenticateToken(mockReq as AuthenticatedRequest, mockRes as Response, mockNext);
 

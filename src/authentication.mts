@@ -18,7 +18,7 @@ export interface AuthenticatedRequest extends Request {
  * Middleware to authenticate JWT token and refresh if needed
  */
 export function authenticateToken(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
-  const authHeader = req.headers['authorization'] || req.headers['Authorization'];
+  const authHeader = req.headers.authorization;
   const authValue = typeof authHeader === 'string' ? authHeader : authHeader?.[0];
   const token = authValue?.startsWith('Bearer ') ? authValue.substring(7) : null;
 

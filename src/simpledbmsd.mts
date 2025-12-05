@@ -14,7 +14,7 @@ import {
   authenticateToken,
   addTokenToResponse,
   generateToken,
-  verifyToken,
+  validateAndRefreshToken,
   type AuthenticatedRequest,
 } from './authentication.mjs';
 
@@ -596,7 +596,7 @@ app.post('/api/signup', async (req, res) => {
  * @param {string} [username] - Username for credential-based login
  * @param {string} [password] - Password for credential-based login
  * @param {string} [token] - Existing JWT token for validation
- * @returns {object} { success: boolean, message: string, token?: string, newToken?: string }
+ * @returns {object} { success: boolean, message: string, token: string }
  */
 app.post('/api/login', async (req, res) => {
   try {
@@ -612,33 +612,20 @@ app.post('/api/login', async (req, res) => {
 
     // If token is provided, validate it for auto-login
     if (existingToken) {
-      const decoded = verifyToken(existingToken);
+      const validation = validateAndRefreshToken(existingToken);
 
-      if (decoded) {
-        // Token is valid - check if it needs refresh
-        const response: { success: boolean; message: string; token?: string } = {
+      if (validation.valid) {
+        res.json({
           success: true,
           message: 'Already authenticated',
-        };
-
-        // Check if token is about to expire (5 minutes or less)
-        if (decoded.exp) {
-          const currentTime = Math.floor(Date.now() / 1000);
-          const timeUntilExpiry = decoded.exp - currentTime;
-
-          // If less than 5 minutes (300 seconds) remaining, issue new token
-          if (timeUntilExpiry <= 300) {
-            response.token = generateToken(decoded.userId, decoded.username);
-          }
-        }
-
-        res.json(response);
+          token: validation.newToken || existingToken,
+        });
         return;
       }
       // Token invalid or expired, fall through to username/password login
     }
 
-    // Validate input for credential-based login
+    // Validate input
     if (!username || !password) {
       res.status(400).json({ success: false, message: 'Username and password are required' });
       return;
@@ -665,13 +652,13 @@ app.post('/api/login', async (req, res) => {
       return;
     }
 
-    // Create JWT token (expires in 30 minutes)
-    const newToken = generateToken(user.id, user.username);
+    // Create JWT token
+    const token = generateToken(user.id, user.username);
 
     res.json({
       success: true,
       message: 'Login successful',
-      newToken,
+      token,
     });
   } catch (error) {
     console.error('Login error:', error);

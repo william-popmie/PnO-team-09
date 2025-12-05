@@ -8,6 +8,7 @@ import {
   addTokenToResponse,
   generateToken,
   verifyToken,
+  validateAndRefreshToken,
   type AuthenticatedRequest,
 } from './authentication.mjs';
 
@@ -184,5 +185,67 @@ describe('Authentication Module', () => {
 
     // Note: Testing token refresh (when exp < 5 minutes) would require mocking time
     // or creating a token with a specific expiration time, which is complex with the current setup
+  });
+
+  describe('validateAndRefreshToken', () => {
+    it('should return valid=true for a valid token', () => {
+      const token = generateToken('user123', 'testuser');
+      const result = validateAndRefreshToken(token);
+
+      expect(result.valid).toBe(true);
+      expect(result.userId).toBe('user123');
+      expect(result.username).toBe('testuser');
+    });
+
+    it('should return valid=false for an invalid token', () => {
+      const result = validateAndRefreshToken('invalid-token');
+
+      expect(result.valid).toBe(false);
+      expect(result.userId).toBeUndefined();
+      expect(result.username).toBeUndefined();
+      expect(result.newToken).toBeUndefined();
+    });
+
+    it('should return valid=false for a malformed token', () => {
+      const result = validateAndRefreshToken('not.a.valid.jwt');
+
+      expect(result.valid).toBe(false);
+    });
+
+    it('should return valid=false for an expired token', () => {
+      const expiredToken =
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJ1c2VyMTIzIiwidXNlcm5hbWUiOiJ0ZXN0dXNlciIsImlhdCI6MTYwOTQ1OTIwMCwiZXhwIjoxNjA5NDU5MjAwfQ.invalid';
+
+      const result = validateAndRefreshToken(expiredToken);
+
+      expect(result.valid).toBe(false);
+    });
+
+    it('should include user data when token is valid', () => {
+      const token = generateToken('alice123', 'alice');
+      const result = validateAndRefreshToken(token);
+
+      expect(result.valid).toBe(true);
+      expect(result.userId).toBe('alice123');
+      expect(result.username).toBe('alice');
+    });
+
+    it('should not include newToken for freshly generated token', () => {
+      const token = generateToken('user123', 'testuser');
+      const result = validateAndRefreshToken(token);
+
+      expect(result.valid).toBe(true);
+      expect(result.newToken).toBeUndefined();
+    });
+
+    it('should preserve all required fields in response', () => {
+      const token = generateToken('bob456', 'bob');
+      const result = validateAndRefreshToken(token);
+
+      expect(result).toHaveProperty('valid');
+      expect(result.valid).toBe(true);
+      expect(result).toHaveProperty('userId');
+      expect(result).toHaveProperty('username');
+    });
   });
 });

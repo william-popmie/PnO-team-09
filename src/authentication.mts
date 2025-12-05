@@ -84,7 +84,7 @@ export function generateToken(userId: string, username: string): string {
 }
 
 /**
- * Verify and decode a JWT token (for login endpoint)
+ * Verify and decode a JWT token
  */
 export function verifyToken(token: string): { userId: string; username: string; exp?: number } | null {
   try {
@@ -92,4 +92,40 @@ export function verifyToken(token: string): { userId: string; username: string; 
   } catch {
     return null;
   }
+}
+
+/**
+ * Validate existing token and refresh if needed (for auto-login)
+ * @returns Object with success status and optional new token
+ */
+export function validateAndRefreshToken(token: string): {
+  valid: boolean;
+  userId?: string;
+  username?: string;
+  newToken?: string;
+} {
+  const decoded = verifyToken(token);
+
+  if (!decoded) {
+    return { valid: false };
+  }
+
+  const result: { valid: boolean; userId?: string; username?: string; newToken?: string } = {
+    valid: true,
+    userId: decoded.userId,
+    username: decoded.username,
+  };
+
+  // Check if token is about to expire
+  if (decoded.exp) {
+    const currentTime = Math.floor(Date.now() / 1000);
+    const timeUntilExpiry = decoded.exp - currentTime;
+
+    // If less than threshold remaining, issue new token
+    if (timeUntilExpiry <= JWT_REFRESH_THRESHOLD) {
+      result.newToken = generateToken(decoded.userId, decoded.username);
+    }
+  }
+
+  return result;
 }

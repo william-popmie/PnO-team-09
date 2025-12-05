@@ -131,8 +131,14 @@ async function createCollection(name: string): Promise<boolean> {
       throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
     }
 
-    const result = (await response.json()) as { success: boolean; message: string };
+    const result = (await response.json()) as { success: boolean; message: string; token?: string };
     console.log('✅ Collection created:', result);
+
+    // If a new token is returned, update it in localStorage
+    if (result.token && typeof result.token === 'string' && result.token.length > 0) {
+      localStorage.setItem('sessionToken', result.token);
+      console.log('🔑 Session token refreshed and cached');
+    }
 
     // Refresh the collections list after successful creation
     await handleRefreshCollections();

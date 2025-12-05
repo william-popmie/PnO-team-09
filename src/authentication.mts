@@ -5,6 +5,8 @@ import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env['JWT_SECRET'] || 'your-secret-key-change-in-production';
+const JWT_EXPIRATION = '30m'; // Token expiration time (e.g., '30m', '1h', '7d')
+const JWT_REFRESH_THRESHOLD = 300; // Refresh token if less than this many seconds remain (5 minutes)
 
 export interface AuthenticatedRequest extends Request {
   user?: {
@@ -46,10 +48,10 @@ export function authenticateToken(req: AuthenticatedRequest, res: Response, next
       const currentTime = Math.floor(Date.now() / 1000);
       const timeUntilExpiry = decoded.exp - currentTime;
 
-      // If less than 5 minutes (300 seconds) remaining, issue new token
-      if (timeUntilExpiry <= 300) {
+      // If less than threshold remaining, issue new token
+      if (timeUntilExpiry <= JWT_REFRESH_THRESHOLD) {
         req.newToken = jwt.sign({ userId: decoded.userId, username: decoded.username }, JWT_SECRET, {
-          expiresIn: '30m',
+          expiresIn: JWT_EXPIRATION,
         });
       }
     }
@@ -78,7 +80,7 @@ export function addTokenToResponse<T extends Record<string, unknown>>(
  * Generate a new JWT token
  */
 export function generateToken(userId: string, username: string): string {
-  return jwt.sign({ userId, username }, JWT_SECRET, { expiresIn: '30m' });
+  return jwt.sign({ userId, username }, JWT_SECRET, { expiresIn: JWT_EXPIRATION });
 }
 
 /**

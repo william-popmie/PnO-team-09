@@ -86,10 +86,10 @@ function updateSelectionUI(): void {
 /**
  * Extracts document ID from document object with fallback strategies
  * @param {Record<string, unknown>} doc - Document object to extract ID from
- * @return {string} Document ID string, using 'id', '_id', or JSON slice as fallback
+ * @return {string} Document ID string, using 'id', 'name', '_id', or JSON slice as fallback
  */
 function getDocumentId(doc: Record<string, unknown>): string {
-  return (doc['id'] as string) || (doc['_id'] as string) || JSON.stringify(doc).slice(0, 10);
+  return (doc['id'] as string) || (doc['name'] as string) || (doc['_id'] as string) || JSON.stringify(doc).slice(0, 10);
 }
 
 // =========================
@@ -164,8 +164,8 @@ async function createDocument(id: string, content: Record<string, unknown>): Pro
       },
       body: JSON.stringify({
         collectionName: currentCollection,
-        documentName: id,
-        documentContent: content,
+        documentName: id, // This will be used as the document identifier (stored in 'name' field)
+        documentContent: content, // User content stored in nested 'content' field
       }),
     });
 

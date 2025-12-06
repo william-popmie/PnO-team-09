@@ -6,7 +6,7 @@ import express from 'express';
 import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
 import cors from 'cors';
-import { SimpleDBMS } from './simpledbms.mjs';
+import { SimpleDBMS, type DocumentValue } from './simpledbms.mjs';
 import { RealFile } from './file/file.mjs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -861,11 +861,12 @@ app.post('/api/createDocument', authenticateToken, async (req: AuthenticatedRequ
     }
 
     // Create the document in the collection
+    // Store documentContent in nested 'content' field to separate system fields from user data
     await collection.insert({
       name: documentName,
       userId: req.user!.userId,
       createdAt: new Date().toISOString(),
-      ...documentContent, // Spread the document content into the document
+      content: (documentContent || {}) as Record<string, DocumentValue>, // User content stored separately
     });
 
     const response = addTokenToResponse(req, {
@@ -1059,13 +1060,9 @@ app.get('/api/fetchDocumentContent', authenticateToken, async (req: Authenticate
       return;
     }
 
-    // Extract document content (everything except id, name, and userId)
-    const { id, name, userId, ...documentContent } = document as unknown as {
-      id: string;
-      name: string;
-      userId: string;
-      [key: string]: unknown;
-    };
+    // Extract the nested content field
+    const docData = document as unknown as { content?: Record<string, DocumentValue> };
+    const documentContent = docData.content || {};
 
     const response = addTokenToResponse(req, {
       success: true,
@@ -1137,11 +1134,13 @@ app.put('/api/updateDocument', authenticateToken, async (req: AuthenticatedReque
       return;
     }
 
-    // Update the document with new content (keeping name, userId, and original createdAt)
+    // Update the document content while preserving all system fields
+    const docData = document as unknown as { createdAt?: string };
     await collection.update(document.id, {
-      ...newDocumentContent,
       name: documentName, // Keep the original name
       userId: req.user!.userId, // Keep the original userId
+      createdAt: docData.createdAt || new Date().toISOString(), // Preserve original timestamp
+      content: newDocumentContent as Record<string, DocumentValue>, // Update only the user content
     });
 
     const response = addTokenToResponse(req, {

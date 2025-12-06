@@ -6,7 +6,7 @@ import express from 'express';
 import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
 import cors from 'cors';
-import { SimpleDBMS } from './simpledbms.mjs';
+import { SimpleDBMS, type DocumentValue } from './simpledbms.mjs';
 import { RealFile } from './file/file.mjs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -26,7 +26,10 @@ const port = 3000;
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, '../public')));
+// Serve static frontend assets (HTML, CSS) from src, scripts from build
+app.use('/components', express.static(path.join(__dirname, '../src/frontend/components')));
+app.use('/styles', express.static(path.join(__dirname, '../src/frontend/styles')));
+app.use('/scripts', express.static(path.join(__dirname, 'frontend/scripts')));
 
 const swaggerOptions = {
   definition: {
@@ -787,13 +790,31 @@ app.delete('/api/deleteCollection', authenticateToken, async (req: Authenticated
       return;
     }
 
+    // Delete all documents in the collection that belong to this user
+    const collection = await db.getCollection(collectionName);
+    const allDocuments = await collection.find();
+
+    const userDocuments = allDocuments.filter((doc) => {
+      const docData = doc as unknown as { userId?: string };
+      return docData.userId === req.user!.userId;
+    });
+
+    // Delete each document
+    for (const doc of userDocuments) {
+      await collection.delete(doc.id);
+    }
+
+    console.log(
+      `Deleted ${userDocuments.length} documents from collection '${collectionName}' for user ${req.user!.userId}`,
+    );
+
     // Remove collection from user's list
     userData.collections = userData.collections.filter((name) => name !== collectionName);
     await usersCollection.update(req.user!.userId, { collections: userData.collections });
 
     const response = addTokenToResponse(req, {
       success: true,
-      message: `Collection '${collectionName}' deleted successfully`,
+      message: `Collection '${collectionName}' and ${userDocuments.length} associated document(s) deleted successfully`,
     });
 
     res.json(response);
@@ -858,11 +879,12 @@ app.post('/api/createDocument', authenticateToken, async (req: AuthenticatedRequ
     }
 
     // Create the document in the collection
+    // Store documentContent in nested 'content' field to separate system fields from user data
     await collection.insert({
       name: documentName,
       userId: req.user!.userId,
       createdAt: new Date().toISOString(),
-      ...documentContent, // Spread the document content into the document
+      content: (documentContent || {}) as Record<string, DocumentValue>, // User content stored separately
     });
 
     const response = addTokenToResponse(req, {
@@ -1056,13 +1078,9 @@ app.get('/api/fetchDocumentContent', authenticateToken, async (req: Authenticate
       return;
     }
 
-    // Extract document content (everything except id, name, and userId)
-    const { id, name, userId, ...documentContent } = document as unknown as {
-      id: string;
-      name: string;
-      userId: string;
-      [key: string]: unknown;
-    };
+    // Extract the nested content field
+    const docData = document as unknown as { content?: Record<string, DocumentValue> };
+    const documentContent = docData.content || {};
 
     const response = addTokenToResponse(req, {
       success: true,
@@ -1134,11 +1152,13 @@ app.put('/api/updateDocument', authenticateToken, async (req: AuthenticatedReque
       return;
     }
 
-    // Update the document with new content (keeping name, userId, and original createdAt)
+    // Update the document content while preserving all system fields
+    const docData = document as unknown as { createdAt?: string };
     await collection.update(document.id, {
-      ...newDocumentContent,
       name: documentName, // Keep the original name
       userId: req.user!.userId, // Keep the original userId
+      createdAt: docData.createdAt || new Date().toISOString(), // Preserve original timestamp
+      content: newDocumentContent as Record<string, DocumentValue>, // Update only the user content
     });
 
     const response = addTokenToResponse(req, {

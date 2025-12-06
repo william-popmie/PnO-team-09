@@ -22,8 +22,7 @@ const collectionNameSpan = getEl<HTMLSpanElement>('collectionName');
 const documentsView = getEl<HTMLDivElement>('documentsView');
 const refreshDocuments = getEl<HTMLButtonElement>('refreshDocuments');
 const insertDocument = getEl<HTMLButtonElement>('insertDocument');
-const selectedCount = getEl<HTMLSpanElement>('selectedCount');
-const deleteSelected = getEl<HTMLButtonElement>('deleteSelected');
+const deleteDocumentBtn = getEl<HTMLButtonElement>('deleteDocument');
 const confirmInsert = getEl<HTMLButtonElement>('confirmInsert');
 const confirmDelete = getEl<HTMLButtonElement>('confirmDelete');
 const insertIdInput = getEl<HTMLInputElement>('insertIdInput');
@@ -34,8 +33,8 @@ const errorDiv = getEl<HTMLDivElement>('error');
 // =========================
 // State Management
 // =========================
-const selectedDocuments = new Set<string>();
 const allDocuments: Array<Record<string, unknown>> = [];
+let currentlyViewedDocument: string | null = null;
 const currentCollection = new URLSearchParams(window.location.search).get('collection') || 'unknown';
 collectionNameSpan.textContent = currentCollection;
 
@@ -64,6 +63,19 @@ function clearError(): void {
 }
 
 /**
+ * Clears the document view panel and resets the currently viewed document
+ * @return {void}
+ */
+function clearDocumentView(): void {
+  documentView.value = '';
+  insertIdInput.value = '';
+  insertJsonInput.value = '';
+  currentlyViewedDocument = null;
+  updateDeleteButtonVisibility();
+  renderDocuments(allDocuments); // Re-render to remove viewing highlight
+}
+
+/**
  * Extracts error message from unknown error type
  * @param {unknown} e - Error object or value of unknown type
  * @return {string} Error message string or stringified value
@@ -73,23 +85,20 @@ function getErrorMessage(e: unknown): string {
 }
 
 /**
- * Updates the UI to reflect current document selection state
- * Shows/hides selection count and delete button based on selected items
+ * Updates the delete button visibility based on document selection
  * @return {void}
  */
-function updateSelectionUI(): void {
-  const count = selectedDocuments.size;
-  selectedCount.textContent = count > 0 ? `${count} selected` : '';
-  deleteSelected.style.display = count > 0 ? 'block' : 'none';
+function updateDeleteButtonVisibility(): void {
+  deleteDocumentBtn.style.display = currentlyViewedDocument ? 'block' : 'none';
 }
 
 /**
  * Extracts document ID from document object with fallback strategies
  * @param {Record<string, unknown>} doc - Document object to extract ID from
- * @return {string} Document ID string, using 'id', '_id', or JSON slice as fallback
+ * @return {string} Document ID string, using 'id', 'name', '_id', or JSON slice as fallback
  */
 function getDocumentId(doc: Record<string, unknown>): string {
-  return (doc['id'] as string) || (doc['_id'] as string) || JSON.stringify(doc).slice(0, 10);
+  return (doc['id'] as string) || (doc['name'] as string) || (doc['_id'] as string) || JSON.stringify(doc).slice(0, 10);
 }
 
 // =========================
@@ -104,14 +113,16 @@ function getDocumentId(doc: Record<string, unknown>): string {
 async function fetchDocuments(): Promise<Array<Record<string, unknown>>> {
   try {
     console.log('🔄 Fetching documents from API for collection:', currentCollection);
-    const response = await fetch(`${API_BASE}/api/fetchDocuments`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
+    const response = await fetch(
+      `${API_BASE}/api/fetchDocuments?collectionName=${encodeURIComponent(currentCollection)}`,
+      {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
+        },
       },
-      body: JSON.stringify({ collectionName: currentCollection }),
-    });
+    );
 
     if (!response.ok) {
       if (response.status === 404) {
@@ -146,12 +157,13 @@ async function fetchDocuments(): Promise<Array<Record<string, unknown>>> {
 /**
  * Creates a new document in the current collection via API
  * @param {string} id - Document ID to create
+ * @param {Record<string, unknown>} content - Document content data
  * @return {Promise<boolean>} Promise resolving to true if creation successful
  * @throws {Error} When API request fails of document creation is rejected
  */
-async function createDocument(id: string): Promise<boolean> {
+async function createDocument(id: string, content: Record<string, unknown>): Promise<boolean> {
   try {
-    console.log('🔧 Creating document via API:', id);
+    console.log('🔧 Creating document via API:', id, content);
 
     const response = await fetch(`${API_BASE}/api/createDocument`, {
       method: 'POST',
@@ -161,7 +173,8 @@ async function createDocument(id: string): Promise<boolean> {
       },
       body: JSON.stringify({
         collectionName: currentCollection,
-        documentName: id,
+        documentName: id, // This will be used as the document identifier (stored in 'name' field)
+        documentContent: content, // User content stored in nested 'content' field
       }),
     });
 
@@ -193,11 +206,11 @@ async function createDocument(id: string): Promise<boolean> {
 /**
  * Updates an existing document in the current collection via API
  * @param {string} id - Document ID to update
- * @param {JSON} data - Updated document data object
+ * @param {Record<string, unknown>} data - Updated document data object
  * @return {Promise<boolean>} Promise resolving to true if update successful
  * @throws {Error} When API request fails, document not found, of update is rejected
  */
-async function updateDocument(id: string, data: JSON): Promise<boolean> {
+async function updateDocument(id: string, data: Record<string, unknown>): Promise<boolean> {
   try {
     console.log('🔧 Updating document via API:', id, data);
 
@@ -243,61 +256,62 @@ async function updateDocument(id: string, data: JSON): Promise<boolean> {
 }
 
 /**
- * Deletes multiple documents from the current collection via API using parallel requests
- * @param {string[]} ids - Array of document IDs to delete
- * @return {Promise<boolean>} Promise resolving to true if all deletions successful
- * @throws {Error} When any document deletion fails or document not found
+ * Deletes a document from the current collection via API
+ * @param {string} id - Document ID to delete
+ * @return {Promise<boolean>} Promise resolving to true if deletion successful
+ * @throws {Error} When document deletion fails or document not found
  */
-async function deleteDocuments(ids: string[]): Promise<boolean> {
+async function deleteDocument(id: string): Promise<boolean> {
   try {
-    console.log('🗑️ Deleting documents via API:', ids);
+    console.log('🗑️ Deleting document via API:', id);
 
-    // Delete each document via API
-    const deletePromises = ids.map(async (id) => {
-      const response = await fetch(`${API_BASE}/api/deleteDocument`, {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
-        },
-        body: JSON.stringify({
-          collectionName: currentCollection,
-          documentName: id,
-        }),
-      });
-
-      if (!response.ok) {
-        if (response.status === 404) {
-          console.warn(`Document ${id} not found (already deleted?)`);
-          return { success: true, message: `Document ${id} not found (already deleted?)` };
-        }
-        const errorData = (await response.json()) as { message?: string };
-        throw new Error(`Failed to delete ${id}: ${errorData.message || response.statusText}`);
-      }
-
-      const result = (await response.json()) as { success: boolean; message: string; token?: string };
-      console.log('✅ Document deleted:', result.message);
-      // If a new token is returned, update it in localStorage
-      if (result.token && typeof result.token === 'string' && result.token.length > 0) {
-        localStorage.setItem('sessionToken', result.token);
-        console.log('🔑 Session token refreshed and cached');
-      }
-
-      return response.json() as Promise<{ success: boolean; message: string; token?: string }>;
+    const response = await fetch(`${API_BASE}/api/deleteDocument`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
+      },
+      body: JSON.stringify({
+        collectionName: currentCollection,
+        documentName: id,
+      }),
     });
 
-    await Promise.all(deletePromises);
-    console.log('✅ All documents deleted successfully');
+    if (!response.ok) {
+      if (response.status === 404) {
+        console.warn(`Document ${id} not found (already deleted?)`);
+        // Still refresh the list
+        const documents = await fetchDocuments();
+        allDocuments.splice(0, allDocuments.length, ...documents);
+        renderDocuments(allDocuments);
+        return true;
+      }
+      const errorData = (await response.json()) as { message?: string };
+      throw new Error(`Failed to delete ${id}: ${errorData.message || response.statusText}`);
+    }
 
-    // Clear selection and refresh the documents list
-    selectedDocuments.clear();
+    const result = (await response.json()) as { success: boolean; message: string; token?: string };
+    console.log('✅ Document deleted:', result.message);
+
+    // If a new token is returned, update it in localStorage
+    if (result.token && typeof result.token === 'string' && result.token.length > 0) {
+      localStorage.setItem('sessionToken', result.token);
+      console.log('🔑 Session token refreshed and cached');
+    }
+
+    // Clear document view if the deleted document was being viewed
+    if (currentlyViewedDocument === id) {
+      clearDocumentView();
+    }
+
+    // Refresh the documents list
     const documents = await fetchDocuments();
     allDocuments.splice(0, allDocuments.length, ...documents);
     renderDocuments(allDocuments);
-    updateSelectionUI();
+    updateDeleteButtonVisibility();
     return true;
   } catch (error) {
-    console.error('❌ Failed to delete documents:', error);
+    console.error('❌ Failed to delete document:', error);
     throw error;
   }
 }
@@ -307,7 +321,7 @@ async function deleteDocuments(ids: string[]): Promise<boolean> {
 // =========================
 
 /**
- * Renders the documents list in the UI with checkboxes and clickable content
+ * Renders the documents list in the UI without checkboxes, just clickable content
  * @param {Array<Record<string, unknown>>} docs - Array of document objects to render
  * @return {void}
  */
@@ -325,27 +339,26 @@ function renderDocuments(docs: Array<Record<string, unknown>>): void {
     const item = document.createElement('div');
     item.className = 'document-item';
 
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.checked = selectedDocuments.has(id);
-    checkbox.addEventListener('change', () => {
-      toggleDocumentSelection(id, checkbox, item);
-    });
+    // Add 'viewing' class if this is the currently viewed document
+    if (currentlyViewedDocument === id) {
+      item.classList.add('viewing');
+    }
 
     const content = document.createElement('div');
     content.className = 'document-content';
     const name = doc['name'] as string | undefined;
     const docId = doc['id'] as string | undefined;
     const displayName = name || docId || 'Unnamed';
-    content.innerHTML = `<strong>${displayName}</strong><br>${JSON.stringify(doc, null, 2).slice(0, 100)}...`;
+    content.innerHTML = `<strong>${displayName}</strong>`;
     content.addEventListener('click', () => {
-      selectDocument(doc);
+      void selectDocument(doc);
     });
 
-    item.appendChild(checkbox);
     item.appendChild(content);
     documentsView.appendChild(item);
   });
+
+  updateDeleteButtonVisibility();
 }
 
 /**
@@ -353,33 +366,90 @@ function renderDocuments(docs: Array<Record<string, unknown>>): void {
  * @param {Record<string, unknown>} doc - Document object to select
  * @return {void}
  */
-function selectDocument(doc: Record<string, unknown>): void {
-  const docJson = JSON.stringify(doc, null, 2);
-  documentView.value = docJson;
-  insertIdInput.value = getDocumentId(doc);
-  insertJsonInput.value = docJson;
-  console.log('Selected document:', doc);
+async function selectDocument(doc: Record<string, unknown>): Promise<void> {
+  try {
+    const documentName = getDocumentId(doc);
+
+    // If clicking the same document, unselect it
+    if (currentlyViewedDocument === documentName) {
+      console.log('📄 Unselecting document:', documentName);
+      clearDocumentView();
+      return;
+    }
+
+    console.log('📄 Fetching document content for:', documentName);
+
+    // Fetch the full document content from the API
+    const response = await fetch(
+      `${API_BASE}/api/fetchDocumentContent?collectionName=${encodeURIComponent(currentCollection)}&documentName=${encodeURIComponent(documentName)}`,
+      {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
+        },
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const result = (await response.json()) as {
+      success: boolean;
+      message: string;
+      documentContent: Record<string, unknown>;
+      token?: string;
+    };
+
+    // If a new token is returned, update it in localStorage
+    if (result.token && typeof result.token === 'string' && result.token.length > 0) {
+      localStorage.setItem('sessionToken', result.token);
+      console.log('🔑 Session token refreshed and cached');
+    }
+
+    if (result.success) {
+      const docJson = JSON.stringify(result.documentContent, null, 2);
+      documentView.value = docJson;
+      insertIdInput.value = documentName;
+      insertJsonInput.value = docJson;
+      currentlyViewedDocument = documentName;
+      renderDocuments(allDocuments); // Re-render to highlight viewed document
+      updateDeleteButtonVisibility();
+      console.log('✅ Document content loaded:', result.documentContent);
+    } else {
+      showError(result.message);
+    }
+  } catch (error) {
+    console.error('❌ Failed to fetch document content:', error);
+    showError('Failed to load document content: ' + getErrorMessage(error));
+  }
 }
 
 /**
- * Toggles selection state for a document and updates UI accordingly
- * @param {string} id - Document ID to toggle
- * @param {HTMLElement} checkbox - The checkbox element that was clicked
- * @param {HTMLElement} item - The document item container element
+ * Handles delete document button click - deletes the currently viewed document via API
  * @return {void}
+ * @throws {Error} Handled internally and displayed to user via showError
  */
-function toggleDocumentSelection(id: string, checkbox: HTMLElement, item: HTMLElement): void {
-  if (selectedDocuments.has(id)) {
-    selectedDocuments.delete(id);
-    item.classList.remove('selected');
-    (checkbox as HTMLInputElement).checked = false;
-  } else {
-    selectedDocuments.add(id);
-    item.classList.add('selected');
-    (checkbox as HTMLInputElement).checked = true;
+async function handleDeleteDocument(): Promise<void> {
+  try {
+    clearError();
+
+    if (!currentlyViewedDocument) {
+      showError('No document selected');
+      return;
+    }
+
+    const success = await deleteDocument(currentlyViewedDocument);
+
+    if (success) {
+      console.log(`Deleted document: ${currentlyViewedDocument}`);
+    } else {
+      showError('Failed to delete document');
+    }
+  } catch (e) {
+    showError('Error deleting document: ' + getErrorMessage(e));
   }
-  updateSelectionUI();
-  console.log('Selection updated:', Array.from(selectedDocuments));
 }
 
 // =========================
@@ -418,47 +488,22 @@ async function handleInsertDocument(): Promise<void> {
       return;
     }
 
-    const data = JSON.parse(jsonText) as JSON;
+    const data = JSON.parse(jsonText) as Record<string, unknown>;
     const exists = allDocuments.some((doc) => getDocumentId(doc) === id);
-    const success = exists ? await updateDocument(id, data) : await createDocument(id);
+    const success = exists ? await updateDocument(id, data) : await createDocument(id, data);
 
     if (success) {
       insertIdInput.value = '';
       insertJsonInput.value = '';
       documentView.value = '';
+      currentlyViewedDocument = null;
+      updateDeleteButtonVisibility();
       console.log(`Document ${exists ? 'updated' : 'created'} successfully`);
     } else {
       showError(`Failed to ${exists ? 'update' : 'create'} document`);
     }
   } catch (e) {
     showError('Invalid JSON or error: ' + getErrorMessage(e));
-  }
-}
-
-/**
- * Handles delete selected documents button click - deletes all selected documents via API
- * @return {void}
- * @throws {Error} Handled internally and displayed to user via showError
- */
-async function handleDeleteSelected(): Promise<void> {
-  try {
-    clearError();
-    const selectedIds = Array.from(selectedDocuments);
-
-    if (selectedIds.length === 0) {
-      showError('No documents selected');
-      return;
-    }
-
-    const success = await deleteDocuments(selectedIds);
-
-    if (success) {
-      console.log(`Deleted ${selectedIds.length} documents`);
-    } else {
-      showError('Failed to delete documents');
-    }
-  } catch (e) {
-    showError('Error deleting documents: ' + getErrorMessage(e));
   }
 }
 
@@ -479,7 +524,7 @@ confirmInsert.addEventListener('click', () => {
 });
 
 confirmDelete.addEventListener('click', () => {
-  void handleDeleteSelected();
+  void handleDeleteDocument();
 });
 
 void (async () => {

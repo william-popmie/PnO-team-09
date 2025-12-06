@@ -26,12 +26,12 @@ export interface SignupResponse {
 //   DOM Elements
 // ==========================
 
-const signupForm = document.getElementById('signupForm') as HTMLFormElement;
-const usernameInput = document.getElementById('username') as HTMLInputElement;
-const passwordInput = document.getElementById('password') as HTMLInputElement;
-const confirmPasswordInput = document.getElementById('confirmPassword') as HTMLInputElement;
-const signupBtn = document.getElementById('signupBtn') as HTMLButtonElement;
-const errorDiv = document.getElementById('error') as HTMLDivElement;
+let signupForm: HTMLFormElement;
+let usernameInput: HTMLInputElement;
+let passwordInput: HTMLInputElement;
+let confirmPasswordInput: HTMLInputElement;
+let signupBtn: HTMLButtonElement;
+let errorDiv: HTMLDivElement;
 
 // ==========================
 //   Utility Functions
@@ -142,75 +142,107 @@ async function signupUser(request: SignupRequest): Promise<SignupResponse> {
 // ==========================
 
 /**
+ * Initialize the application when DOM is ready
+ */
+function init(): void {
+  signupForm = document.getElementById('signupForm') as HTMLFormElement;
+  usernameInput = document.getElementById('username') as HTMLInputElement;
+  passwordInput = document.getElementById('password') as HTMLInputElement;
+  confirmPasswordInput = document.getElementById('confirmPassword') as HTMLInputElement;
+  signupBtn = document.getElementById('signupBtn') as HTMLButtonElement;
+  errorDiv = document.getElementById('error') as HTMLDivElement;
+
+  if (!signupForm) {
+    console.error('❌ Signup form not found');
+    return;
+  }
+
+  console.log('✅ All DOM elements found, setting up event listeners');
+  setupEventListeners();
+}
+
+/**
  * Handles signup form submission, validates input, and registers user via API
  * @param {Event} e - The form submit event
  * @return {Promise<void>}
  */
-signupForm.addEventListener('submit', (e) => {
-  void (async () => {
-    e.preventDefault();
+function setupEventListeners(): void {
+  signupForm.addEventListener('submit', (e) => {
+    void (async () => {
+      e.preventDefault();
 
-    const username = usernameInput.value.trim();
-    const password = passwordInput.value;
-    const confirmPassword = confirmPasswordInput.value;
+      const username = usernameInput.value.trim();
+      const password = passwordInput.value;
+      const confirmPassword = confirmPasswordInput.value;
 
-    // Clear previous error
-    clearError();
+      // Clear previous error
+      clearError();
 
-    // Client-side validation
-    if (!allRequiredFields()) {
-      showError('All fields are required');
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      showError('Passwords do not match');
-      return;
-    }
-
-    if (!isValidUsername(username)) {
-      showError('Username must be between 3 and 20 characters and contain only letters, numbers, and underscores');
-      return;
-    }
-
-    if (!isValidPassword(password)) {
-      showError('Password must be at least 8 characters long and contain at least one letter and one number');
-      return;
-    }
-
-    // Disable form while submitting
-    signupBtn.disabled = true;
-    signupBtn.textContent = 'Creating account...';
-
-    try {
-      const result = await signupUser({
-        username,
-        password,
-      });
-
-      if (result.success) {
-        showSuccess(result.message + ' Redirecting to collections...');
-
-        // Redirect to collections page after successful signup
-        setTimeout(() => {
-          window.location.href = 'simpledbmswebclient.html';
-        }, 2000);
-      } else {
-        showError(result.message);
+      // Client-side validation
+      if (!allRequiredFields()) {
+        showError('All fields are required');
+        return;
       }
-    } catch (error) {
-      console.error('Signup error:', error);
-      showError(error instanceof Error ? error.message : 'An unexpected error occurred');
-    } finally {
-      // Re-enable form
-      signupBtn.disabled = false;
-      signupBtn.textContent = 'Sign Up';
-    }
-  })(); // End of async IIFE
-}); // End of event listener
+
+      if (password !== confirmPassword) {
+        showError('Passwords do not match');
+        return;
+      }
+
+      if (!isValidUsername(username)) {
+        showError('Username must be between 3 and 20 characters and contain only letters, numbers, and underscores');
+        return;
+      }
+
+      if (!isValidPassword(password)) {
+        showError('Password must be at least 8 characters long and contain at least one letter and one number');
+        return;
+      }
+
+      // Disable form while submitting
+      signupBtn.disabled = true;
+      signupBtn.textContent = 'Creating account...';
+
+      try {
+        const result = await signupUser({
+          username,
+          password,
+        });
+
+        if (result.success) {
+          showSuccess(result.message + ' Redirecting to collections...');
+
+          // Store username for display in webclient
+          localStorage.setItem('username', username);
+
+          // Redirect to collections page after successful signup
+          setTimeout(() => {
+            window.location.href = 'simpledbmswebclient.html';
+          }, 2000);
+        } else {
+          showError(result.message);
+        }
+      } catch (error) {
+        console.error('Signup error:', error);
+        showError(error instanceof Error ? error.message : 'An unexpected error occurred');
+      } finally {
+        // Re-enable form
+        signupBtn.disabled = false;
+        signupBtn.textContent = 'Sign Up';
+      }
+    })(); // End of async IIFE
+  }); // End of event listener
+}
 
 // ==========================
 //   Init
 // ==========================
 
 console.log('✅ Signup script loaded');
+
+// Wait for DOM to be ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}

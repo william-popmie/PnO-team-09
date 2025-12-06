@@ -57,7 +57,7 @@ export function authenticateToken(req: AuthenticatedRequest, res: Response, next
     }
 
     next();
-  } catch (error) {
+  } catch {
     res.status(401).json({ success: false, message: 'Invalid or expired token' });
     return;
   }

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SimpleDBMS Team 9</title>
-    <link rel="stylesheet" href="../styles/styles.css" />
+    <link rel="stylesheet" href="/styles/styles.css" />
   </head>
   <body>
     <div class="container">
@@ -23,8 +23,7 @@
         <div class="collections-header">
           <div class="meta"><h1>Collections Overview</h1></div>
           <div class="header-buttons">
-            <span id="selectedCount" class="selected-count" style="display: none">0 selected</span>
-            <button id="deleteSelected" class="btn btn-ghost" style="display: none">Delete Selected</button>
+            <button id="deleteCollection" class="btn btn-ghost" style="display: none">Delete</button>
             <button id="refreshCollections" class="btn btn-ghost">Refresh</button>
             <button id="createCollection" class="btn btn-primary">Create Collection</button>
           </div>
@@ -58,7 +57,7 @@
     </div>
 
     <!-- Module handles UI interactions; remove inline demo script to avoid accidental document loading -->
-    <script src="../scripts/webclient.mjs" defer></script>
+    <script type="module" src="/scripts/webclient.mjs"></script>
     <script>
       // Modal functionality for create form
       document.addEventListener('DOMContentLoaded', () => {

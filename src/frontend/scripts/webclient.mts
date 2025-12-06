@@ -244,7 +244,7 @@ function renderCollections(collections: string[]): void {
  * @param {string} name - Name of the collection clicked
  * @return {void}
  */
-async function handleCollectionClick(name: string): Promise<void> {
+function handleCollectionClick(name: string): void {
   // If already selected, navigate to documents page
   if (currentlySelectedCollection === name) {
     void selectCollection(name);

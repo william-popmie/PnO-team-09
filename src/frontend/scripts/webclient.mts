@@ -259,13 +259,12 @@ async function selectCollection(name: string): Promise<void> {
     console.log('📂 Selecting collection via API:', name);
 
     // First, verify the collection exists and optionally get document count
-    const response = await fetch(`${API_BASE}/api/getDocuments`, {
-      method: 'POST',
+    const response = await fetch(`${API_BASE}/api/fetchDocuments?collectionName=${encodeURIComponent(name)}`, {
+      method: 'GET',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
       },
-      body: JSON.stringify({ collectionName: name }),
     });
 
     if (!response.ok) {
@@ -277,7 +276,7 @@ async function selectCollection(name: string): Promise<void> {
     }
 
     const collectionInfo = (await response.json()) as {
-      succes: boolean;
+      success: boolean;
       message: string;
       documentNames: string[];
       token?: string;
@@ -289,7 +288,7 @@ async function selectCollection(name: string): Promise<void> {
       console.log('🔑 Session token refreshed and cached');
     }
 
-    if (collectionInfo.succes) {
+    if (collectionInfo.success) {
       console.log(collectionInfo.message);
       // Navigate to documents page with collection parameter
       window.location.href = `documents.html?collection=${encodeURIComponent(name)}`;

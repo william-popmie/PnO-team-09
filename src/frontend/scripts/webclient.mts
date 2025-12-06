@@ -17,8 +17,7 @@ let collectionSearch: HTMLInputElement;
 let collectionsList: HTMLDivElement;
 let refreshCollections: HTMLButtonElement;
 let createCollectionButton: HTMLButtonElement;
-let selectedCount: HTMLSpanElement;
-let deleteSelected: HTMLButtonElement;
+let deleteCollectionBtn: HTMLButtonElement;
 let confirmCreate: HTMLButtonElement;
 let confirmDelete: HTMLButtonElement | null;
 let collectionNameInput: HTMLInputElement;
@@ -28,8 +27,8 @@ let errorDiv: HTMLDivElement;
 // State Management
 // =========================
 
-const selectedCollections = new Set<string>();
 let allCollections: string[] = [];
+let currentlySelectedCollection: string | null = null;
 
 // =========================
 // Utility Functions
@@ -65,14 +64,11 @@ function getErrorMessage(e: unknown): string {
 }
 
 /**
- * Updates the UI to reflect current collection selection state
- * Shows/hides selection count and delete button based on selected items
+ * Updates the delete button visibility based on collection selection
  * @return {void}
  */
-function updateSelectionUI(): void {
-  const count = selectedCollections.size;
-  selectedCount.textContent = count > 0 ? `${count} selected` : '';
-  deleteSelected.style.display = count > 0 ? 'block' : 'none';
+function updateDeleteButtonVisibility(): void {
+  deleteCollectionBtn.style.display = currentlySelectedCollection ? 'block' : 'none';
 }
 
 // =========================
@@ -157,52 +153,48 @@ async function createCollection(name: string): Promise<boolean> {
 }
 
 /**
- * Deletes multiple collections via API using parallel requests
- * @param {string[]} names - Array of collection names to delete
- * @return {Promise<boolean>} Promise resolving to true if all deletions successful
- * @throws {Error} When any collection deletion fails
+ * Deletes a collection via API
+ * @param {string} name - Collection name to delete
+ * @return {Promise<boolean>} Promise resolving to true if deletion successful
+ * @throws {Error} When collection deletion fails
  */
-async function deleteCollections(names: string[]): Promise<boolean> {
+async function deleteCollection(name: string): Promise<boolean> {
   try {
-    console.log('🗑️ Deleting collections via API:', names);
+    console.log('🗑️ Deleting collection via API:', name);
 
-    // Delete each collection via API
-    const deletePromises = names.map(async (name) => {
-      const response = await fetch(`${API_BASE}/api/deleteCollection`, {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
-        },
-        body: JSON.stringify({ collectionName: name }),
-      });
-
-      if (!response.ok) {
-        const errorData = (await response.json()) as { message?: string };
-        throw new Error(errorData.message || `Failed to delete collection ${name}: HTTP ${response.status}`);
-      }
-
-      const result = (await response.json()) as { success: boolean; message: string; token?: string };
-      console.log('✅ Collection deleted:', result.message);
-
-      // If a new token is returned, update it in localStorage
-      if (result.token && typeof result.token === 'string' && result.token.length > 0) {
-        localStorage.setItem('sessionToken', result.token);
-        console.log('🔑 Session token refreshed and cached');
-      }
-
-      return result;
+    const response = await fetch(`${API_BASE}/api/deleteCollection`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
+      },
+      body: JSON.stringify({ collectionName: name }),
     });
 
-    await Promise.all(deletePromises);
-    console.log('✅ All collections deleted successfully');
+    if (!response.ok) {
+      const errorData = (await response.json()) as { message?: string };
+      throw new Error(errorData.message || `Failed to delete collection ${name}: HTTP ${response.status}`);
+    }
 
-    // Clear selection and refresh the collections list
-    selectedCollections.clear();
+    const result = (await response.json()) as { success: boolean; message: string; token?: string };
+    console.log('✅ Collection deleted:', result.message);
+
+    // If a new token is returned, update it in localStorage
+    if (result.token && typeof result.token === 'string' && result.token.length > 0) {
+      localStorage.setItem('sessionToken', result.token);
+      console.log('🔑 Session token refreshed and cached');
+    }
+
+    // Clear current selection if this was the selected collection
+    if (currentlySelectedCollection === name) {
+      currentlySelectedCollection = null;
+    }
+
+    // Refresh the collections list
     await handleRefreshCollections();
     return true;
   } catch (error) {
-    console.error('❌ Failed to delete collections:', error);
+    console.error('❌ Failed to delete collection:', error);
     throw error;
   }
 }
@@ -212,7 +204,7 @@ async function deleteCollections(names: string[]): Promise<boolean> {
 // =========================
 
 /**
- * Renders the collections list in the UI with checkboxes and clickable names
+ * Renders the collections list in the UI without checkboxes, just clickable names
  * @param {string[]} collections - Array of collection names to render
  * @return {void}
  */
@@ -228,25 +220,39 @@ function renderCollections(collections: string[]): void {
     const item = document.createElement('div');
     item.className = 'collection-item';
 
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.className = 'collection-checkbox';
-    checkbox.checked = selectedCollections.has(name);
-    checkbox.addEventListener('change', () => {
-      toggleCollectionSelection(name, checkbox, item);
-    });
+    // Add 'selected' class if this is the currently selected collection
+    if (currentlySelectedCollection === name) {
+      item.classList.add('selected');
+    }
 
     const nameSpan = document.createElement('span');
     nameSpan.className = 'collection-name';
     nameSpan.textContent = name;
     nameSpan.addEventListener('click', () => {
-      void selectCollection(name);
+      void handleCollectionClick(name);
     });
 
-    item.appendChild(checkbox);
     item.appendChild(nameSpan);
     collectionsList.appendChild(item);
   });
+
+  updateDeleteButtonVisibility();
+}
+
+/**
+ * Handles collection click - toggles selection or navigates to documents
+ * @param {string} name - Name of the collection clicked
+ * @return {void}
+ */
+async function handleCollectionClick(name: string): Promise<void> {
+  // If already selected, navigate to documents page
+  if (currentlySelectedCollection === name) {
+    void selectCollection(name);
+  } else {
+    // Otherwise, select this collection
+    currentlySelectedCollection = name;
+    renderCollections(allCollections);
+  }
 }
 
 /**
@@ -304,24 +310,6 @@ async function selectCollection(name: string): Promise<void> {
   }
 }
 
-/**
- * Toggles selection state for a collection and updates UI accordingly
- * @param {string} name - Name of the collection to toggle
- * @param {HTMLInputElement} checkbox - The checkbox element that was clicked
- * @param {HTMLElement} item - The collection item container element
- * @return {void}
- */
-function toggleCollectionSelection(name: string, checkbox: HTMLInputElement, item: HTMLElement): void {
-  if (checkbox.checked) {
-    selectedCollections.add(name);
-    item.classList.add('selected');
-  } else {
-    selectedCollections.delete(name);
-    item.classList.remove('selected');
-  }
-  updateSelectionUI();
-}
-
 // =========================
 // Event Handlers
 // =========================
@@ -368,26 +356,25 @@ async function handleCreateCollection(): Promise<void> {
 }
 
 /**
- * Handles delete selected collections button click - deletes all selected collections via API
+ * Handles delete collection button click - deletes the currently selected collection via API
  * @return {void}
  * @throws {Error} Handled internally and displayed to user via showError
  */
-async function handleDeleteSelected(): Promise<void> {
-  const selected = Array.from(selectedCollections);
-  if (selected.length === 0) {
-    showError('No collections selected');
+async function handleDeleteCollection(): Promise<void> {
+  if (!currentlySelectedCollection) {
+    showError('No collection selected');
     return;
   }
 
   try {
-    const success = await deleteCollections(selected);
+    const success = await deleteCollection(currentlySelectedCollection);
     if (success) {
       clearError();
     } else {
-      showError('Failed to delete collections');
+      showError('Failed to delete collection');
     }
   } catch (error) {
-    showError('Error deleting collections: ' + getErrorMessage(error));
+    showError('Error deleting collection: ' + getErrorMessage(error));
   }
 }
 
@@ -411,8 +398,7 @@ function initializeApp(): void {
   collectionsList = document.getElementById('collectionsList') as HTMLDivElement;
   refreshCollections = document.getElementById('refreshCollections') as HTMLButtonElement;
   createCollectionButton = document.getElementById('createCollection') as HTMLButtonElement;
-  selectedCount = document.getElementById('selectedCount') as HTMLSpanElement;
-  deleteSelected = document.getElementById('deleteSelected') as HTMLButtonElement;
+  deleteCollectionBtn = document.getElementById('deleteCollection') as HTMLButtonElement;
   confirmCreate = document.getElementById('confirmCreate') as HTMLButtonElement;
   confirmDelete = document.getElementById('confirmDelete') as HTMLButtonElement | null;
   collectionNameInput = document.getElementById('collectionNameInput') as HTMLInputElement;
@@ -440,12 +426,12 @@ function initializeApp(): void {
 
   if (confirmDelete) {
     confirmDelete.addEventListener('click', () => {
-      void handleDeleteSelected();
+      void handleDeleteCollection();
     });
   }
 
-  deleteSelected?.addEventListener('click', () => {
-    void handleDeleteSelected();
+  deleteCollectionBtn?.addEventListener('click', () => {
+    void handleDeleteCollection();
   });
 
   collectionSearch?.addEventListener('input', () => {

@@ -13,16 +13,16 @@ const API_BASE = 'http://localhost:3000';
 // DOM Element Selectors
 // =========================
 
-const collectionSearch = document.getElementById('collectionSearch') as HTMLInputElement;
-const collectionsList = document.getElementById('collectionsList') as HTMLDivElement;
-const refreshCollections = document.getElementById('refreshCollections') as HTMLButtonElement;
-const createCollectionButton = document.getElementById('createCollection') as HTMLButtonElement;
-const selectedCount = document.getElementById('selectedCount') as HTMLSpanElement;
-const deleteSelected = document.getElementById('deleteSelected') as HTMLButtonElement;
-const confirmCreate = document.getElementById('confirmCreate') as HTMLButtonElement;
-const confirmDelete = document.getElementById('confirmDelete') as HTMLButtonElement;
-const collectionNameInput = document.getElementById('collectionNameInput') as HTMLInputElement;
-const errorDiv = document.getElementById('error') as HTMLDivElement;
+let collectionSearch: HTMLInputElement;
+let collectionsList: HTMLDivElement;
+let refreshCollections: HTMLButtonElement;
+let createCollectionButton: HTMLButtonElement;
+let selectedCount: HTMLSpanElement;
+let deleteSelected: HTMLButtonElement;
+let confirmCreate: HTMLButtonElement;
+let confirmDelete: HTMLButtonElement | null;
+let collectionNameInput: HTMLInputElement;
+let errorDiv: HTMLDivElement;
 
 // =========================
 // State Management
@@ -405,39 +405,74 @@ function handleSearchCollections(): void {
 // Event Listeners & Init
 // =========================
 
-refreshCollections.addEventListener('click', () => {
-  void handleRefreshCollections();
-});
+function initializeApp(): void {
+  // Get DOM elements
+  collectionSearch = document.getElementById('collectionSearch') as HTMLInputElement;
+  collectionsList = document.getElementById('collectionsList') as HTMLDivElement;
+  refreshCollections = document.getElementById('refreshCollections') as HTMLButtonElement;
+  createCollectionButton = document.getElementById('createCollection') as HTMLButtonElement;
+  selectedCount = document.getElementById('selectedCount') as HTMLSpanElement;
+  deleteSelected = document.getElementById('deleteSelected') as HTMLButtonElement;
+  confirmCreate = document.getElementById('confirmCreate') as HTMLButtonElement;
+  confirmDelete = document.getElementById('confirmDelete') as HTMLButtonElement | null;
+  collectionNameInput = document.getElementById('collectionNameInput') as HTMLInputElement;
+  errorDiv = document.getElementById('error') as HTMLDivElement;
 
-createCollectionButton.addEventListener('click', () => {
-  /* Modal will open automatically via HTML */
-});
-
-confirmCreate.addEventListener('click', () => {
-  void handleCreateCollection();
-});
-
-confirmDelete.addEventListener('click', () => {
-  void handleDeleteSelected();
-});
-
-collectionSearch.addEventListener('input', () => {
-  handleSearchCollections();
-});
-
-// Initialize page
-void (async () => {
-  try {
-    console.log('🚀 Initializing webclient...');
-    await handleRefreshCollections();
-  } catch (error) {
-    console.error('❌ Failed to initialize webclient:', error);
-    showError('Failed to load collections. Using offline mode.');
-
-    // Fallback to demo data
-    allCollections = ['users', 'sessions', 'products', 'orders'];
-    renderCollections(allCollections);
+  if (!collectionsList || !refreshCollections || !errorDiv) {
+    console.error('❌ Required DOM elements not found');
+    return;
   }
-})();
 
-console.log('✅ WebClient ready');
+  console.log('✅ DOM elements loaded');
+
+  // Set up event listeners
+  refreshCollections.addEventListener('click', () => {
+    void handleRefreshCollections();
+  });
+
+  createCollectionButton?.addEventListener('click', () => {
+    /* Modal will open automatically via HTML */
+  });
+
+  confirmCreate?.addEventListener('click', () => {
+    void handleCreateCollection();
+  });
+
+  if (confirmDelete) {
+    confirmDelete.addEventListener('click', () => {
+      void handleDeleteSelected();
+    });
+  }
+
+  deleteSelected?.addEventListener('click', () => {
+    void handleDeleteSelected();
+  });
+
+  collectionSearch?.addEventListener('input', () => {
+    handleSearchCollections();
+  });
+
+  // Initialize page
+  void (async () => {
+    try {
+      console.log('🚀 Initializing webclient...');
+      await handleRefreshCollections();
+    } catch (error) {
+      console.error('❌ Failed to initialize webclient:', error);
+      showError('Failed to load collections. Using offline mode.');
+
+      // Fallback to demo data
+      allCollections = ['users', 'sessions', 'products', 'orders'];
+      renderCollections(allCollections);
+    }
+  })();
+
+  console.log('✅ WebClient ready');
+}
+
+// Wait for DOM to be ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializeApp);
+} else {
+  initializeApp();
+}

@@ -128,6 +128,8 @@ authForm.addEventListener('submit', (e) => {
         if (result.token) {
           localStorage.setItem('sessionToken', result.token);
         }
+        // Store username for display in webclient
+        localStorage.setItem('username', username);
 
         showError('Login successful! Redirecting...');
         errorDiv.style.color = 'var(--success, #22c55e)';

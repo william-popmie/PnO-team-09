@@ -212,6 +212,9 @@ function setupEventListeners(): void {
         if (result.success) {
           showSuccess(result.message + ' Redirecting to collections...');
 
+          // Store username for display in webclient
+          localStorage.setItem('username', username);
+
           // Redirect to collections page after successful signup
           setTimeout(() => {
             window.location.href = 'simpledbmswebclient.html';

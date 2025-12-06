@@ -339,9 +339,9 @@ function renderDocuments(docs: Array<Record<string, unknown>>): void {
     const name = doc['name'] as string | undefined;
     const docId = doc['id'] as string | undefined;
     const displayName = name || docId || 'Unnamed';
-    content.innerHTML = `<strong>${displayName}</strong><br>${JSON.stringify(doc, null, 2).slice(0, 100)}...`;
+    content.innerHTML = `<strong>${displayName}</strong>`;
     content.addEventListener('click', () => {
-      selectDocument(doc);
+      void selectDocument(doc);
     });
 
     item.appendChild(checkbox);
@@ -355,12 +355,53 @@ function renderDocuments(docs: Array<Record<string, unknown>>): void {
  * @param {Record<string, unknown>} doc - Document object to select
  * @return {void}
  */
-function selectDocument(doc: Record<string, unknown>): void {
-  const docJson = JSON.stringify(doc, null, 2);
-  documentView.value = docJson;
-  insertIdInput.value = getDocumentId(doc);
-  insertJsonInput.value = docJson;
-  console.log('Selected document:', doc);
+async function selectDocument(doc: Record<string, unknown>): Promise<void> {
+  try {
+    const documentName = getDocumentId(doc);
+    console.log('📄 Fetching document content for:', documentName);
+
+    // Fetch the full document content from the API
+    const response = await fetch(
+      `${API_BASE}/api/fetchDocumentContent?collectionName=${encodeURIComponent(currentCollection)}&documentName=${encodeURIComponent(documentName)}`,
+      {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
+        },
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const result = (await response.json()) as {
+      success: boolean;
+      message: string;
+      documentContent: Record<string, unknown>;
+      token?: string;
+    };
+
+    // If a new token is returned, update it in localStorage
+    if (result.token && typeof result.token === 'string' && result.token.length > 0) {
+      localStorage.setItem('sessionToken', result.token);
+      console.log('🔑 Session token refreshed and cached');
+    }
+
+    if (result.success) {
+      const docJson = JSON.stringify(result.documentContent, null, 2);
+      documentView.value = docJson;
+      insertIdInput.value = documentName;
+      insertJsonInput.value = docJson;
+      console.log('✅ Document content loaded:', result.documentContent);
+    } else {
+      showError(result.message);
+    }
+  } catch (error) {
+    console.error('❌ Failed to fetch document content:', error);
+    showError('Failed to load document content: ' + getErrorMessage(error));
+  }
 }
 
 /**

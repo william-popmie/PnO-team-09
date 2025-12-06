@@ -26,7 +26,10 @@ const port = 3000;
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, '../public')));
+// Serve static frontend assets (HTML, CSS) from src, scripts from build
+app.use('/components', express.static(path.join(__dirname, '../src/frontend/components')));
+app.use('/styles', express.static(path.join(__dirname, '../src/frontend/styles')));
+app.use('/scripts', express.static(path.join(__dirname, 'frontend/scripts')));
 
 const swaggerOptions = {
   definition: {

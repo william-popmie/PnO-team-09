@@ -148,12 +148,13 @@ async function fetchDocuments(): Promise<Array<Record<string, unknown>>> {
 /**
  * Creates a new document in the current collection via API
  * @param {string} id - Document ID to create
+ * @param {Record<string, unknown>} content - Document content data
  * @return {Promise<boolean>} Promise resolving to true if creation successful
  * @throws {Error} When API request fails of document creation is rejected
  */
-async function createDocument(id: string): Promise<boolean> {
+async function createDocument(id: string, content: Record<string, unknown>): Promise<boolean> {
   try {
-    console.log('🔧 Creating document via API:', id);
+    console.log('🔧 Creating document via API:', id, content);
 
     const response = await fetch(`${API_BASE}/api/createDocument`, {
       method: 'POST',
@@ -164,6 +165,7 @@ async function createDocument(id: string): Promise<boolean> {
       body: JSON.stringify({
         collectionName: currentCollection,
         documentName: id,
+        documentContent: content,
       }),
     });
 
@@ -195,11 +197,11 @@ async function createDocument(id: string): Promise<boolean> {
 /**
  * Updates an existing document in the current collection via API
  * @param {string} id - Document ID to update
- * @param {JSON} data - Updated document data object
+ * @param {Record<string, unknown>} data - Updated document data object
  * @return {Promise<boolean>} Promise resolving to true if update successful
  * @throws {Error} When API request fails, document not found, of update is rejected
  */
-async function updateDocument(id: string, data: JSON): Promise<boolean> {
+async function updateDocument(id: string, data: Record<string, unknown>): Promise<boolean> {
   try {
     console.log('🔧 Updating document via API:', id, data);
 
@@ -461,9 +463,9 @@ async function handleInsertDocument(): Promise<void> {
       return;
     }
 
-    const data = JSON.parse(jsonText) as JSON;
+    const data = JSON.parse(jsonText) as Record<string, unknown>;
     const exists = allDocuments.some((doc) => getDocumentId(doc) === id);
-    const success = exists ? await updateDocument(id, data) : await createDocument(id);
+    const success = exists ? await updateDocument(id, data) : await createDocument(id, data);
 
     if (success) {
       insertIdInput.value = '';

@@ -168,7 +168,7 @@ async function deleteCollections(names: string[]): Promise<boolean> {
 
     // Delete each collection via API
     const deletePromises = names.map(async (name) => {
-      const response = await fetch(`${API_BASE}/api/deleteCollection}`, {
+      const response = await fetch(`${API_BASE}/api/deleteCollection`, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
@@ -177,20 +177,21 @@ async function deleteCollections(names: string[]): Promise<boolean> {
         body: JSON.stringify({ collectionName: name }),
       });
 
+      if (!response.ok) {
+        const errorData = (await response.json()) as { message?: string };
+        throw new Error(errorData.message || `Failed to delete collection ${name}: HTTP ${response.status}`);
+      }
+
       const result = (await response.json()) as { success: boolean; message: string; token?: string };
-      console.log('✅ Document deleted:', result.message);
+      console.log('✅ Collection deleted:', result.message);
+
       // If a new token is returned, update it in localStorage
       if (result.token && typeof result.token === 'string' && result.token.length > 0) {
         localStorage.setItem('sessionToken', result.token);
         console.log('🔑 Session token refreshed and cached');
       }
 
-      if (!response.ok) {
-        const errorData = (await response.json()) as { message?: string };
-        throw new Error(errorData.message || `Failed to delete collection ${name}: HTTP ${response.status}`);
-      }
-
-      return response.json() as Promise<{ success: boolean; message: string; token?: string }>;
+      return result;
     });
 
     await Promise.all(deletePromises);

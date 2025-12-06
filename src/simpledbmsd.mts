@@ -790,13 +790,31 @@ app.delete('/api/deleteCollection', authenticateToken, async (req: Authenticated
       return;
     }
 
+    // Delete all documents in the collection that belong to this user
+    const collection = await db.getCollection(collectionName);
+    const allDocuments = await collection.find();
+
+    const userDocuments = allDocuments.filter((doc) => {
+      const docData = doc as unknown as { userId?: string };
+      return docData.userId === req.user!.userId;
+    });
+
+    // Delete each document
+    for (const doc of userDocuments) {
+      await collection.delete(doc.id);
+    }
+
+    console.log(
+      `Deleted ${userDocuments.length} documents from collection '${collectionName}' for user ${req.user!.userId}`,
+    );
+
     // Remove collection from user's list
     userData.collections = userData.collections.filter((name) => name !== collectionName);
     await usersCollection.update(req.user!.userId, { collections: userData.collections });
 
     const response = addTokenToResponse(req, {
       success: true,
-      message: `Collection '${collectionName}' deleted successfully`,
+      message: `Collection '${collectionName}' and ${userDocuments.length} associated document(s) deleted successfully`,
     });
 
     res.json(response);

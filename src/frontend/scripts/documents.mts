@@ -287,7 +287,7 @@ async function deleteDocuments(ids: string[]): Promise<boolean> {
         console.log('🔑 Session token refreshed and cached');
       }
 
-      return response.json() as Promise<{ success: boolean; message: string; token?: string }>;
+      return result;
     });
 
     await Promise.all(deletePromises);

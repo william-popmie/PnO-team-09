@@ -55,6 +55,17 @@ function clearError(): void {
 }
 
 /**
+ * Handles token expiration by clearing session and redirecting to login
+ * @return {void}
+ */
+function handleTokenExpiration(): void {
+  console.warn('⚠️ Token expired or invalid, redirecting to login');
+  localStorage.removeItem('sessionToken');
+  localStorage.removeItem('username');
+  window.location.href = 'login.html';
+}
+
+/**
  * Extracts error message from unknown error type
  * @param {unknown} e - Error object or value of unknown type
  * @return {string} Error message string or stringified value
@@ -92,6 +103,10 @@ async function fetchCollections(): Promise<string[]> {
     });
 
     if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        handleTokenExpiration();
+        return [];
+      }
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
 
@@ -130,6 +145,10 @@ async function createCollection(name: string): Promise<boolean> {
     });
 
     if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        handleTokenExpiration();
+        return false;
+      }
       const errorData = (await response.json()) as { message?: string };
       throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
     }
@@ -172,6 +191,10 @@ async function deleteCollection(name: string): Promise<boolean> {
     });
 
     if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        handleTokenExpiration();
+        return false;
+      }
       const errorData = (await response.json()) as { message?: string };
       throw new Error(errorData.message || `Failed to delete collection ${name}: HTTP ${response.status}`);
     }
@@ -275,6 +298,10 @@ async function selectCollection(name: string): Promise<void> {
     });
 
     if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        handleTokenExpiration();
+        return;
+      }
       if (response.status === 404) {
         showError(`Collection '${name}' not found`);
         return;
@@ -422,6 +449,14 @@ function initializeApp(): void {
 
   confirmCreate?.addEventListener('click', () => {
     void handleCreateCollection();
+  });
+
+  // Allow Enter key to submit collection creation
+  collectionNameInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      confirmCreate?.click();
+    }
   });
 
   if (confirmDelete) {

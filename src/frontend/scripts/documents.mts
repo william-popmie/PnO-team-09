@@ -63,6 +63,17 @@ function clearError(): void {
 }
 
 /**
+ * Handles token expiration by clearing session and redirecting to login
+ * @return {void}
+ */
+function handleTokenExpiration(): void {
+  console.warn('⚠️ Token expired or invalid, redirecting to login');
+  localStorage.removeItem('sessionToken');
+  localStorage.removeItem('username');
+  window.location.href = 'login.html';
+}
+
+/**
  * Clears the document view panel and resets the currently viewed document
  * @return {void}
  */
@@ -125,6 +136,10 @@ async function fetchDocuments(): Promise<Array<Record<string, unknown>>> {
     );
 
     if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        handleTokenExpiration();
+        return [];
+      }
       if (response.status === 404) {
         console.log('📭 Collection not found, returning empty array');
         return [];
@@ -179,6 +194,10 @@ async function createDocument(id: string, content: Record<string, unknown>): Pro
     });
 
     if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        handleTokenExpiration();
+        return false;
+      }
       const errorData = (await response.json()) as { message?: string };
       throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
     }
@@ -228,6 +247,10 @@ async function updateDocument(id: string, data: Record<string, unknown>): Promis
     });
 
     if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        handleTokenExpiration();
+        return false;
+      }
       if (response.status === 404) {
         throw new Error(`Document with ID '${id}' not found`);
       }
@@ -278,6 +301,10 @@ async function deleteDocument(id: string): Promise<boolean> {
     });
 
     if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        handleTokenExpiration();
+        return false;
+      }
       if (response.status === 404) {
         console.warn(`Document ${id} not found (already deleted?)`);
         // Still refresh the list
@@ -521,6 +548,14 @@ insertDocument.addEventListener('click', () => {
 
 confirmInsert.addEventListener('click', () => {
   void handleInsertDocument();
+});
+
+// Allow Enter key to submit document insert
+insertIdInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    confirmInsert.click();
+  }
 });
 
 confirmDelete.addEventListener('click', () => {

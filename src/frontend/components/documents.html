@@ -90,6 +90,7 @@
         const insertBtn = document.getElementById('insertDocument');
         const insertModal = document.getElementById('insertModalOverlay');
         const cancelInsertBtn = document.getElementById('cancelInsert');
+        const confirmInsertBtn = document.getElementById('confirmInsert');
         const nameInput = document.getElementById('insertIdInput');
         const jsonInput = document.getElementById('insertJsonInput');
 
@@ -109,6 +110,13 @@
         });
 
         cancelInsertBtn?.addEventListener('click', () => {
+          insertModal?.classList.remove('show');
+          if (nameInput) nameInput.value = '';
+          if (jsonInput) jsonInput.value = '';
+        });
+
+        // Close insert modal when confirm button is clicked
+        confirmInsertBtn?.addEventListener('click', () => {
           insertModal?.classList.remove('show');
           if (nameInput) nameInput.value = '';
           if (jsonInput) jsonInput.value = '';

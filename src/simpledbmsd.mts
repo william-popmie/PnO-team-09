@@ -1,4 +1,4 @@
-// @author Maarten Haine, Jari Daemen
+// @author Maarten Haine, Jari Daemen, William Ragnarsson
 // also used Claude to help with debugging
 // @date 2025-11-22
 
@@ -10,6 +10,13 @@ import { SimpleDBMS } from './simpledbms.mjs';
 import { RealFile } from './file/file.mjs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import {
+  authenticateToken,
+  addTokenToResponse,
+  generateToken,
+  validateAndRefreshToken,
+  type AuthenticatedRequest,
+} from './authentication.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -34,6 +41,15 @@ const swaggerOptions = {
         url: `http://localhost:${port}`,
       },
     ],
+    components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+        },
+      },
+    },
   },
   apis: ['./src/simpledbmsd.mts'],
 };
@@ -511,6 +527,629 @@ app.post('/db/:collection/join', async (req, res) => {
     res.json(results);
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * William Ragnarsson
+ * Frontend webapp routing endpoints
+ * Note: These endpoints are not included in public API documentation for security reasons
+ */
+
+/**
+ * POST /api/signup
+ * Register a new user account
+ * @param {string} username - The desired username
+ * @param {string} password - The user's password (TODO: should be hashed)
+ * @returns {object} { success: boolean, message: string, token: string }
+ */
+app.post('/api/signup', async (req, res) => {
+  try {
+    const { username, password } = req.body as { username?: string; password?: string };
+
+    // Validate input
+    if (!username || !password) {
+      res.status(400).json({ success: false, message: 'Username and password are required' });
+      return;
+    }
+
+    // Get users collection (this internally uses db.getCollection())
+    const usersCollection = await db.getCollection('users');
+
+    // Check if user already exists
+    const existingUsers = await usersCollection.find();
+    const userExists = existingUsers.some((user) => {
+      const userData = user as unknown as { username: string };
+      return userData.username && userData.username.toLowerCase() === username.toLowerCase();
+    });
+
+    if (userExists) {
+      res.status(400).json({ success: false, message: 'Username already exists' });
+      return;
+    }
+
+    // Create new user (this internally calls collection.insert())
+    const newUser = await usersCollection.insert({
+      username,
+      password, // TODO: Hash this in production!
+      collections: [],
+      createdAt: new Date().toISOString(),
+    });
+
+    // Create JWT token (expires in 30 minutes)
+    const token = generateToken(newUser.id, username);
+
+    res.status(201).json({
+      success: true,
+      message: 'User created successfully',
+      token,
+    });
+  } catch (error) {
+    console.error('Signup error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * POST /api/login
+ * Authenticate a user with credentials or validate an existing token
+ * @param {string} [username] - Username for credential-based login
+ * @param {string} [password] - Password for credential-based login
+ * @param {string} [token] - Existing JWT token for validation
+ * @returns {object} { success: boolean, message: string, token: string }
+ */
+app.post('/api/login', async (req, res) => {
+  try {
+    const {
+      username,
+      password,
+      token: existingToken,
+    } = req.body as {
+      username?: string;
+      password?: string;
+      token?: string;
+    };
+
+    // If token is provided, validate it for auto-login
+    if (existingToken) {
+      const validation = validateAndRefreshToken(existingToken);
+
+      if (validation.valid) {
+        res.json({
+          success: true,
+          message: 'Already authenticated',
+          token: validation.newToken || existingToken,
+        });
+        return;
+      }
+      // Token invalid or expired, fall through to username/password login
+    }
+
+    // Validate input
+    if (!username || !password) {
+      res.status(400).json({ success: false, message: 'Username and password are required' });
+      return;
+    }
+
+    // Get users collection
+    const usersCollection = await db.getCollection('users');
+    const users = await usersCollection.find();
+
+    // Find user
+    const user = users.find((u) => {
+      const userData = u as unknown as { username?: string };
+      return userData.username && userData.username.toLowerCase() === username.toLowerCase();
+    }) as { id: string; username: string; password: string } | undefined;
+
+    if (!user) {
+      res.status(401).json({ success: false, message: 'Invalid username or password' });
+      return;
+    }
+
+    // Check password (plain text for now - TODO: use bcrypt.compare() in production)
+    if (user.password !== password) {
+      res.status(401).json({ success: false, message: 'Invalid username or password' });
+      return;
+    }
+
+    // Create JWT token
+    const token = generateToken(user.id, user.username);
+
+    res.json({
+      success: true,
+      message: 'Login successful',
+      token,
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * POST /api/createCollection
+ * Create a new collection for the authenticated user
+ * @requires Authentication - Bearer token in Authorization header
+ * @param {string} collectionName - Name of the collection to create
+ * @returns {object} { success: boolean, message: string, token?: string }
+ */
+app.post('/api/createCollection', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { collectionName } = req.body as { collectionName?: string };
+
+    if (!collectionName) {
+      res.status(400).json({ success: false, message: 'collectionName is required' });
+      return;
+    }
+
+    // Check if user already has this collection
+    const usersCollection = await db.getCollection('users');
+    const user = await usersCollection.findById(req.user!.userId);
+
+    if (user) {
+      const userData = user as unknown as { collections?: string[] };
+
+      // Initialize collections array if it doesn't exist
+      if (!userData.collections) {
+        userData.collections = [];
+      }
+
+      // Check if collection already exists for this user
+      if (userData.collections.includes(collectionName)) {
+        res.status(400).json({ success: false, message: 'Collection already exists' });
+        return;
+      }
+
+      // Create the collection and add to user's list
+      await db.getCollection(collectionName);
+      userData.collections.push(collectionName);
+      await usersCollection.update(req.user!.userId, { collections: userData.collections });
+    }
+
+    const response = addTokenToResponse(req, {
+      success: true,
+      message: `Collection created succesfully and assigned to: ${req.user!.username}`,
+    });
+
+    res.status(201).json(response);
+  } catch (error) {
+    console.error('Create collection error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * GET /api/fetchCollections
+ * Retrieve all collections owned by the authenticated user
+ * @requires Authentication - Bearer token in Authorization header
+ * @returns {object} { success: boolean, message: string, collections: string[], token?: string }
+ */
+app.get('/api/fetchCollections', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    // Get user's collections list
+    const usersCollection = await db.getCollection('users');
+    const user = await usersCollection.findById(req.user!.userId);
+
+    let collections: string[] = [];
+    if (user) {
+      const userData = user as unknown as { collections: string[] };
+      collections = userData.collections || null;
+    }
+
+    if (!collections) {
+      res.status(400).json({ success: false, message: 'Server error when fetching usercollections' });
+      return;
+    }
+
+    const response = addTokenToResponse(req, {
+      success: true,
+      message: 'collections fetched succesfully',
+      collections,
+    });
+
+    res.json(response);
+  } catch (error) {
+    console.error('Get collections error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * DELETE /api/deleteCollection
+ * Delete a collection from the authenticated user's account
+ * @requires Authentication - Bearer token in Authorization header
+ * @param {string} collectionName - Name of the collection to delete
+ * @returns {object} { success: boolean, message: string, token?: string }
+ */
+app.delete('/api/deleteCollection', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { collectionName } = req.body as { collectionName?: string };
+
+    if (!collectionName) {
+      res.status(400).json({ success: false, message: 'collectionName is required' });
+      return;
+    }
+
+    // Get user document
+    const usersCollection = await db.getCollection('users');
+    const user = await usersCollection.findById(req.user!.userId);
+
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    const userData = user as unknown as { collections: string[] };
+
+    // Check if collection exists in user's list
+    if (!userData.collections.includes(collectionName)) {
+      res.status(400).json({ success: false, message: 'Collection not found in user collections' });
+      return;
+    }
+
+    // Remove collection from user's list
+    userData.collections = userData.collections.filter((name) => name !== collectionName);
+    await usersCollection.update(req.user!.userId, { collections: userData.collections });
+
+    const response = addTokenToResponse(req, {
+      success: true,
+      message: `Collection '${collectionName}' deleted successfully`,
+    });
+
+    res.json(response);
+  } catch (error) {
+    console.error('Delete collection error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * POST /api/createDocument
+ * Create a new document in a collection for the authenticated user
+ * @requires Authentication - Bearer token in Authorization header
+ * @param {string} collectionName - Name of the collection
+ * @param {string} documentName - Name of the document (must be unique per user per collection)
+ * @param {object} documentContent - JSON object containing the document data
+ * @returns {object} { success: boolean, message: string, token?: string }
+ */
+app.post('/api/createDocument', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { collectionName, documentName, documentContent } = req.body as {
+      collectionName?: string;
+      documentName?: string;
+      documentContent?: Record<string, unknown>;
+    };
+
+    if (!collectionName || !documentName) {
+      res.status(400).json({ success: false, message: 'collectionName and documentName are required' });
+      return;
+    }
+
+    // Verify user has access to this collection
+    const usersCollection = await db.getCollection('users');
+    const user = await usersCollection.findById(req.user!.userId);
+
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    const userData = user as unknown as { collections?: string[] };
+
+    // Check if collection exists in user's list
+    if (!userData.collections || !userData.collections.includes(collectionName)) {
+      res.status(400).json({ success: false, message: 'Collection not found in user collections' });
+      return;
+    }
+
+    // Get the collection and check for duplicate document names
+    const collection = await db.getCollection(collectionName);
+    const existingDocuments = await collection.find();
+
+    // Check if a document with this name already exists for this user in this collection
+    const documentExists = existingDocuments.some((doc) => {
+      const docData = doc as unknown as { name?: string; userId?: string };
+      return docData.name === documentName && docData.userId === req.user!.userId;
+    });
+
+    if (documentExists) {
+      res.status(400).json({ success: false, message: 'A document with this name already exists in the collection' });
+      return;
+    }
+
+    // Create the document in the collection
+    await collection.insert({
+      name: documentName,
+      userId: req.user!.userId,
+      createdAt: new Date().toISOString(),
+      ...documentContent, // Spread the document content into the document
+    });
+
+    const response = addTokenToResponse(req, {
+      success: true,
+      message: `Document '${documentName}' created successfully in collection '${collectionName}'`,
+    });
+
+    res.status(201).json(response);
+  } catch (error) {
+    console.error('Create document error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * DELETE /api/deleteDocument
+ * Delete a document from a collection
+ * @requires Authentication - Bearer token in Authorization header
+ * @param {string} collectionName - Name of the collection
+ * @param {string} documentName - Name of the document to delete
+ * @returns {object} { success: boolean, message: string, token?: string }
+ */
+app.delete('/api/deleteDocument', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { collectionName, documentName } = req.body as {
+      collectionName?: string;
+      documentName?: string;
+    };
+
+    if (!collectionName || !documentName) {
+      res.status(400).json({ success: false, message: 'collectionName and documentName are required' });
+      return;
+    }
+
+    // Verify user has access to this collection
+    const usersCollection = await db.getCollection('users');
+    const user = await usersCollection.findById(req.user!.userId);
+
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    const userData = user as unknown as { collections?: string[] };
+
+    // Check if collection exists in user's list
+    if (!userData.collections || !userData.collections.includes(collectionName)) {
+      res.status(400).json({ success: false, message: 'Collection not found in user collections' });
+      return;
+    }
+
+    // Find and delete the document
+    const collection = await db.getCollection(collectionName);
+    const documents = await collection.find();
+
+    // Find the document by name and userId
+    const document = documents.find((doc) => {
+      const docData = doc as unknown as { name?: string; userId?: string };
+      return docData.name === documentName && docData.userId === req.user!.userId;
+    });
+
+    if (!document) {
+      res.status(404).json({ success: false, message: 'Document not found' });
+      return;
+    }
+
+    // Delete the document
+    await collection.delete(document.id);
+
+    const response = addTokenToResponse(req, {
+      success: true,
+      message: `Document '${documentName}' deleted successfully from collection '${collectionName}'`,
+    });
+
+    res.json(response);
+  } catch (error) {
+    console.error('Delete document error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * GET /api/fetchDocuments
+ * Retrieve all document names from a collection for the authenticated user
+ * @requires Authentication - Bearer token in Authorization header
+ * @param {string} collectionName - Name of the collection (query parameter)
+ * @returns {object} { success: boolean, message: string, documentNames: string[], token?: string }
+ */
+app.get('/api/fetchDocuments', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const collectionName = req.query['collectionName'] as string | undefined;
+
+    if (!collectionName) {
+      res.status(400).json({ success: false, message: 'collectionName is required' });
+      return;
+    }
+
+    // Verify user has access to this collection
+    const usersCollection = await db.getCollection('users');
+    const user = await usersCollection.findById(req.user!.userId);
+
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    const userData = user as unknown as { collections?: string[] };
+
+    // Check if collection exists in user's list
+    if (!userData.collections || !userData.collections.includes(collectionName)) {
+      res.status(400).json({ success: false, message: 'Collection not found in user collections' });
+      return;
+    }
+
+    // Get all documents from the collection that belong to this user
+    const collection = await db.getCollection(collectionName);
+    const allDocuments = await collection.find();
+
+    // Filter documents by userId and extract names
+    const documentNames = allDocuments
+      .filter((doc) => {
+        const docData = doc as unknown as { userId?: string };
+        return docData.userId === req.user!.userId;
+      })
+      .map((doc) => {
+        const docData = doc as unknown as { name?: string };
+        return docData.name || '';
+      })
+      .filter((name) => name !== ''); // Remove empty names
+
+    const response = addTokenToResponse(req, {
+      success: true,
+      message: 'Documents fetched successfully',
+      documentNames,
+    });
+
+    res.json(response);
+  } catch (error) {
+    console.error('Fetch documents error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * GET /api/fetchDocumentContent
+ * Retrieve the full content of a specific document
+ * @requires Authentication - Bearer token in Authorization header
+ * @param {string} collectionName - Name of the collection (query parameter)
+ * @param {string} documentName - Name of the document (query parameter)
+ * @returns {object} { success: boolean, message: string, documentContent: object, token?: string }
+ */
+app.get('/api/fetchDocumentContent', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const collectionName = req.query['collectionName'] as string | undefined;
+    const documentName = req.query['documentName'] as string | undefined;
+
+    if (!collectionName || !documentName) {
+      res.status(400).json({ success: false, message: 'collectionName and documentName are required' });
+      return;
+    }
+
+    // Verify user has access to this collection
+    const usersCollection = await db.getCollection('users');
+    const user = await usersCollection.findById(req.user!.userId);
+
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    const userData = user as unknown as { collections?: string[] };
+
+    // Check if collection exists in user's list
+    if (!userData.collections || !userData.collections.includes(collectionName)) {
+      res.status(400).json({ success: false, message: 'Collection not found in user collections' });
+      return;
+    }
+
+    // Find the document in the collection
+    const collection = await db.getCollection(collectionName);
+    const allDocuments = await collection.find();
+
+    // Find the document by name and userId
+    const document = allDocuments.find((doc) => {
+      const docData = doc as unknown as { name?: string; userId?: string };
+      return docData.name === documentName && docData.userId === req.user!.userId;
+    });
+
+    if (!document) {
+      res.status(404).json({ success: false, message: 'Document not found' });
+      return;
+    }
+
+    // Extract document content (everything except id, name, and userId)
+    const { id, name, userId, ...documentContent } = document as unknown as {
+      id: string;
+      name: string;
+      userId: string;
+      [key: string]: unknown;
+    };
+
+    const response = addTokenToResponse(req, {
+      success: true,
+      message: 'Document content fetched successfully',
+      documentContent,
+    });
+
+    res.json(response);
+  } catch (error) {
+    console.error('Fetch document content error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * PUT /api/updateDocument
+ * Update the content of an existing document
+ * @requires Authentication - Bearer token in Authorization header
+ * @param {string} collectionName - Name of the collection
+ * @param {string} documentName - Name of the document to update
+ * @param {object} newDocumentContent - New JSON object to replace the document content
+ * @returns {object} { success: boolean, message: string, token?: string }
+ * @note The name and userId fields are preserved during update
+ */
+app.put('/api/updateDocument', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { collectionName, documentName, newDocumentContent } = req.body as {
+      collectionName?: string;
+      documentName?: string;
+      newDocumentContent?: Record<string, unknown>;
+    };
+
+    if (!collectionName || !documentName || !newDocumentContent) {
+      res
+        .status(400)
+        .json({ success: false, message: 'collectionName, documentName, and newDocumentContent are required' });
+      return;
+    }
+
+    // Verify user has access to this collection
+    const usersCollection = await db.getCollection('users');
+    const user = await usersCollection.findById(req.user!.userId);
+
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    const userData = user as unknown as { collections?: string[] };
+
+    // Check if collection exists in user's list
+    if (!userData.collections || !userData.collections.includes(collectionName)) {
+      res.status(400).json({ success: false, message: 'Collection not found in user collections' });
+      return;
+    }
+
+    // Find the document in the collection
+    const collection = await db.getCollection(collectionName);
+    const allDocuments = await collection.find();
+
+    // Find the document by name and userId
+    const document = allDocuments.find((doc) => {
+      const docData = doc as unknown as { name?: string; userId?: string };
+      return docData.name === documentName && docData.userId === req.user!.userId;
+    });
+
+    if (!document) {
+      res.status(404).json({ success: false, message: 'Document not found' });
+      return;
+    }
+
+    // Update the document with new content (keeping name, userId, and original createdAt)
+    await collection.update(document.id, {
+      ...newDocumentContent,
+      name: documentName, // Keep the original name
+      userId: req.user!.userId, // Keep the original userId
+    });
+
+    const response = addTokenToResponse(req, {
+      success: true,
+      message: `Document '${documentName}' updated successfully in collection '${collectionName}'`,
+    });
+
+    res.json(response);
+  } catch (error) {
+    console.error('Update document error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 

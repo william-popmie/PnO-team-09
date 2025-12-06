@@ -104,14 +104,16 @@ function getDocumentId(doc: Record<string, unknown>): string {
 async function fetchDocuments(): Promise<Array<Record<string, unknown>>> {
   try {
     console.log('🔄 Fetching documents from API for collection:', currentCollection);
-    const response = await fetch(`${API_BASE}/api/fetchDocuments`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
+    const response = await fetch(
+      `${API_BASE}/api/fetchDocuments?collectionName=${encodeURIComponent(currentCollection)}`,
+      {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
+        },
       },
-      body: JSON.stringify({ collectionName: currentCollection }),
-    });
+    );
 
     if (!response.ok) {
       if (response.status === 404) {

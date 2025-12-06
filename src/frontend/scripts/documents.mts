@@ -36,6 +36,7 @@ const errorDiv = getEl<HTMLDivElement>('error');
 // =========================
 const selectedDocuments = new Set<string>();
 const allDocuments: Array<Record<string, unknown>> = [];
+let currentlyViewedDocument: string | null = null;
 const currentCollection = new URLSearchParams(window.location.search).get('collection') || 'unknown';
 collectionNameSpan.textContent = currentCollection;
 
@@ -61,6 +62,18 @@ function showError(msg: string): void {
  */
 function clearError(): void {
   errorDiv.textContent = '';
+}
+
+/**
+ * Clears the document view panel and resets the currently viewed document
+ * @return {void}
+ */
+function clearDocumentView(): void {
+  documentView.value = '';
+  insertIdInput.value = '';
+  insertJsonInput.value = '';
+  currentlyViewedDocument = null;
+  renderDocuments(allDocuments); // Re-render to remove viewing highlight
 }
 
 /**
@@ -293,6 +306,11 @@ async function deleteDocuments(ids: string[]): Promise<boolean> {
     await Promise.all(deletePromises);
     console.log('✅ All documents deleted successfully');
 
+    // Clear document view if any deleted document was being viewed
+    if (currentlyViewedDocument && ids.includes(currentlyViewedDocument)) {
+      clearDocumentView();
+    }
+
     // Clear selection and refresh the documents list
     selectedDocuments.clear();
     const documents = await fetchDocuments();
@@ -329,6 +347,11 @@ function renderDocuments(docs: Array<Record<string, unknown>>): void {
     const item = document.createElement('div');
     item.className = 'document-item';
 
+    // Add 'viewing' class if this is the currently viewed document
+    if (currentlyViewedDocument === id) {
+      item.classList.add('viewing');
+    }
+
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.checked = selectedDocuments.has(id);
@@ -360,6 +383,14 @@ function renderDocuments(docs: Array<Record<string, unknown>>): void {
 async function selectDocument(doc: Record<string, unknown>): Promise<void> {
   try {
     const documentName = getDocumentId(doc);
+
+    // If clicking the same document, unselect it
+    if (currentlyViewedDocument === documentName) {
+      console.log('📄 Unselecting document:', documentName);
+      clearDocumentView();
+      return;
+    }
+
     console.log('📄 Fetching document content for:', documentName);
 
     // Fetch the full document content from the API
@@ -396,6 +427,8 @@ async function selectDocument(doc: Record<string, unknown>): Promise<void> {
       documentView.value = docJson;
       insertIdInput.value = documentName;
       insertJsonInput.value = docJson;
+      currentlyViewedDocument = documentName;
+      renderDocuments(allDocuments); // Re-render to highlight viewed document
       console.log('✅ Document content loaded:', result.documentContent);
     } else {
       showError(result.message);

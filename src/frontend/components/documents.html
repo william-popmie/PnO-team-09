@@ -137,7 +137,7 @@
           }
         });
 
-        // Close modals on Escape key
+        // Close modals on Escape key or Enter key for delete modal
         document.addEventListener('keydown', (e) => {
           if (e.key === 'Escape') {
             if (deleteModal?.classList.contains('show')) {
@@ -148,6 +148,11 @@
               if (nameInput) nameInput.value = '';
               if (jsonInput) jsonInput.value = '';
             }
+          }
+          // Enter key confirms delete when delete modal is open
+          if (e.key === 'Enter' && deleteModal?.classList.contains('show')) {
+            e.preventDefault();
+            document.getElementById('confirmDelete')?.click();
           }
         });
       });

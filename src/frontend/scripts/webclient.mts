@@ -449,6 +449,10 @@ function initializeApp(): void {
 
   confirmCreate?.addEventListener('click', () => {
     void handleCreateCollection();
+    // Close the create modal after confirmation
+    const modalOverlay = document.getElementById('modalOverlay');
+    modalOverlay?.classList.remove('show');
+    if (collectionNameInput) collectionNameInput.value = '';
   });
 
   // Allow Enter key to submit collection creation
@@ -462,11 +466,15 @@ function initializeApp(): void {
   if (confirmDelete) {
     confirmDelete.addEventListener('click', () => {
       void handleDeleteCollection();
+      // Close the delete modal after confirmation
+      const deleteModal = document.getElementById('deleteModalOverlay');
+      deleteModal?.classList.remove('show');
     });
   }
 
   deleteCollectionBtn?.addEventListener('click', () => {
-    void handleDeleteCollection();
+    const deleteModal = document.getElementById('deleteModalOverlay');
+    deleteModal?.classList.add('show');
   });
 
   collectionSearch?.addEventListener('input', () => {

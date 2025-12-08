@@ -560,6 +560,9 @@ insertIdInput.addEventListener('keydown', (e) => {
 
 confirmDelete.addEventListener('click', () => {
   void handleDeleteDocument();
+  // Close the delete modal after confirmation
+  const deleteModal = document.getElementById('deleteModalOverlay');
+  deleteModal?.classList.remove('show');
 });
 
 void (async () => {

@@ -85,6 +85,8 @@ async function initDB(customDbPath?: string, customWalPath?: string) {
       db = await SimpleDBMS.create(dbFile, walFile);
       console.log('Database created successfully.');
     }
+
+    encryptionService = EncryptionService.fromHexKey(masterKey);
   } catch (error) {
     console.error('Failed to initialize database:', error);
     throw error;
@@ -884,9 +886,7 @@ app.post('/api/createDocument', authenticateToken, async (req: AuthenticatedRequ
     }
 
     // Encrypt the document content before storing
-    const encryptedBuffer = encryptionService.encrypt(
-      Buffer.from(JSON.stringify(documentContent || {}))
-    );
+    const encryptedBuffer = encryptionService.encrypt(Buffer.from(JSON.stringify(documentContent || {})));
 
     // Create the document in the collection with encrypted content
     await collection.insert({
@@ -1166,9 +1166,7 @@ app.put('/api/updateDocument', authenticateToken, async (req: AuthenticatedReque
     }
 
     // Encrypt the new content before storing
-    const encryptedBuffer = encryptionService.encrypt(
-      Buffer.from(JSON.stringify(newDocumentContent))
-    );
+    const encryptedBuffer = encryptionService.encrypt(Buffer.from(JSON.stringify(newDocumentContent)));
 
     // Update the document content while preserving all system fields
     const docData = document as unknown as { createdAt?: string };
@@ -1195,7 +1193,6 @@ app.put('/api/updateDocument', authenticateToken, async (req: AuthenticatedReque
 if (process.env['NODE_ENV'] !== 'test') {
   initDB()
     .then(() => {
-      encryptionService = EncryptionService.fromHexKey(masterKey);
       app.listen(port, () => {
         console.log(`SimpleDBMS Daemon listening at http://localhost:${port}`);
         console.log(`Swagger UI available at http://localhost:${port}/api-docs`);

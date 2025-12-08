@@ -170,6 +170,51 @@ async function fetchDocuments(): Promise<Array<Record<string, unknown>>> {
 }
 
 /**
+ * Fetches the full content of a single document by name
+ * @param {string} documentName - Name/ID of the document to fetch
+ * @return {Promise<Record<string, unknown>>} The document content object
+ */
+async function fetchDocumentContentByName(documentName: string): Promise<Record<string, unknown>> {
+  const response = await fetch(
+    `${API_BASE}/api/fetchDocumentContent?collectionName=${encodeURIComponent(currentCollection)}&documentName=${encodeURIComponent(documentName)}`,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
+      },
+    },
+  );
+
+  if (response.status === 401 || response.status === 403) {
+    handleTokenExpiration();
+    return {};
+  }
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+  }
+
+  const result = (await response.json()) as {
+    success: boolean;
+    message: string;
+    documentContent: Record<string, unknown>;
+    token?: string;
+  };
+
+  if (result.token && typeof result.token === 'string' && result.token.length > 0) {
+    localStorage.setItem('sessionToken', result.token);
+    console.log('🔑 Session token refreshed and cached');
+  }
+
+  if (!result.success) {
+    throw new Error(result.message || 'Failed to fetch document content');
+  }
+
+  return result.documentContent || {};
+}
+
+/**
  * Creates a new document in the current collection via API
  * @param {string} id - Document ID to create
  * @param {Record<string, unknown>} content - Document content data
@@ -406,47 +451,15 @@ async function selectDocument(doc: Record<string, unknown>): Promise<void> {
 
     console.log('📄 Fetching document content for:', documentName);
 
-    // Fetch the full document content from the API
-    const response = await fetch(
-      `${API_BASE}/api/fetchDocumentContent?collectionName=${encodeURIComponent(currentCollection)}&documentName=${encodeURIComponent(documentName)}`,
-      {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
-        },
-      },
-    );
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const result = (await response.json()) as {
-      success: boolean;
-      message: string;
-      documentContent: Record<string, unknown>;
-      token?: string;
-    };
-
-    // If a new token is returned, update it in localStorage
-    if (result.token && typeof result.token === 'string' && result.token.length > 0) {
-      localStorage.setItem('sessionToken', result.token);
-      console.log('🔑 Session token refreshed and cached');
-    }
-
-    if (result.success) {
-      const docJson = JSON.stringify(result.documentContent, null, 2);
-      documentView.value = docJson;
-      insertIdInput.value = documentName;
-      insertJsonInput.value = docJson;
-      currentlyViewedDocument = documentName;
-      renderDocuments(allDocuments); // Re-render to highlight viewed document
-      updateDeleteButtonVisibility();
-      console.log('✅ Document content loaded:', result.documentContent);
-    } else {
-      showError(result.message);
-    }
+    const documentContent = await fetchDocumentContentByName(documentName);
+    const docJson = JSON.stringify(documentContent, null, 2);
+    documentView.value = docJson;
+    insertIdInput.value = documentName;
+    insertJsonInput.value = docJson;
+    currentlyViewedDocument = documentName;
+    renderDocuments(allDocuments); // Re-render to highlight viewed document
+    updateDeleteButtonVisibility();
+    console.log('✅ Document content loaded:', documentContent);
   } catch (error) {
     console.error('❌ Failed to fetch document content:', error);
     showError('Failed to load document content: ' + getErrorMessage(error));
@@ -595,67 +608,111 @@ async function handleRunAggregate(): Promise<void> {
     clearError();
 
     const groupBy = groupByField.value.trim();
-    if (!groupBy) {
-      showError('Please specify a field to group by');
-      return;
-    }
 
     const opType = operationType.value;
     const fieldName = operationField.value.trim();
 
-    // Build operations object based on selected operation
-    const operations: {
-      count?: string;
-      sum?: Array<{ field: string; as: string }>;
-      avg?: Array<{ field: string; as: string }>;
-      min?: Array<{ field: string; as: string }>;
-      max?: Array<{ field: string; as: string }>;
-    } = {};
-
-    if (opType === 'count') {
-      operations.count = 'total';
-    } else {
-      if (!fieldName) {
-        showError('Please specify a field to analyze');
-        return;
-      }
-
-      if (opType === 'sum') {
-        operations.sum = [{ field: fieldName, as: 'sum_' + fieldName }];
-      } else if (opType === 'avg') {
-        operations.avg = [{ field: fieldName, as: 'avg_' + fieldName }];
-      } else if (opType === 'min') {
-        operations.min = [{ field: fieldName, as: 'min_' + fieldName }];
-      } else if (opType === 'max') {
-        operations.max = [{ field: fieldName, as: 'max_' + fieldName }];
-      }
+    if (opType !== 'count' && !fieldName) {
+      showError('Please specify a field to analyze');
+      return;
     }
 
     aggregateResults.textContent = 'Running analysis...';
 
-    const token = localStorage.getItem('sessionToken');
-    const response = await fetch(`${API_BASE}/db/${currentCollection}/aggregate`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: token ? `Bearer ${token}` : '',
-      },
-      body: JSON.stringify({ groupBy, operations }),
-    });
+    // Ensure we have the latest document list
+    const docs = await fetchDocuments();
+    allDocuments.splice(0, allDocuments.length, ...docs);
 
-    if (response.status === 401 || response.status === 403) {
-      handleTokenExpiration();
+    // Fetch full content for each document so we can aggregate client-side
+    const detailedDocs = await Promise.all(
+      docs.map(async (doc) => {
+        const name = getDocumentId(doc);
+        try {
+          const content = await fetchDocumentContentByName(name);
+          return { name, content };
+        } catch (error) {
+          console.warn(`⚠️ Skipping document ${name} due to fetch error:`, error);
+          return { name, content: {} as Record<string, unknown> };
+        }
+      }),
+    );
+
+    if (detailedDocs.length === 0) {
+      aggregateResults.textContent = 'No documents found to analyze.';
       return;
     }
 
-    if (!response.ok) {
-      const errorData = (await response.json()) as { error?: string };
-      throw new Error(errorData.error || 'Failed to run aggregate');
-    }
+    const toNumber = (value: unknown): number | null => {
+      if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
 
-    const results = (await response.json()) as unknown[];
+    type GroupState = {
+      groupValue: unknown;
+      count: number;
+      sum: number;
+      min: number | null;
+      max: number | null;
+      numericCount: number;
+    };
+
+    const groups = new Map<string, GroupState>();
+
+    detailedDocs.forEach(({ content }) => {
+      const record = content;
+      const groupValue = groupBy ? record[groupBy] : 'all';
+      const groupKey = groupBy
+        ? groupValue === undefined || groupValue === null
+          ? 'null'
+          : JSON.stringify(groupValue)
+        : 'all';
+
+      const state: GroupState = groups.get(groupKey) || {
+        groupValue: groupBy ? (groupValue ?? null) : 'all',
+        count: 0,
+        sum: 0,
+        min: null,
+        max: null,
+        numericCount: 0,
+      };
+
+      state.count += 1;
+
+      if (opType !== 'count') {
+        const numeric = toNumber(record[fieldName]);
+        if (numeric !== null) {
+          state.sum += numeric;
+          state.min = state.min === null ? numeric : Math.min(state.min, numeric);
+          state.max = state.max === null ? numeric : Math.max(state.max, numeric);
+          state.numericCount += 1;
+        }
+      }
+
+      groups.set(groupKey, state);
+    });
+
+    const results = Array.from(groups.values()).map((state) => {
+      const base: Record<string, unknown> = {
+        group: state.groupValue,
+        count: state.count,
+      };
+
+      if (opType === 'sum') {
+        base[`sum_${fieldName}`] = state.sum;
+      } else if (opType === 'avg') {
+        base[`avg_${fieldName}`] = state.numericCount > 0 ? state.sum / state.numericCount : null;
+      } else if (opType === 'min') {
+        base[`min_${fieldName}`] = state.numericCount > 0 ? state.min : null;
+      } else if (opType === 'max') {
+        base[`max_${fieldName}`] = state.numericCount > 0 ? state.max : null;
+      }
+
+      return base;
+    });
+
     aggregateResults.textContent = JSON.stringify(results, null, 2);
-    console.log('Aggregate results:', results);
+    console.log('Aggregate results (client-side):', results);
   } catch (e) {
     showError('Aggregate error: ' + getErrorMessage(e));
     aggregateResults.textContent = 'Error running analysis. See error message above.';

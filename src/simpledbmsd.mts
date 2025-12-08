@@ -17,12 +17,14 @@ import {
   validateAndRefreshToken,
   type AuthenticatedRequest,
 } from './authentication.mjs';
+import { PasswordHasher } from './password-hashing.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const port = 3000;
+const passwordHasher = new PasswordHasher();
 
 app.use(cors());
 app.use(express.json());
@@ -571,10 +573,13 @@ app.post('/api/signup', async (req, res) => {
       return;
     }
 
+    // Hash the password before storing
+    const hashedPassword = await passwordHasher.hashPassword(password);
+
     // Create new user (this internally calls collection.insert())
     const newUser = await usersCollection.insert({
       username,
-      password, // TODO: Hash this in production!
+      password: hashedPassword,
       collections: [],
       createdAt: new Date().toISOString(),
     });
@@ -649,8 +654,10 @@ app.post('/api/login', async (req, res) => {
       return;
     }
 
-    // Check password (plain text for now - TODO: use bcrypt.compare() in production)
-    if (user.password !== password) {
+    // Verify the password against the stored hash
+    const isPasswordValid = await passwordHasher.verifyPassword(password, user.password);
+
+    if (!isPasswordValid) {
       res.status(401).json({ success: false, message: 'Invalid username or password' });
       return;
     }

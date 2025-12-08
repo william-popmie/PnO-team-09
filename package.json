@@ -20,6 +20,7 @@
   },
   "devDependencies": {
     "@eslint/js": "9.39.0",
+    "@types/argon2": "0.14.1",
     "@types/cors": "2.8.19",
     "@types/express": "5.0.5",
     "@types/jsonwebtoken": "9.0.10",

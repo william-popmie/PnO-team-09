@@ -48,6 +48,71 @@
           <div id="error">&nbsp;</div>
         </aside>
       </div>
+
+      <!-- Aggregate Section -->
+      <div class="card" style="margin-top: 20px">
+        <div class="meta"><h2>Data Analysis</h2></div>
+
+        <label for="groupByField">Group by field</label>
+        <input id="groupByField" type="text" placeholder="e.g., category, status, department" />
+
+        <div class="spacer"></div>
+
+        <label for="operationType">Operation</label>
+        <select
+          id="operationType"
+          style="
+            width: 100%;
+            padding: 14px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: #1e293b;
+            color: #ffffff;
+            font-size: 16px;
+            box-sizing: border-box;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+          "
+        >
+          <option value="count">Count documents</option>
+          <option value="sum">Sum</option>
+          <option value="avg">Average</option>
+          <option value="min">Minimum</option>
+          <option value="max">Maximum</option>
+        </select>
+
+        <div id="operationFieldContainer" style="display: none">
+          <div class="spacer"></div>
+          <label for="operationField">Field to analyze</label>
+          <input id="operationField" type="text" placeholder="e.g., price, age, score" />
+        </div>
+
+        <div class="spacer-md"></div>
+        <button id="runAggregate" class="btn btn-primary">Run Analysis</button>
+
+        <div class="spacer-md"></div>
+        <label for="aggregateResults">Results</label>
+        <div
+          id="aggregateResults"
+          style="
+            width: 100%;
+            padding: 14px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: #1e293b;
+            color: #ffffff;
+            font-size: 16px;
+            box-sizing: border-box;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+            min-height: 120px;
+            white-space: pre-wrap;
+            font-family: ui-monospace, monospace;
+            font-size: 13px;
+            line-height: 1.6;
+          "
+        >
+          No results yet. Configure and run an analysis above.
+        </div>
+      </div>
     </div>
 
     <!-- Modal for deleting document -->

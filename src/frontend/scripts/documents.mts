@@ -565,6 +565,107 @@ confirmDelete.addEventListener('click', () => {
   deleteModal?.classList.remove('show');
 });
 
+// =========================
+// Aggregate Functionality
+// =========================
+
+const runAggregateBtn = getEl<HTMLButtonElement>('runAggregate');
+const groupByField = getEl<HTMLInputElement>('groupByField');
+const operationField = getEl<HTMLInputElement>('operationField');
+const operationType = getEl<HTMLSelectElement>('operationType');
+const aggregateResults = getEl<HTMLDivElement>('aggregateResults');
+const operationFieldContainer = getEl<HTMLDivElement>('operationFieldContainer');
+
+// Toggle field visibility based on operation type
+operationType.addEventListener('change', () => {
+  if (operationType.value === 'count') {
+    operationFieldContainer.style.display = 'none';
+    operationField.value = ''; // Clear the field when hidden
+  } else {
+    operationFieldContainer.style.display = 'block';
+  }
+});
+
+/**
+ * Runs aggregate analysis on the collection
+ * @return {void}
+ */
+async function handleRunAggregate(): Promise<void> {
+  try {
+    clearError();
+
+    const groupBy = groupByField.value.trim();
+    if (!groupBy) {
+      showError('Please specify a field to group by');
+      return;
+    }
+
+    const opType = operationType.value;
+    const fieldName = operationField.value.trim();
+
+    // Build operations object based on selected operation
+    const operations: {
+      count?: string;
+      sum?: Array<{ field: string; as: string }>;
+      avg?: Array<{ field: string; as: string }>;
+      min?: Array<{ field: string; as: string }>;
+      max?: Array<{ field: string; as: string }>;
+    } = {};
+
+    if (opType === 'count') {
+      operations.count = 'total';
+    } else {
+      if (!fieldName) {
+        showError('Please specify a field to analyze');
+        return;
+      }
+
+      if (opType === 'sum') {
+        operations.sum = [{ field: fieldName, as: 'sum_' + fieldName }];
+      } else if (opType === 'avg') {
+        operations.avg = [{ field: fieldName, as: 'avg_' + fieldName }];
+      } else if (opType === 'min') {
+        operations.min = [{ field: fieldName, as: 'min_' + fieldName }];
+      } else if (opType === 'max') {
+        operations.max = [{ field: fieldName, as: 'max_' + fieldName }];
+      }
+    }
+
+    aggregateResults.textContent = 'Running analysis...';
+
+    const token = localStorage.getItem('sessionToken');
+    const response = await fetch(`${API_BASE}/db/${currentCollection}/aggregate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: token ? `Bearer ${token}` : '',
+      },
+      body: JSON.stringify({ groupBy, operations }),
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      handleTokenExpiration();
+      return;
+    }
+
+    if (!response.ok) {
+      const errorData = (await response.json()) as { error?: string };
+      throw new Error(errorData.error || 'Failed to run aggregate');
+    }
+
+    const results = (await response.json()) as unknown[];
+    aggregateResults.textContent = JSON.stringify(results, null, 2);
+    console.log('Aggregate results:', results);
+  } catch (e) {
+    showError('Aggregate error: ' + getErrorMessage(e));
+    aggregateResults.textContent = 'Error running analysis. See error message above.';
+  }
+}
+
+runAggregateBtn.addEventListener('click', () => {
+  void handleRunAggregate();
+});
+
 void (async () => {
   try {
     console.log('🚀 Initializing documents page for collection:', currentCollection);

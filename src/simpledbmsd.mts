@@ -1,4 +1,4 @@
-// @author Maarten Haine, Jari Daemen, William Ragnarsson
+// @author Maarten Haine, Jari Daemen, William Ragnarsson, Wout Van Hemelrijck
 // also used Claude to help with debugging
 // @date 2025-11-22
 
@@ -6,6 +6,7 @@ import express from 'express';
 import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
 import cors from 'cors';
+import { EncryptionService } from './encryption-service.mjs';
 import { SimpleDBMS, type DocumentValue } from './simpledbms.mjs';
 import { RealFile } from './file/file.mjs';
 import path from 'path';
@@ -23,6 +24,10 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const port = 3000;
+
+// Initialize encryption service
+const masterKey = process.env['ENCRYPTION_KEY'] || EncryptionService.generateMasterKey();
+let encryptionService: EncryptionService;
 
 app.use(cors());
 app.use(express.json());
@@ -878,13 +883,17 @@ app.post('/api/createDocument', authenticateToken, async (req: AuthenticatedRequ
       return;
     }
 
-    // Create the document in the collection
-    // Store documentContent in nested 'content' field to separate system fields from user data
+    // Encrypt the document content before storing
+    const encryptedBuffer = encryptionService.encrypt(
+      Buffer.from(JSON.stringify(documentContent || {}))
+    );
+
+    // Create the document in the collection with encrypted content
     await collection.insert({
       name: documentName,
       userId: req.user!.userId,
       createdAt: new Date().toISOString(),
-      content: (documentContent || {}) as Record<string, DocumentValue>, // User content stored separately
+      content: encryptedBuffer.toString('base64') as unknown as Record<string, DocumentValue>,
     });
 
     const response = addTokenToResponse(req, {
@@ -1078,9 +1087,13 @@ app.get('/api/fetchDocumentContent', authenticateToken, async (req: Authenticate
       return;
     }
 
-    // Extract the nested content field
-    const docData = document as unknown as { content?: Record<string, DocumentValue> };
-    const documentContent = docData.content || {};
+    // Extract and decrypt the content
+    const docData = document as unknown as { content?: string };
+    const encryptedContent = docData.content || '';
+
+    // Decrypt the content
+    const decryptedBuffer = encryptionService.decrypt(Buffer.from(encryptedContent, 'base64'));
+    const documentContent = JSON.parse(decryptedBuffer.toString()) as Record<string, unknown>;
 
     const response = addTokenToResponse(req, {
       success: true,
@@ -1152,13 +1165,18 @@ app.put('/api/updateDocument', authenticateToken, async (req: AuthenticatedReque
       return;
     }
 
+    // Encrypt the new content before storing
+    const encryptedBuffer = encryptionService.encrypt(
+      Buffer.from(JSON.stringify(newDocumentContent))
+    );
+
     // Update the document content while preserving all system fields
     const docData = document as unknown as { createdAt?: string };
     await collection.update(document.id, {
-      name: documentName, // Keep the original name
-      userId: req.user!.userId, // Keep the original userId
-      createdAt: docData.createdAt || new Date().toISOString(), // Preserve original timestamp
-      content: newDocumentContent as Record<string, DocumentValue>, // Update only the user content
+      name: documentName,
+      userId: req.user!.userId,
+      createdAt: docData.createdAt || new Date().toISOString(),
+      content: encryptedBuffer.toString('base64') as unknown as Record<string, DocumentValue>,
     });
 
     const response = addTokenToResponse(req, {
@@ -1177,6 +1195,7 @@ app.put('/api/updateDocument', authenticateToken, async (req: AuthenticatedReque
 if (process.env['NODE_ENV'] !== 'test') {
   initDB()
     .then(() => {
+      encryptionService = EncryptionService.fromHexKey(masterKey);
       app.listen(port, () => {
         console.log(`SimpleDBMS Daemon listening at http://localhost:${port}`);
         console.log(`Swagger UI available at http://localhost:${port}/api-docs`);

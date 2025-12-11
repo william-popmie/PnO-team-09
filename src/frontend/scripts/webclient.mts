@@ -83,6 +83,66 @@ function updateDeleteButtonVisibility(): void {
 }
 
 // =========================
+// Wrapper function
+// =========================
+
+/**
+ * Wrapper function for authenticated API calls that handles token management
+ * @param {string} url - The API endpoint URL
+ * @param {RequestInit} options - Fetch options (method, body, etc.)
+ * @return {Promise<Response>} The fetch response
+ * @throws {Error} When token is missing or API request fails
+ */
+async function authenticatedFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  // Get session token
+  const sessionToken = localStorage.getItem('sessionToken');
+
+  // If no token, redirect to login
+  if (!sessionToken) {
+    handleTokenExpiration();
+    throw new Error('No authentication token found');
+  }
+
+  // Add Authorization header
+  const headers = {
+    'Content-Type': 'application/json',
+    ...options.headers,
+    Authorization: `Bearer ${sessionToken}`,
+  };
+
+  // Make the request
+  const response = await fetch(url, {
+    ...options,
+    headers,
+  });
+
+  // Handle authentication errors
+  if (response.status === 401 || response.status === 403) {
+    handleTokenExpiration();
+    throw new Error('Authentication failed');
+  }
+
+  // Check for updated token in response
+  if (response.ok) {
+    try {
+      // Clone response to read it without consuming the original
+      const clonedResponse = response.clone();
+      const data = (await clonedResponse.json()) as { token?: string };
+
+      // Update token if provided
+      if (data.token && typeof data.token === 'string' && data.token.length > 0) {
+        localStorage.setItem('sessionToken', data.token);
+        console.log('Session token refreshed and cached');
+      }
+    } catch {
+      // If response is not JSON, ignore token update
+    }
+  }
+
+  return response;
+}
+
+// =========================
 // API Functions
 // =========================
 
@@ -94,30 +154,16 @@ function updateDeleteButtonVisibility(): void {
 async function fetchCollections(): Promise<string[]> {
   try {
     console.log('Fetching collections from API...');
-    const response = await fetch(`${API_BASE}/api/fetchCollections`, {
+    const response = await authenticatedFetch(`${API_BASE}/api/fetchCollections`, {
       method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
-      },
     });
 
     if (!response.ok) {
-      if (response.status === 401 || response.status === 403) {
-        handleTokenExpiration();
-        return [];
-      }
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
 
-    const collections = (await response.json()) as { collections: string[]; token?: string };
+    const collections = (await response.json()) as { collections: string[] };
     console.log('Collections received:', collections);
-
-    // If a new token is returned, update it in localStorage
-    if (collections.token && typeof collections.token === 'string' && collections.token.length > 0) {
-      localStorage.setItem('sessionToken', collections.token);
-      console.log('Session token refreshed and cached');
-    }
 
     return collections.collections;
   } catch (error) {
@@ -135,32 +181,18 @@ async function fetchCollections(): Promise<string[]> {
 async function createCollection(name: string): Promise<boolean> {
   try {
     console.log('Creating collection via API:', name);
-    const response = await fetch(`${API_BASE}/api/createCollection`, {
+    const response = await authenticatedFetch(`${API_BASE}/api/createCollection`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
-      },
       body: JSON.stringify({ collectionName: name }),
     });
 
     if (!response.ok) {
-      if (response.status === 401 || response.status === 403) {
-        handleTokenExpiration();
-        return false;
-      }
       const errorData = (await response.json()) as { message?: string };
       throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
     }
 
-    const result = (await response.json()) as { success: boolean; message: string; token?: string };
+    const result = (await response.json()) as { success: boolean; message: string };
     console.log('Collection created:', result);
-
-    // If a new token is returned, update it in localStorage
-    if (result.token && typeof result.token === 'string' && result.token.length > 0) {
-      localStorage.setItem('sessionToken', result.token);
-      console.log('Session token refreshed and cached');
-    }
 
     // Refresh the collections list after successful creation
     await handleRefreshCollections();
@@ -181,32 +213,18 @@ async function deleteCollection(name: string): Promise<boolean> {
   try {
     console.log('Deleting collection via API:', name);
 
-    const response = await fetch(`${API_BASE}/api/deleteCollection`, {
+    const response = await authenticatedFetch(`${API_BASE}/api/deleteCollection`, {
       method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
-      },
       body: JSON.stringify({ collectionName: name }),
     });
 
     if (!response.ok) {
-      if (response.status === 401 || response.status === 403) {
-        handleTokenExpiration();
-        return false;
-      }
       const errorData = (await response.json()) as { message?: string };
       throw new Error(errorData.message || `Failed to delete collection ${name}: HTTP ${response.status}`);
     }
 
-    const result = (await response.json()) as { success: boolean; message: string; token?: string };
+    const result = (await response.json()) as { success: boolean; message: string };
     console.log('Collection deleted:', result.message);
-
-    // If a new token is returned, update it in localStorage
-    if (result.token && typeof result.token === 'string' && result.token.length > 0) {
-      localStorage.setItem('sessionToken', result.token);
-      console.log('Session token refreshed and cached');
-    }
 
     // Clear current selection if this was the selected collection
     if (currentlySelectedCollection === name) {
@@ -289,19 +307,14 @@ async function selectCollection(name: string): Promise<void> {
     console.log('Selecting collection via API:', name);
 
     // First, verify the collection exists and optionally get document count
-    const response = await fetch(`${API_BASE}/api/fetchDocuments?collectionName=${encodeURIComponent(name)}`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
+    const response = await authenticatedFetch(
+      `${API_BASE}/api/fetchDocuments?collectionName=${encodeURIComponent(name)}`,
+      {
+        method: 'GET',
       },
-    });
+    );
 
     if (!response.ok) {
-      if (response.status === 401 || response.status === 403) {
-        handleTokenExpiration();
-        return;
-      }
       if (response.status === 404) {
         showError(`Collection '${name}' not found`);
         return;
@@ -313,14 +326,7 @@ async function selectCollection(name: string): Promise<void> {
       success: boolean;
       message: string;
       documentNames: string[];
-      token?: string;
     };
-
-    // If a new token is returned, update it in localStorage
-    if (collectionInfo.token && typeof collectionInfo.token === 'string' && collectionInfo.token.length > 0) {
-      localStorage.setItem('sessionToken', collectionInfo.token);
-      console.log('Session token refreshed and cached');
-    }
 
     if (collectionInfo.success) {
       console.log(collectionInfo.message);

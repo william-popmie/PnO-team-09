@@ -153,11 +153,11 @@ function init(): void {
   errorDiv = document.getElementById('error') as HTMLDivElement;
 
   if (!signupForm) {
-    console.error('❌ Signup form not found');
+    console.error('Signup form not found');
     return;
   }
 
-  console.log('✅ All DOM elements found, setting up event listeners');
+  console.log('All DOM elements found, setting up event listeners');
   setupEventListeners();
 }
 
@@ -238,7 +238,7 @@ function setupEventListeners(): void {
 //   Init
 // ==========================
 
-console.log('✅ Signup script loaded');
+console.log('Signup script loaded');
 
 // Wait for DOM to be ready
 if (document.readyState === 'loading') {

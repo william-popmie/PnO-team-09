@@ -59,7 +59,7 @@ function clearError(): void {
  * @return {void}
  */
 function handleTokenExpiration(): void {
-  console.warn('⚠️ Token expired or invalid, redirecting to login');
+  console.warn('Token expired or invalid, redirecting to login');
   localStorage.removeItem('sessionToken');
   localStorage.removeItem('username');
   window.location.href = 'login.html';
@@ -93,7 +93,7 @@ function updateDeleteButtonVisibility(): void {
  */
 async function fetchCollections(): Promise<string[]> {
   try {
-    console.log('🔄 Fetching collections from API...');
+    console.log('Fetching collections from API...');
     const response = await fetch(`${API_BASE}/api/fetchCollections`, {
       method: 'GET',
       headers: {
@@ -111,17 +111,17 @@ async function fetchCollections(): Promise<string[]> {
     }
 
     const collections = (await response.json()) as { collections: string[]; token?: string };
-    console.log('✅ Collections received:', collections);
+    console.log('Collections received:', collections);
 
     // If a new token is returned, update it in localStorage
     if (collections.token && typeof collections.token === 'string' && collections.token.length > 0) {
       localStorage.setItem('sessionToken', collections.token);
-      console.log('🔑 Session token refreshed and cached');
+      console.log('Session token refreshed and cached');
     }
 
     return collections.collections;
   } catch (error) {
-    console.error('❌ Failed to fetch collections:', error);
+    console.error('Failed to fetch collections:', error);
     throw error;
   }
 }
@@ -134,7 +134,7 @@ async function fetchCollections(): Promise<string[]> {
  */
 async function createCollection(name: string): Promise<boolean> {
   try {
-    console.log('🔧 Creating collection via API:', name);
+    console.log('Creating collection via API:', name);
     const response = await fetch(`${API_BASE}/api/createCollection`, {
       method: 'POST',
       headers: {
@@ -154,19 +154,19 @@ async function createCollection(name: string): Promise<boolean> {
     }
 
     const result = (await response.json()) as { success: boolean; message: string; token?: string };
-    console.log('✅ Collection created:', result);
+    console.log('Collection created:', result);
 
     // If a new token is returned, update it in localStorage
     if (result.token && typeof result.token === 'string' && result.token.length > 0) {
       localStorage.setItem('sessionToken', result.token);
-      console.log('🔑 Session token refreshed and cached');
+      console.log('Session token refreshed and cached');
     }
 
     // Refresh the collections list after successful creation
     await handleRefreshCollections();
     return true;
   } catch (error) {
-    console.error('❌ Failed to create collection:', error);
+    console.error('Failed to create collection:', error);
     throw error;
   }
 }
@@ -179,7 +179,7 @@ async function createCollection(name: string): Promise<boolean> {
  */
 async function deleteCollection(name: string): Promise<boolean> {
   try {
-    console.log('🗑️ Deleting collection via API:', name);
+    console.log('Deleting collection via API:', name);
 
     const response = await fetch(`${API_BASE}/api/deleteCollection`, {
       method: 'DELETE',
@@ -200,12 +200,12 @@ async function deleteCollection(name: string): Promise<boolean> {
     }
 
     const result = (await response.json()) as { success: boolean; message: string; token?: string };
-    console.log('✅ Collection deleted:', result.message);
+    console.log('Collection deleted:', result.message);
 
     // If a new token is returned, update it in localStorage
     if (result.token && typeof result.token === 'string' && result.token.length > 0) {
       localStorage.setItem('sessionToken', result.token);
-      console.log('🔑 Session token refreshed and cached');
+      console.log('Session token refreshed and cached');
     }
 
     // Clear current selection if this was the selected collection
@@ -217,7 +217,7 @@ async function deleteCollection(name: string): Promise<boolean> {
     await handleRefreshCollections();
     return true;
   } catch (error) {
-    console.error('❌ Failed to delete collection:', error);
+    console.error('Failed to delete collection:', error);
     throw error;
   }
 }
@@ -286,7 +286,7 @@ function handleCollectionClick(name: string): void {
  */
 async function selectCollection(name: string): Promise<void> {
   try {
-    console.log('📂 Selecting collection via API:', name);
+    console.log('Selecting collection via API:', name);
 
     // First, verify the collection exists and optionally get document count
     const response = await fetch(`${API_BASE}/api/fetchDocuments?collectionName=${encodeURIComponent(name)}`, {
@@ -319,7 +319,7 @@ async function selectCollection(name: string): Promise<void> {
     // If a new token is returned, update it in localStorage
     if (collectionInfo.token && typeof collectionInfo.token === 'string' && collectionInfo.token.length > 0) {
       localStorage.setItem('sessionToken', collectionInfo.token);
-      console.log('🔑 Session token refreshed and cached');
+      console.log('Session token refreshed and cached');
     }
 
     if (collectionInfo.success) {
@@ -330,9 +330,9 @@ async function selectCollection(name: string): Promise<void> {
       showError(`Collection '${name}' does not exist`);
     }
   } catch (error) {
-    console.error('❌ Failed to select collection:', error);
+    console.error('Failed to select collection:', error);
     // Fallback - still navigate to documents page
-    console.log('📄 Falling back to direct navigation');
+    console.log('Falling back to direct navigation');
     window.location.href = `documents.html?collection=${encodeURIComponent(name)}`;
   }
 }
@@ -432,11 +432,11 @@ function initializeApp(): void {
   errorDiv = document.getElementById('error') as HTMLDivElement;
 
   if (!collectionsList || !refreshCollections || !errorDiv) {
-    console.error('❌ Required DOM elements not found');
+    console.error('Required DOM elements not found');
     return;
   }
 
-  console.log('✅ DOM elements loaded');
+  console.log('DOM elements loaded');
 
   // Set up event listeners
   refreshCollections.addEventListener('click', () => {
@@ -484,10 +484,10 @@ function initializeApp(): void {
   // Initialize page
   void (async () => {
     try {
-      console.log('🚀 Initializing webclient...');
+      console.log('Initializing webclient...');
       await handleRefreshCollections();
     } catch (error) {
-      console.error('❌ Failed to initialize webclient:', error);
+      console.error('Failed to initialize webclient:', error);
       showError('Failed to load collections. Using offline mode.');
 
       // Fallback to demo data
@@ -496,7 +496,7 @@ function initializeApp(): void {
     }
   })();
 
-  console.log('✅ WebClient ready');
+  console.log('WebClient ready');
 }
 
 // Wait for DOM to be ready

@@ -6,7 +6,7 @@
 // =========================
 
 const API_BASE = 'http://localhost:3000';
-console.log('📝 Documents loading...', 'API:', API_BASE);
+console.log('Documents loading...', 'API:', API_BASE);
 declare const document: Document;
 
 // =========================
@@ -67,7 +67,7 @@ function clearError(): void {
  * @return {void}
  */
 function handleTokenExpiration(): void {
-  console.warn('⚠️ Token expired or invalid, redirecting to login');
+  console.warn('Token expired or invalid, redirecting to login');
   localStorage.removeItem('sessionToken');
   localStorage.removeItem('username');
   window.location.href = 'login.html';
@@ -123,7 +123,7 @@ function getDocumentId(doc: Record<string, unknown>): string {
  */
 async function fetchDocuments(): Promise<Array<Record<string, unknown>>> {
   try {
-    console.log('🔄 Fetching documents from API for collection:', currentCollection);
+    console.log('Fetching documents from API for collection:', currentCollection);
     const response = await fetch(
       `${API_BASE}/api/fetchDocuments?collectionName=${encodeURIComponent(currentCollection)}`,
       {
@@ -141,7 +141,7 @@ async function fetchDocuments(): Promise<Array<Record<string, unknown>>> {
         return [];
       }
       if (response.status === 404) {
-        console.log('📭 Collection not found, returning empty array');
+        console.log('Collection not found, returning empty array');
         return [];
       }
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -158,13 +158,13 @@ async function fetchDocuments(): Promise<Array<Record<string, unknown>>> {
     // If a new token is returned, update it in localStorage
     if (documents.token && typeof documents.token === 'string' && documents.token.length > 0) {
       localStorage.setItem('sessionToken', documents.token);
-      console.log('🔑 Session token refreshed and cached');
+      console.log('Session token refreshed and cached');
     }
 
     // Map document names to objects to satisfy the return type expected by the UI
     return documents.documentNames.map((name) => ({ id: name, name: name }));
   } catch (error) {
-    console.error('❌ Failed to fetch documents:', error);
+    console.error('Failed to fetch documents:', error);
     throw error;
   }
 }
@@ -204,7 +204,7 @@ async function fetchDocumentContentByName(documentName: string): Promise<Record<
 
   if (result.token && typeof result.token === 'string' && result.token.length > 0) {
     localStorage.setItem('sessionToken', result.token);
-    console.log('🔑 Session token refreshed and cached');
+    console.log('Session token refreshed and cached');
   }
 
   if (!result.success) {
@@ -223,7 +223,7 @@ async function fetchDocumentContentByName(documentName: string): Promise<Record<
  */
 async function createDocument(id: string, content: Record<string, unknown>): Promise<boolean> {
   try {
-    console.log('🔧 Creating document via API:', id, content);
+    console.log('Creating document via API:', id, content);
 
     const response = await fetch(`${API_BASE}/api/createDocument`, {
       method: 'POST',
@@ -248,12 +248,12 @@ async function createDocument(id: string, content: Record<string, unknown>): Pro
     }
 
     const result = (await response.json()) as { success: boolean; message: string; token?: string };
-    console.log('✅ Document created:', result.message);
+    console.log('Document created:', result.message);
 
     // If a new token is returned, update it in localStorage
     if (result.token && typeof result.token === 'string' && result.token.length > 0) {
       localStorage.setItem('sessionToken', result.token);
-      console.log('🔑 Session token refreshed and cached');
+      console.log('Session token refreshed and cached');
     }
 
     // Refresh documents list after creation
@@ -262,7 +262,7 @@ async function createDocument(id: string, content: Record<string, unknown>): Pro
     renderDocuments(allDocuments);
     return result.success;
   } catch (error) {
-    console.error('❌ Failed to create document:', error);
+    console.error('Failed to create document:', error);
     throw error;
   }
 }
@@ -276,7 +276,7 @@ async function createDocument(id: string, content: Record<string, unknown>): Pro
  */
 async function updateDocument(id: string, data: Record<string, unknown>): Promise<boolean> {
   try {
-    console.log('🔧 Updating document via API:', id, data);
+    console.log('Updating document via API:', id, data);
 
     const response = await fetch(`${API_BASE}/api/updateDocument`, {
       method: 'PUT',
@@ -304,12 +304,12 @@ async function updateDocument(id: string, data: Record<string, unknown>): Promis
     }
 
     const result = (await response.json()) as { success: boolean; message: string; token?: string };
-    console.log('✅ Document updated:', result);
+    console.log('Document updated:', result);
 
     // If a new token is returned, update it in localStorage
     if (result.token && typeof result.token === 'string' && result.token.length > 0) {
       localStorage.setItem('sessionToken', result.token);
-      console.log('🔑 Session token refreshed and cached');
+      console.log('Session token refreshed and cached');
     }
 
     // Refresh documents list after update
@@ -318,7 +318,7 @@ async function updateDocument(id: string, data: Record<string, unknown>): Promis
     renderDocuments(allDocuments);
     return true;
   } catch (error) {
-    console.error('❌ Failed to update document:', error);
+    console.error('Failed to update document:', error);
     throw error;
   }
 }
@@ -368,7 +368,7 @@ async function deleteDocument(id: string): Promise<boolean> {
     // If a new token is returned, update it in localStorage
     if (result.token && typeof result.token === 'string' && result.token.length > 0) {
       localStorage.setItem('sessionToken', result.token);
-      console.log('🔑 Session token refreshed and cached');
+      console.log('Session token refreshed and cached');
     }
 
     // Clear document view if the deleted document was being viewed
@@ -383,7 +383,7 @@ async function deleteDocument(id: string): Promise<boolean> {
     updateDeleteButtonVisibility();
     return true;
   } catch (error) {
-    console.error('❌ Failed to delete document:', error);
+    console.error('Failed to delete document:', error);
     throw error;
   }
 }
@@ -444,12 +444,12 @@ async function selectDocument(doc: Record<string, unknown>): Promise<void> {
 
     // If clicking the same document, unselect it
     if (currentlyViewedDocument === documentName) {
-      console.log('📄 Unselecting document:', documentName);
+      console.log('Unselecting document:', documentName);
       clearDocumentView();
       return;
     }
 
-    console.log('📄 Fetching document content for:', documentName);
+    console.log('Fetching document content for:', documentName);
 
     const documentContent = await fetchDocumentContentByName(documentName);
     const docJson = JSON.stringify(documentContent, null, 2);
@@ -459,9 +459,9 @@ async function selectDocument(doc: Record<string, unknown>): Promise<void> {
     currentlyViewedDocument = documentName;
     renderDocuments(allDocuments); // Re-render to highlight viewed document
     updateDeleteButtonVisibility();
-    console.log('✅ Document content loaded:', documentContent);
+    console.log('Document content loaded:', documentContent);
   } catch (error) {
-    console.error('❌ Failed to fetch document content:', error);
+    console.error('Failed to fetch document content:', error);
     showError('Failed to load document content: ' + getErrorMessage(error));
   }
 }
@@ -631,7 +631,7 @@ async function handleRunAggregate(): Promise<void> {
           const content = await fetchDocumentContentByName(name);
           return { name, content };
         } catch (error) {
-          console.warn(`⚠️ Skipping document ${name} due to fetch error:`, error);
+          console.warn(`Skipping document ${name} due to fetch error:`, error);
           return { name, content: {} as Record<string, unknown> };
         }
       }),
@@ -725,16 +725,16 @@ runAggregateBtn.addEventListener('click', () => {
 
 void (async () => {
   try {
-    console.log('🚀 Initializing documents page for collection:', currentCollection);
+    console.log('Initializing documents page for collection:', currentCollection);
     const docs = await fetchDocuments();
     allDocuments.splice(0, allDocuments.length, ...docs);
     renderDocuments(docs);
-    console.log('✅ Documents page initialized successfully');
+    console.log('Documents page initialized successfully');
   } catch (error) {
-    console.error('❌ Failed to initialize documents page:', error);
+    console.error('Failed to initialize documents page:', error);
     showError('Failed to load documents. Check if the collection exists and the server is running.');
     documentsView.innerHTML = '<div class="no-results">Unable to load documents. Please try refreshing.</div>';
   }
 })();
 
-console.log('✅ Documents script loaded');
+console.log('Documents script loaded');

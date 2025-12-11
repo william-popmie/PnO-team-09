@@ -155,4 +155,4 @@ authForm.addEventListener('submit', (e) => {
 //   Init
 // ==========================
 
-console.log('✅ Login script loaded');
+console.log('Login script loaded');

@@ -6,7 +6,7 @@
 // =========================
 
 const API_BASE = 'http://localhost:3000';
-console.log('📝 Documents loading...', 'API:', API_BASE);
+console.log('Documents loading...', 'API:', API_BASE);
 declare const document: Document;
 
 // =========================
@@ -67,7 +67,7 @@ function clearError(): void {
  * @return {void}
  */
 function handleTokenExpiration(): void {
-  console.warn('⚠️ Token expired or invalid, redirecting to login');
+  console.warn('Token expired or invalid, redirecting to login');
   localStorage.removeItem('sessionToken');
   localStorage.removeItem('username');
   window.location.href = 'login.html';
@@ -123,7 +123,7 @@ function getDocumentId(doc: Record<string, unknown>): string {
  */
 async function fetchDocuments(): Promise<Array<Record<string, unknown>>> {
   try {
-    console.log('🔄 Fetching documents from API for collection:', currentCollection);
+    console.log('Fetching documents from API for collection:', currentCollection);
     const response = await fetch(
       `${API_BASE}/api/fetchDocuments?collectionName=${encodeURIComponent(currentCollection)}`,
       {
@@ -141,7 +141,7 @@ async function fetchDocuments(): Promise<Array<Record<string, unknown>>> {
         return [];
       }
       if (response.status === 404) {
-        console.log('📭 Collection not found, returning empty array');
+        console.log('Collection not found, returning empty array');
         return [];
       }
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -158,15 +158,60 @@ async function fetchDocuments(): Promise<Array<Record<string, unknown>>> {
     // If a new token is returned, update it in localStorage
     if (documents.token && typeof documents.token === 'string' && documents.token.length > 0) {
       localStorage.setItem('sessionToken', documents.token);
-      console.log('🔑 Session token refreshed and cached');
+      console.log('Session token refreshed and cached');
     }
 
     // Map document names to objects to satisfy the return type expected by the UI
     return documents.documentNames.map((name) => ({ id: name, name: name }));
   } catch (error) {
-    console.error('❌ Failed to fetch documents:', error);
+    console.error('Failed to fetch documents:', error);
     throw error;
   }
+}
+
+/**
+ * Fetches the full content of a single document by name
+ * @param {string} documentName - Name/ID of the document to fetch
+ * @return {Promise<Record<string, unknown>>} The document content object
+ */
+async function fetchDocumentContentByName(documentName: string): Promise<Record<string, unknown>> {
+  const response = await fetch(
+    `${API_BASE}/api/fetchDocumentContent?collectionName=${encodeURIComponent(currentCollection)}&documentName=${encodeURIComponent(documentName)}`,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
+      },
+    },
+  );
+
+  if (response.status === 401 || response.status === 403) {
+    handleTokenExpiration();
+    return {};
+  }
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+  }
+
+  const result = (await response.json()) as {
+    success: boolean;
+    message: string;
+    documentContent: Record<string, unknown>;
+    token?: string;
+  };
+
+  if (result.token && typeof result.token === 'string' && result.token.length > 0) {
+    localStorage.setItem('sessionToken', result.token);
+    console.log('Session token refreshed and cached');
+  }
+
+  if (!result.success) {
+    throw new Error(result.message || 'Failed to fetch document content');
+  }
+
+  return result.documentContent || {};
 }
 
 /**
@@ -178,7 +223,7 @@ async function fetchDocuments(): Promise<Array<Record<string, unknown>>> {
  */
 async function createDocument(id: string, content: Record<string, unknown>): Promise<boolean> {
   try {
-    console.log('🔧 Creating document via API:', id, content);
+    console.log('Creating document via API:', id, content);
 
     const response = await fetch(`${API_BASE}/api/createDocument`, {
       method: 'POST',
@@ -203,12 +248,12 @@ async function createDocument(id: string, content: Record<string, unknown>): Pro
     }
 
     const result = (await response.json()) as { success: boolean; message: string; token?: string };
-    console.log('✅ Document created:', result.message);
+    console.log('Document created:', result.message);
 
     // If a new token is returned, update it in localStorage
     if (result.token && typeof result.token === 'string' && result.token.length > 0) {
       localStorage.setItem('sessionToken', result.token);
-      console.log('🔑 Session token refreshed and cached');
+      console.log('Session token refreshed and cached');
     }
 
     // Refresh documents list after creation
@@ -217,7 +262,7 @@ async function createDocument(id: string, content: Record<string, unknown>): Pro
     renderDocuments(allDocuments);
     return result.success;
   } catch (error) {
-    console.error('❌ Failed to create document:', error);
+    console.error('Failed to create document:', error);
     throw error;
   }
 }
@@ -231,7 +276,7 @@ async function createDocument(id: string, content: Record<string, unknown>): Pro
  */
 async function updateDocument(id: string, data: Record<string, unknown>): Promise<boolean> {
   try {
-    console.log('🔧 Updating document via API:', id, data);
+    console.log('Updating document via API:', id, data);
 
     const response = await fetch(`${API_BASE}/api/updateDocument`, {
       method: 'PUT',
@@ -259,12 +304,12 @@ async function updateDocument(id: string, data: Record<string, unknown>): Promis
     }
 
     const result = (await response.json()) as { success: boolean; message: string; token?: string };
-    console.log('✅ Document updated:', result);
+    console.log('Document updated:', result);
 
     // If a new token is returned, update it in localStorage
     if (result.token && typeof result.token === 'string' && result.token.length > 0) {
       localStorage.setItem('sessionToken', result.token);
-      console.log('🔑 Session token refreshed and cached');
+      console.log('Session token refreshed and cached');
     }
 
     // Refresh documents list after update
@@ -273,7 +318,7 @@ async function updateDocument(id: string, data: Record<string, unknown>): Promis
     renderDocuments(allDocuments);
     return true;
   } catch (error) {
-    console.error('❌ Failed to update document:', error);
+    console.error('Failed to update document:', error);
     throw error;
   }
 }
@@ -323,7 +368,7 @@ async function deleteDocument(id: string): Promise<boolean> {
     // If a new token is returned, update it in localStorage
     if (result.token && typeof result.token === 'string' && result.token.length > 0) {
       localStorage.setItem('sessionToken', result.token);
-      console.log('🔑 Session token refreshed and cached');
+      console.log('Session token refreshed and cached');
     }
 
     // Clear document view if the deleted document was being viewed
@@ -338,7 +383,7 @@ async function deleteDocument(id: string): Promise<boolean> {
     updateDeleteButtonVisibility();
     return true;
   } catch (error) {
-    console.error('❌ Failed to delete document:', error);
+    console.error('Failed to delete document:', error);
     throw error;
   }
 }
@@ -399,56 +444,24 @@ async function selectDocument(doc: Record<string, unknown>): Promise<void> {
 
     // If clicking the same document, unselect it
     if (currentlyViewedDocument === documentName) {
-      console.log('📄 Unselecting document:', documentName);
+      console.log('Unselecting document:', documentName);
       clearDocumentView();
       return;
     }
 
-    console.log('📄 Fetching document content for:', documentName);
+    console.log('Fetching document content for:', documentName);
 
-    // Fetch the full document content from the API
-    const response = await fetch(
-      `${API_BASE}/api/fetchDocumentContent?collectionName=${encodeURIComponent(currentCollection)}&documentName=${encodeURIComponent(documentName)}`,
-      {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
-        },
-      },
-    );
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const result = (await response.json()) as {
-      success: boolean;
-      message: string;
-      documentContent: Record<string, unknown>;
-      token?: string;
-    };
-
-    // If a new token is returned, update it in localStorage
-    if (result.token && typeof result.token === 'string' && result.token.length > 0) {
-      localStorage.setItem('sessionToken', result.token);
-      console.log('🔑 Session token refreshed and cached');
-    }
-
-    if (result.success) {
-      const docJson = JSON.stringify(result.documentContent, null, 2);
-      documentView.value = docJson;
-      insertIdInput.value = documentName;
-      insertJsonInput.value = docJson;
-      currentlyViewedDocument = documentName;
-      renderDocuments(allDocuments); // Re-render to highlight viewed document
-      updateDeleteButtonVisibility();
-      console.log('✅ Document content loaded:', result.documentContent);
-    } else {
-      showError(result.message);
-    }
+    const documentContent = await fetchDocumentContentByName(documentName);
+    const docJson = JSON.stringify(documentContent, null, 2);
+    documentView.value = docJson;
+    insertIdInput.value = documentName;
+    insertJsonInput.value = docJson;
+    currentlyViewedDocument = documentName;
+    renderDocuments(allDocuments); // Re-render to highlight viewed document
+    updateDeleteButtonVisibility();
+    console.log('Document content loaded:', documentContent);
   } catch (error) {
-    console.error('❌ Failed to fetch document content:', error);
+    console.error('Failed to fetch document content:', error);
     showError('Failed to load document content: ' + getErrorMessage(error));
   }
 }
@@ -560,20 +573,258 @@ insertIdInput.addEventListener('keydown', (e) => {
 
 confirmDelete.addEventListener('click', () => {
   void handleDeleteDocument();
+  // Close the delete modal after confirmation
+  const deleteModal = document.getElementById('deleteModalOverlay');
+  deleteModal?.classList.remove('show');
 });
+
+// =========================
+// Aggregate Functionality
+// =========================
+
+const runAggregateBtn = getEl<HTMLButtonElement>('runAggregate');
+const groupByField = getEl<HTMLInputElement>('groupByField');
+const operationField = getEl<HTMLInputElement>('operationField');
+const operationType = getEl<HTMLSelectElement>('operationType');
+const aggregateResults = getEl<HTMLDivElement>('aggregateResults');
+const operationFieldContainer = getEl<HTMLDivElement>('operationFieldContainer');
+
+// Toggle field visibility based on operation type
+operationType.addEventListener('change', () => {
+  if (operationType.value === 'count') {
+    operationFieldContainer.style.display = 'none';
+    operationField.value = ''; // Clear the field when hidden
+  } else {
+    operationFieldContainer.style.display = 'block';
+  }
+});
+
+/**
+ * Runs aggregate analysis on the collection
+ * @return {void}
+ */
+async function handleRunAggregate(): Promise<void> {
+  try {
+    clearError();
+
+    const groupBy = groupByField.value.trim();
+
+    const opType = operationType.value;
+    const fieldName = operationField.value.trim();
+
+    if (opType !== 'count' && !fieldName) {
+      showError('Please specify a field to analyze');
+      return;
+    }
+
+    aggregateResults.textContent = 'Running analysis...';
+
+    // Ensure we have the latest document list
+    const docs = await fetchDocuments();
+    allDocuments.splice(0, allDocuments.length, ...docs);
+
+    // Fetch full content for each document so we can aggregate client-side
+    const detailedDocs = await Promise.all(
+      docs.map(async (doc) => {
+        const name = getDocumentId(doc);
+        try {
+          const content = await fetchDocumentContentByName(name);
+          return { name, content };
+        } catch (error) {
+          console.warn(`Skipping document ${name} due to fetch error:`, error);
+          return { name, content: {} as Record<string, unknown> };
+        }
+      }),
+    );
+
+    if (detailedDocs.length === 0) {
+      aggregateResults.textContent = 'No documents found to analyze.';
+      return;
+    }
+
+    const toNumber = (value: unknown): number | null => {
+      if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+
+    type GroupState = {
+      groupValue: unknown;
+      count: number;
+      sum: number;
+      min: number | null;
+      max: number | null;
+      numericCount: number;
+    };
+
+    const groups = new Map<string, GroupState>();
+
+    detailedDocs.forEach(({ content }) => {
+      const record = content;
+      const groupValue = groupBy ? record[groupBy] : 'all';
+      const groupKey = groupBy
+        ? groupValue === undefined || groupValue === null
+          ? 'null'
+          : JSON.stringify(groupValue)
+        : 'all';
+
+      const state: GroupState = groups.get(groupKey) || {
+        groupValue: groupBy ? (groupValue ?? null) : 'all',
+        count: 0,
+        sum: 0,
+        min: null,
+        max: null,
+        numericCount: 0,
+      };
+
+      state.count += 1;
+
+      if (opType !== 'count') {
+        const numeric = toNumber(record[fieldName]);
+        if (numeric !== null) {
+          state.sum += numeric;
+          state.min = state.min === null ? numeric : Math.min(state.min, numeric);
+          state.max = state.max === null ? numeric : Math.max(state.max, numeric);
+          state.numericCount += 1;
+        }
+      }
+
+      groups.set(groupKey, state);
+    });
+
+    const results = Array.from(groups.values()).map((state) => {
+      const base: Record<string, unknown> = {
+        group: state.groupValue,
+        count: state.count,
+      };
+
+      if (opType === 'sum') {
+        base[`sum_${fieldName}`] = state.sum;
+      } else if (opType === 'avg') {
+        base[`avg_${fieldName}`] = state.numericCount > 0 ? state.sum / state.numericCount : null;
+      } else if (opType === 'min') {
+        base[`min_${fieldName}`] = state.numericCount > 0 ? state.min : null;
+      } else if (opType === 'max') {
+        base[`max_${fieldName}`] = state.numericCount > 0 ? state.max : null;
+      }
+
+      return base;
+    });
+
+    aggregateResults.textContent = JSON.stringify(results, null, 2);
+    console.log('Aggregate results (client-side):', results);
+  } catch (e) {
+    showError('Aggregate error: ' + getErrorMessage(e));
+    aggregateResults.textContent = 'Error running analysis. See error message above.';
+  }
+}
+
+runAggregateBtn.addEventListener('click', () => {
+  void handleRunAggregate();
+});
+
+// =========================
+// Modal Functionality
+// =========================
+
+/**
+ * Initializes modal event listeners for delete and insert modals
+ * @return {void}
+ */
+function initializeModals(): void {
+  const deleteBtn = document.getElementById('deleteDocument');
+  const deleteModal = document.getElementById('deleteModalOverlay');
+  const cancelDeleteBtn = document.getElementById('cancelDelete');
+
+  const insertBtn = document.getElementById('insertDocument');
+  const insertModal = document.getElementById('insertModalOverlay');
+  const cancelInsertBtn = document.getElementById('cancelInsert');
+  const confirmInsertBtn = document.getElementById('confirmInsert');
+  const nameInput = document.getElementById('insertIdInput') as HTMLInputElement;
+  const jsonInput = document.getElementById('insertJsonInput') as HTMLTextAreaElement;
+
+  // Delete modal
+  deleteBtn?.addEventListener('click', () => {
+    deleteModal?.classList.add('show');
+  });
+
+  cancelDeleteBtn?.addEventListener('click', () => {
+    deleteModal?.classList.remove('show');
+  });
+
+  // Insert modal
+  insertBtn?.addEventListener('click', () => {
+    insertModal?.classList.add('show');
+    nameInput?.focus();
+  });
+
+  cancelInsertBtn?.addEventListener('click', () => {
+    insertModal?.classList.remove('show');
+    if (nameInput) nameInput.value = '';
+    if (jsonInput) jsonInput.value = '';
+  });
+
+  // Close insert modal when confirm button is clicked
+  confirmInsertBtn?.addEventListener('click', () => {
+    insertModal?.classList.remove('show');
+    if (nameInput) nameInput.value = '';
+    if (jsonInput) jsonInput.value = '';
+  });
+
+  // Close modals when clicking overlay
+  deleteModal?.addEventListener('click', (e) => {
+    if (e.target === deleteModal) {
+      deleteModal.classList.remove('show');
+    }
+  });
+
+  insertModal?.addEventListener('click', (e) => {
+    if (e.target === insertModal) {
+      insertModal.classList.remove('show');
+      if (nameInput) nameInput.value = '';
+      if (jsonInput) jsonInput.value = '';
+    }
+  });
+
+  // Close modals on Escape key or Enter key for delete modal
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (deleteModal?.classList.contains('show')) {
+        deleteModal.classList.remove('show');
+      }
+      if (insertModal?.classList.contains('show')) {
+        insertModal.classList.remove('show');
+        if (nameInput) nameInput.value = '';
+        if (jsonInput) jsonInput.value = '';
+      }
+    }
+    // Enter key confirms delete when delete modal is open
+    if (e.key === 'Enter' && deleteModal?.classList.contains('show')) {
+      e.preventDefault();
+      document.getElementById('confirmDelete')?.click();
+    }
+  });
+}
+
+// Initialize modals when DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializeModals);
+} else {
+  initializeModals();
+}
 
 void (async () => {
   try {
-    console.log('🚀 Initializing documents page for collection:', currentCollection);
+    console.log('Initializing documents page for collection:', currentCollection);
     const docs = await fetchDocuments();
     allDocuments.splice(0, allDocuments.length, ...docs);
     renderDocuments(docs);
-    console.log('✅ Documents page initialized successfully');
+    console.log('Documents page initialized successfully');
   } catch (error) {
-    console.error('❌ Failed to initialize documents page:', error);
+    console.error('Failed to initialize documents page:', error);
     showError('Failed to load documents. Check if the collection exists and the server is running.');
     documentsView.innerHTML = '<div class="no-results">Unable to load documents. Please try refreshing.</div>';
   }
 })();
 
-console.log('✅ Documents script loaded');
+console.log('Documents script loaded');

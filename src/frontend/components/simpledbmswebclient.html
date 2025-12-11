@@ -56,66 +56,21 @@
       </div>
     </div>
 
+    <!-- Modal for deleting collection -->
+    <div id="deleteModalOverlay" class="modal-overlay">
+      <div class="modal-content">
+        <h2 class="modal-title">Delete Collection</h2>
+        <p style="color: var(--muted); margin: 0 0 16px 0">
+          Are you sure you want to delete this collection? This action cannot be undone.
+        </p>
+        <div class="actions">
+          <button id="cancelDelete" class="btn btn-ghost">Cancel</button>
+          <button id="confirmDelete" class="btn btn-primary" style="background: #ef4444">Delete</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Module handles UI interactions; remove inline demo script to avoid accidental document loading -->
     <script type="module" src="/scripts/webclient.mjs"></script>
-    <script>
-      // Modal functionality for create form
-      document.addEventListener('DOMContentLoaded', () => {
-        const createBtn = document.getElementById('createCollection');
-        const modalOverlay = document.getElementById('modalOverlay');
-        const cancelBtn = document.getElementById('cancelCreate');
-        const nameInput = document.getElementById('collectionNameInput');
-        const logoutBtn = document.getElementById('logoutBtn');
-        const welcomeUser = document.getElementById('welcomeUser');
-
-        // Check if user is logged in
-        const sessionToken = localStorage.getItem('sessionToken');
-        const username = localStorage.getItem('username');
-
-        if (!sessionToken || !username) {
-          // Not logged in, redirect to login
-          window.location.href = 'login.html';
-          return;
-        }
-
-        // Set welcome message
-        if (welcomeUser) {
-          welcomeUser.textContent = `Welcome, ${username}`;
-        }
-
-        // Logout functionality
-        logoutBtn?.addEventListener('click', () => {
-          localStorage.removeItem('sessionToken');
-          localStorage.removeItem('username');
-          window.location.href = 'login.html';
-        });
-
-        createBtn?.addEventListener('click', () => {
-          modalOverlay?.classList.add('show');
-          nameInput?.focus();
-        });
-
-        cancelBtn?.addEventListener('click', () => {
-          modalOverlay?.classList.remove('show');
-          if (nameInput) nameInput.value = '';
-        });
-
-        // Close modal when clicking overlay
-        modalOverlay?.addEventListener('click', (e) => {
-          if (e.target === modalOverlay) {
-            modalOverlay.classList.remove('show');
-            if (nameInput) nameInput.value = '';
-          }
-        });
-
-        // Close modal on Escape key
-        document.addEventListener('keydown', (e) => {
-          if (e.key === 'Escape' && modalOverlay?.classList.contains('show')) {
-            modalOverlay.classList.remove('show');
-            if (nameInput) nameInput.value = '';
-          }
-        });
-      });
-    </script>
   </body>
 </html>

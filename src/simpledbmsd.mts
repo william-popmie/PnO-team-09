@@ -38,6 +38,11 @@ app.use('/components', express.static(path.join(__dirname, '../src/frontend/comp
 app.use('/styles', express.static(path.join(__dirname, '../src/frontend/styles')));
 app.use('/scripts', express.static(path.join(__dirname, 'frontend/scripts')));
 
+// Redirect root to the main webclient UI
+app.get('/', (_req, res) => {
+  res.redirect('/components/simpledbmswebclient.html');
+});
+
 const swaggerOptions = {
   definition: {
     openapi: '3.0.0',

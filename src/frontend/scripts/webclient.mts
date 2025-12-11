@@ -438,19 +438,43 @@ function initializeApp(): void {
 
   console.log('DOM elements loaded');
 
+  // Auth guard and welcome text
+  const sessionToken = localStorage.getItem('sessionToken');
+  const username = localStorage.getItem('username');
+  if (!sessionToken || !username) {
+    window.location.href = 'login.html';
+    return;
+  }
+
+  const welcomeUser = document.getElementById('welcomeUser');
+  if (welcomeUser) {
+    welcomeUser.textContent = `Welcome, ${username}`;
+  }
+
+  const logoutBtn = document.getElementById('logoutBtn');
+  logoutBtn?.addEventListener('click', () => {
+    localStorage.removeItem('sessionToken');
+    localStorage.removeItem('username');
+    window.location.href = 'login.html';
+  });
+
   // Set up event listeners
   refreshCollections.addEventListener('click', () => {
     void handleRefreshCollections();
   });
 
+  const modalOverlay = document.getElementById('modalOverlay');
+  const deleteModal = document.getElementById('deleteModalOverlay');
+  const nameInput = document.getElementById('collectionNameInput') as HTMLInputElement;
+
   createCollectionButton?.addEventListener('click', () => {
-    /* Modal will open automatically via HTML */
+    modalOverlay?.classList.add('show');
+    nameInput?.focus();
   });
 
   confirmCreate?.addEventListener('click', () => {
     void handleCreateCollection();
     // Close the create modal after confirmation
-    const modalOverlay = document.getElementById('modalOverlay');
     modalOverlay?.classList.remove('show');
     if (collectionNameInput) collectionNameInput.value = '';
   });
@@ -467,14 +491,43 @@ function initializeApp(): void {
     confirmDelete.addEventListener('click', () => {
       void handleDeleteCollection();
       // Close the delete modal after confirmation
-      const deleteModal = document.getElementById('deleteModalOverlay');
       deleteModal?.classList.remove('show');
     });
   }
 
   deleteCollectionBtn?.addEventListener('click', () => {
-    const deleteModal = document.getElementById('deleteModalOverlay');
     deleteModal?.classList.add('show');
+  });
+
+  // Close modals when clicking overlay
+  modalOverlay?.addEventListener('click', (e) => {
+    if (e.target === modalOverlay) {
+      modalOverlay.classList.remove('show');
+      if (nameInput) nameInput.value = '';
+    }
+  });
+
+  deleteModal?.addEventListener('click', (e) => {
+    if (e.target === deleteModal) {
+      deleteModal.classList.remove('show');
+    }
+  });
+
+  // Close modal on Escape key, confirm delete on Enter key
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (modalOverlay?.classList.contains('show')) {
+        modalOverlay.classList.remove('show');
+        if (nameInput) nameInput.value = '';
+      }
+      if (deleteModal?.classList.contains('show')) {
+        deleteModal.classList.remove('show');
+      }
+    }
+    if (e.key === 'Enter' && deleteModal?.classList.contains('show')) {
+      e.preventDefault();
+      document.getElementById('confirmDelete')?.click();
+    }
   });
 
   collectionSearch?.addEventListener('input', () => {

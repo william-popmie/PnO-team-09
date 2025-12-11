@@ -723,6 +723,96 @@ runAggregateBtn.addEventListener('click', () => {
   void handleRunAggregate();
 });
 
+// =========================
+// Modal Functionality
+// =========================
+
+/**
+ * Initializes modal event listeners for delete and insert modals
+ * @return {void}
+ */
+function initializeModals(): void {
+  const deleteBtn = document.getElementById('deleteDocument');
+  const deleteModal = document.getElementById('deleteModalOverlay');
+  const cancelDeleteBtn = document.getElementById('cancelDelete');
+
+  const insertBtn = document.getElementById('insertDocument');
+  const insertModal = document.getElementById('insertModalOverlay');
+  const cancelInsertBtn = document.getElementById('cancelInsert');
+  const confirmInsertBtn = document.getElementById('confirmInsert');
+  const nameInput = document.getElementById('insertIdInput') as HTMLInputElement;
+  const jsonInput = document.getElementById('insertJsonInput') as HTMLTextAreaElement;
+
+  // Delete modal
+  deleteBtn?.addEventListener('click', () => {
+    deleteModal?.classList.add('show');
+  });
+
+  cancelDeleteBtn?.addEventListener('click', () => {
+    deleteModal?.classList.remove('show');
+  });
+
+  // Insert modal
+  insertBtn?.addEventListener('click', () => {
+    insertModal?.classList.add('show');
+    nameInput?.focus();
+  });
+
+  cancelInsertBtn?.addEventListener('click', () => {
+    insertModal?.classList.remove('show');
+    if (nameInput) nameInput.value = '';
+    if (jsonInput) jsonInput.value = '';
+  });
+
+  // Close insert modal when confirm button is clicked
+  confirmInsertBtn?.addEventListener('click', () => {
+    insertModal?.classList.remove('show');
+    if (nameInput) nameInput.value = '';
+    if (jsonInput) jsonInput.value = '';
+  });
+
+  // Close modals when clicking overlay
+  deleteModal?.addEventListener('click', (e) => {
+    if (e.target === deleteModal) {
+      deleteModal.classList.remove('show');
+    }
+  });
+
+  insertModal?.addEventListener('click', (e) => {
+    if (e.target === insertModal) {
+      insertModal.classList.remove('show');
+      if (nameInput) nameInput.value = '';
+      if (jsonInput) jsonInput.value = '';
+    }
+  });
+
+  // Close modals on Escape key or Enter key for delete modal
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (deleteModal?.classList.contains('show')) {
+        deleteModal.classList.remove('show');
+      }
+      if (insertModal?.classList.contains('show')) {
+        insertModal.classList.remove('show');
+        if (nameInput) nameInput.value = '';
+        if (jsonInput) jsonInput.value = '';
+      }
+    }
+    // Enter key confirms delete when delete modal is open
+    if (e.key === 'Enter' && deleteModal?.classList.contains('show')) {
+      e.preventDefault();
+      document.getElementById('confirmDelete')?.click();
+    }
+  });
+}
+
+// Initialize modals when DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializeModals);
+} else {
+  initializeModals();
+}
+
 void (async () => {
   try {
     console.log('Initializing documents page for collection:', currentCollection);

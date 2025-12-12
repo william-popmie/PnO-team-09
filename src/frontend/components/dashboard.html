@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>User Dashboard - SimpleDBMS Team 9</title>
+    <link rel="stylesheet" href="/styles/styles.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <div class="logo">DB9</div>
+        <div>
+          <h1>User Dashboard</h1>
+          <p class="lead">
+            <a href="simpledbmswebclient.html" style="color: var(--accent); text-decoration: none"
+              >← Back to Collections</a
+            >
+          </p>
+        </div>
+        <div class="header-user">
+          <span id="welcomeUser" class="welcome-text">Welcome, User</span>
+          <button id="logoutBtn" class="btn btn-ghost">Logout</button>
+        </div>
+      </header>
+
+      <div class="card">
+        <div class="collections-header">
+          <div class="meta"><h2>Your Account Information</h2></div>
+          <div class="header-buttons">
+            <button id="refreshData" class="btn btn-ghost">Refresh</button>
+          </div>
+        </div>
+
+        <p style="color: var(--muted); margin: 16px 0">
+          This page displays all your stored personal information in compliance with GDPR regulations.
+        </p>
+
+        <div id="userDataView" style="margin-top: 24px">
+          <div style="color: var(--muted); font-size: 14px; padding: 16px">Loading your information...</div>
+        </div>
+
+        <div class="spacer-md"></div>
+        <div class="meta">Status</div>
+        <div id="error">&nbsp;</div>
+      </div>
+
+      <div class="card" style="margin-top: 20px">
+        <div class="meta"><h3>GDPR Information</h3></div>
+        <p style="color: var(--muted); margin: 16px 0; line-height: 1.6">
+          Under GDPR (General Data Protection Regulation), you have the right to:
+        </p>
+        <ul style="color: var(--muted); margin: 0 0 16px 20px; line-height: 1.8">
+          <li>Access your personal data (shown above)</li>
+          <li>Request correction of inaccurate data</li>
+          <li>Request deletion of your data</li>
+          <li>Object to processing of your data</li>
+          <li>Data portability</li>
+        </ul>
+        <p style="color: var(--muted); margin: 16px 0; line-height: 1.6">
+          For any data-related requests, please contact your system administrator.
+        </p>
+      </div>
+    </div>
+
+    <script type="module" src="/scripts/dashboard.mjs"></script>
+  </body>
+</html>

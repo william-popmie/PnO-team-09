@@ -689,6 +689,53 @@ app.post('/api/login', async (req, res) => {
 });
 
 /**
+ * GET /api/getUserData
+ * Retrieve the authenticated user's personal data (GDPR compliance)
+ * @requires Authentication - Bearer token in Authorization header
+ * @returns {object} { success: boolean, message: string, userData: { userId: string, username: string, hashedPassword: string }, token?: string }
+ */
+app.get('/api/getUserData', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ success: false, message: 'User not authenticated' });
+      return;
+    }
+
+    const userId = req.user.userId;
+
+    // Get users collection
+    const usersCollection = await db.getCollection('users');
+
+    // Find user by ID
+    const user = await usersCollection.findById(userId);
+
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    // Extract user data
+    const userData = user as unknown as { id: string; username: string; password: string };
+
+    // Return user data (including hashed password for GDPR transparency)
+    const responseData = addTokenToResponse(req, {
+      success: true,
+      message: 'User data retrieved successfully',
+      userData: {
+        userId: userData.id,
+        username: userData.username,
+        hashedPassword: userData.password, // Show hashed password for transparency
+      },
+    });
+
+    res.json(responseData);
+  } catch (error) {
+    console.error('Get user data error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
  * POST /api/createCollection
  * Create a new collection for the authenticated user
  * @requires Authentication - Bearer token in Authorization header

@@ -70,13 +70,71 @@ function allRequiredFields(): boolean {
 }
 
 // ==========================
+//   Login Functions
+// ==========================
+
+/**
+ * Performs the login request to the backend and handles token updates
+ * @param {string} username - The username to login with
+ * @param {string} password - The password to login with
+ * @return {Promise<void>}
+ */
+async function performLogin(username: string, password: string): Promise<void> {
+  const token = localStorage.getItem('sessionToken') || '';
+
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Logging in...';
+
+  try {
+    const response = await fetch('http://localhost:3000/api/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ username, password, token } as LoginRequest),
+    });
+
+    if (!response.ok) {
+      const errorData = (await response.json()) as ErrorResponse;
+      showError(errorData.message || 'Login failed');
+      return;
+    }
+
+    const result = (await response.json()) as LoginResponse;
+    if (result.success) {
+      if (result.token) {
+        localStorage.setItem('sessionToken', result.token);
+      }
+      // Store username for display in webclient
+      localStorage.setItem('username', username);
+
+      showError('Login successful! Redirecting...');
+      errorDiv.style.color = 'var(--success, #22c55e)';
+
+      // Redirect to main app
+      setTimeout(() => {
+        window.location.href = 'simpledbmswebclient.html';
+      }, 1000);
+    } else {
+      showError(result.message || 'Login failed');
+    }
+  } catch (error) {
+    console.error('Login error:', error);
+    showError(error instanceof Error ? error.message : 'An unexpected error occurred');
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Log In';
+  }
+}
+
+// ==========================
 //   Event Handlers
 // ==========================
 
 /**
- * Handles login form submission, validates input, and authenticates via API
+ * Handles login form submission and validates input before calling performLogin
  * @param {Event} e - The form submit event
- * @return {Promise<void>}
+ * @return {void}
  */
 authForm.addEventListener('submit', (e) => {
   e.preventDefault();
@@ -103,51 +161,8 @@ authForm.addEventListener('submit', (e) => {
       );
       return;
     }
-    const token = localStorage.getItem('sessionToken') || '';
 
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'Logging in...';
-
-    try {
-      const response = await fetch('http://localhost:3000/api/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ username, password, token } as LoginRequest),
-      });
-
-      if (!response.ok) {
-        const errorData = (await response.json()) as ErrorResponse;
-        showError(errorData.message || 'Login failed');
-        return;
-      }
-
-      const result = (await response.json()) as LoginResponse;
-      if (result.success) {
-        if (result.token) {
-          localStorage.setItem('sessionToken', result.token);
-        }
-        // Store username for display in webclient
-        localStorage.setItem('username', username);
-
-        showError('Login successful! Redirecting...');
-        errorDiv.style.color = 'var(--success, #22c55e)';
-
-        // Redirect to main app
-        setTimeout(() => {
-          window.location.href = 'simpledbmswebclient.html';
-        }, 1000);
-      } else {
-        showError(result.message || 'Login failed');
-      }
-    } catch (error) {
-      console.error('Login error:', error);
-      showError(error instanceof Error ? error.message : 'An unexpected error occurred');
-    } finally {
-      submitBtn.disabled = false;
-      submitBtn.textContent = 'Log In';
-    }
+    await performLogin(username, password);
   })(); // End async IIFE
 }); // End event listener
 

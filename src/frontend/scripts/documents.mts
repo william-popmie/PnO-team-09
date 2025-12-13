@@ -1,11 +1,12 @@
 // @author Tijn Gommers
 // @date 2025-19-11
 
+import { API_BASE, authenticatedFetch, getErrorMessage } from './utils.mjs';
+
 // =========================
 // Constants & Initialization
 // =========================
 
-const API_BASE = 'http://localhost:3000';
 console.log('Documents loading...', 'API:', API_BASE);
 declare const document: Document;
 
@@ -63,17 +64,6 @@ function clearError(): void {
 }
 
 /**
- * Handles token expiration by clearing session and redirecting to login
- * @return {void}
- */
-function handleTokenExpiration(): void {
-  console.warn('Token expired or invalid, redirecting to login');
-  localStorage.removeItem('sessionToken');
-  localStorage.removeItem('username');
-  window.location.href = 'login.html';
-}
-
-/**
  * Clears the document view panel and resets the currently viewed document
  * @return {void}
  */
@@ -84,15 +74,6 @@ function clearDocumentView(): void {
   currentlyViewedDocument = null;
   updateDeleteButtonVisibility();
   renderDocuments(allDocuments); // Re-render to remove viewing highlight
-}
-
-/**
- * Extracts error message from unknown error type
- * @param {unknown} e - Error object or value of unknown type
- * @return {string} Error message string or stringified value
- */
-function getErrorMessage(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
 }
 
 /**
@@ -124,22 +105,14 @@ function getDocumentId(doc: Record<string, unknown>): string {
 async function fetchDocuments(): Promise<Array<Record<string, unknown>>> {
   try {
     console.log('Fetching documents from API for collection:', currentCollection);
-    const response = await fetch(
+    const response = await authenticatedFetch(
       `${API_BASE}/api/fetchDocuments?collectionName=${encodeURIComponent(currentCollection)}`,
       {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
-        },
       },
     );
 
     if (!response.ok) {
-      if (response.status === 401 || response.status === 403) {
-        handleTokenExpiration();
-        return [];
-      }
       if (response.status === 404) {
         console.log('Collection not found, returning empty array');
         return [];
@@ -151,15 +124,8 @@ async function fetchDocuments(): Promise<Array<Record<string, unknown>>> {
       success: boolean;
       message: string;
       documentNames: string[];
-      token?: string;
     };
     console.log(documents.message);
-
-    // If a new token is returned, update it in localStorage
-    if (documents.token && typeof documents.token === 'string' && documents.token.length > 0) {
-      localStorage.setItem('sessionToken', documents.token);
-      console.log('Session token refreshed and cached');
-    }
 
     // Map document names to objects to satisfy the return type expected by the UI
     return documents.documentNames.map((name) => ({ id: name, name: name }));
@@ -175,21 +141,12 @@ async function fetchDocuments(): Promise<Array<Record<string, unknown>>> {
  * @return {Promise<Record<string, unknown>>} The document content object
  */
 async function fetchDocumentContentByName(documentName: string): Promise<Record<string, unknown>> {
-  const response = await fetch(
+  const response = await authenticatedFetch(
     `${API_BASE}/api/fetchDocumentContent?collectionName=${encodeURIComponent(currentCollection)}&documentName=${encodeURIComponent(documentName)}`,
     {
       method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
-      },
     },
   );
-
-  if (response.status === 401 || response.status === 403) {
-    handleTokenExpiration();
-    return {};
-  }
 
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -199,13 +156,7 @@ async function fetchDocumentContentByName(documentName: string): Promise<Record<
     success: boolean;
     message: string;
     documentContent: Record<string, unknown>;
-    token?: string;
   };
-
-  if (result.token && typeof result.token === 'string' && result.token.length > 0) {
-    localStorage.setItem('sessionToken', result.token);
-    console.log('Session token refreshed and cached');
-  }
 
   if (!result.success) {
     throw new Error(result.message || 'Failed to fetch document content');
@@ -225,12 +176,8 @@ async function createDocument(id: string, content: Record<string, unknown>): Pro
   try {
     console.log('Creating document via API:', id, content);
 
-    const response = await fetch(`${API_BASE}/api/createDocument`, {
+    const response = await authenticatedFetch(`${API_BASE}/api/createDocument`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
-      },
       body: JSON.stringify({
         collectionName: currentCollection,
         documentName: id, // This will be used as the document identifier (stored in 'name' field)
@@ -239,22 +186,12 @@ async function createDocument(id: string, content: Record<string, unknown>): Pro
     });
 
     if (!response.ok) {
-      if (response.status === 401 || response.status === 403) {
-        handleTokenExpiration();
-        return false;
-      }
       const errorData = (await response.json()) as { message?: string };
       throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
     }
 
-    const result = (await response.json()) as { success: boolean; message: string; token?: string };
+    const result = (await response.json()) as { success: boolean; message: string };
     console.log('Document created:', result.message);
-
-    // If a new token is returned, update it in localStorage
-    if (result.token && typeof result.token === 'string' && result.token.length > 0) {
-      localStorage.setItem('sessionToken', result.token);
-      console.log('Session token refreshed and cached');
-    }
 
     // Refresh documents list after creation
     const documents = await fetchDocuments();
@@ -278,12 +215,8 @@ async function updateDocument(id: string, data: Record<string, unknown>): Promis
   try {
     console.log('Updating document via API:', id, data);
 
-    const response = await fetch(`${API_BASE}/api/updateDocument`, {
+    const response = await authenticatedFetch(`${API_BASE}/api/updateDocument`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
-      },
       body: JSON.stringify({
         collectionName: currentCollection,
         documentData: data,
@@ -292,10 +225,6 @@ async function updateDocument(id: string, data: Record<string, unknown>): Promis
     });
 
     if (!response.ok) {
-      if (response.status === 401 || response.status === 403) {
-        handleTokenExpiration();
-        return false;
-      }
       if (response.status === 404) {
         throw new Error(`Document with ID '${id}' not found`);
       }
@@ -303,14 +232,8 @@ async function updateDocument(id: string, data: Record<string, unknown>): Promis
       throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
     }
 
-    const result = (await response.json()) as { success: boolean; message: string; token?: string };
+    const result = (await response.json()) as { success: boolean; message: string };
     console.log('Document updated:', result);
-
-    // If a new token is returned, update it in localStorage
-    if (result.token && typeof result.token === 'string' && result.token.length > 0) {
-      localStorage.setItem('sessionToken', result.token);
-      console.log('Session token refreshed and cached');
-    }
 
     // Refresh documents list after update
     const documents = await fetchDocuments();
@@ -333,12 +256,8 @@ async function deleteDocument(id: string): Promise<boolean> {
   try {
     console.log('🗑️ Deleting document via API:', id);
 
-    const response = await fetch(`${API_BASE}/api/deleteDocument`, {
+    const response = await authenticatedFetch(`${API_BASE}/api/deleteDocument`, {
       method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('sessionToken') || ''}`,
-      },
       body: JSON.stringify({
         collectionName: currentCollection,
         documentName: id,
@@ -346,10 +265,6 @@ async function deleteDocument(id: string): Promise<boolean> {
     });
 
     if (!response.ok) {
-      if (response.status === 401 || response.status === 403) {
-        handleTokenExpiration();
-        return false;
-      }
       if (response.status === 404) {
         console.warn(`Document ${id} not found (already deleted?)`);
         // Still refresh the list
@@ -362,14 +277,8 @@ async function deleteDocument(id: string): Promise<boolean> {
       throw new Error(`Failed to delete ${id}: ${errorData.message || response.statusText}`);
     }
 
-    const result = (await response.json()) as { success: boolean; message: string; token?: string };
+    const result = (await response.json()) as { success: boolean; message: string };
     console.log('✅ Document deleted:', result.message);
-
-    // If a new token is returned, update it in localStorage
-    if (result.token && typeof result.token === 'string' && result.token.length > 0) {
-      localStorage.setItem('sessionToken', result.token);
-      console.log('Session token refreshed and cached');
-    }
 
     // Clear document view if the deleted document was being viewed
     if (currentlyViewedDocument === id) {

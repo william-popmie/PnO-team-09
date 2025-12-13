@@ -55,6 +55,22 @@ Once the server is running, open your browser and navigate to:
 - **Login**: `http://localhost:3000/login.html`
 - **Signup**: `http://localhost:3000/signup.html`
 
+### Demo Account
+
+The project includes a pre-populated demo account for testing and demonstrations. When you create a new database, a demo account is automatically created with sample data including customers, products, orders, inventory, and analytics.
+
+**Demo Credentials:**
+- **Username**: `demo`
+- **Password**: `demo123`
+
+The demo account includes:
+- 5 collections (customers, products, orders, inventory, analytics)
+- 15+ documents with realistic data
+- Nested objects and arrays to showcase complex data structures
+- Various data types (strings, numbers, booleans, objects, arrays)
+
+> **Note:** The demo account is only created when initializing a new database. To customize the demo data, edit `dummy-account.json` in the project root before starting the server for the first time.
+
 ## Features
 
 - User authentication (signup/login)

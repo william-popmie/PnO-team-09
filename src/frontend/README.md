@@ -65,11 +65,14 @@ The project includes a pre-populated demo account for testing and demonstrations
 
 The demo account includes:
 - 5 collections (customers, products, orders, inventory, analytics)
-- 15+ documents with realistic data
+- 50+ documents with realistic data
 - Nested objects and arrays to showcase complex data structures
 - Various data types (strings, numbers, booleans, objects, arrays)
+- 15 customer profiles with complete address information
+- 20+ product listings across multiple categories
+- 12 order records with detailed transaction information
 
-> **Note:** The demo account is only created when initializing a new database. To customize the demo data, edit `dummy-account.json` in the project root before starting the server for the first time.
+> **Note:** The demo account is only created when initializing a new database. To customize the demo data, edit `data/dummy-account.json` before starting the server for the first time.
 
 ## Features
 

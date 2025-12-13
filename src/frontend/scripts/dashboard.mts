@@ -2,10 +2,15 @@
 // @date 2025-12-12
 
 // ==========================
+//   Imports
+// ==========================
+
+import { API_BASE, handleTokenExpiration, getErrorMessage, authenticatedFetch } from './utils.mjs';
+
+// ==========================
 //   Constants & Initialization
 // ==========================
 
-const API_BASE = 'http://localhost:3000';
 console.log('Dashboard loading...', 'API:', API_BASE);
 
 // ==========================
@@ -65,36 +70,6 @@ function clearMessage(): void {
   errorDiv.innerHTML = '&nbsp;';
 }
 
-/**
- * Handles token expiration by clearing session and redirecting to login
- * @return {void}
- */
-function handleTokenExpiration(): void {
-  console.warn('Token expired or invalid, redirecting to login');
-  localStorage.removeItem('sessionToken');
-  localStorage.removeItem('username');
-  window.location.href = 'login.html';
-}
-
-/**
- * Retrieves the stored session token from localStorage
- * @return {string | null} The session token or null if not found
- */
-function getToken(): string | null {
-  return localStorage.getItem('sessionToken');
-}
-
-/**
- * Updates the stored session token if a new one is provided
- * @param {string | undefined} newToken - Optional new token to store
- * @return {void}
- */
-function updateToken(newToken: string | undefined): void {
-  if (newToken) {
-    localStorage.setItem('sessionToken', newToken);
-  }
-}
-
 // ==========================
 //   API Functions
 // ==========================
@@ -104,36 +79,20 @@ function updateToken(newToken: string | undefined): void {
  * @return {Promise<void>}
  */
 async function fetchUserData(): Promise<void> {
-  const token = getToken();
-  if (!token) {
-    handleTokenExpiration();
-    return;
-  }
-
   try {
     clearMessage();
     userDataView.innerHTML = '<div style="color: var(--muted); font-size: 14px; padding: 16px">Loading...</div>';
 
-    const response = await fetch(`${API_BASE}/api/getUserData`, {
+    const response = await authenticatedFetch(`${API_BASE}/api/getUserData`, {
       method: 'GET',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
     });
 
-    const data = (await response.json()) as UserDataResponse;
-
     if (!response.ok) {
-      if (response.status === 401) {
-        handleTokenExpiration();
-        return;
-      }
+      const data = (await response.json()) as UserDataResponse;
       throw new Error(data.message || 'Failed to fetch user data');
     }
 
-    // Update token if refreshed
-    updateToken(data.token);
+    const data = (await response.json()) as UserDataResponse;
 
     if (data.success && data.userData) {
       displayUserData(data.userData);
@@ -143,8 +102,7 @@ async function fetchUserData(): Promise<void> {
     }
   } catch (error) {
     console.error('Error fetching user data:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-    showError(`Error: ${errorMessage}`);
+    showError(`Error: ${getErrorMessage(error)}`);
     userDataView.innerHTML =
       '<div style="color: var(--error); font-size: 14px; padding: 16px">Failed to load user data</div>';
   }

@@ -105,10 +105,9 @@ To start fresh with a blank database:
    # Press Ctrl+C in the terminal running the server
    ```
 
-2. **Remove database files**
+2. **Reset the database**
    ```bash
-   rm -f mydb.db mydb.wal testdb
-   rm -rf test_files/
+   npm run reset-db
    ```
 
 3. **Restart the server**
@@ -116,4 +115,4 @@ To start fresh with a blank database:
    npm run dev
    ```
 
-The database will be recreated automatically on startup. All users, collections, and documents will be cleared.
+The database will be recreated automatically on startup. All users, collections, and documents will be cleared, and the demo account will be re-initialized with fresh sample data.

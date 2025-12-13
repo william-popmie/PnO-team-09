@@ -76,3 +76,25 @@ frontend/
 - **Build TypeScript**: `npm run build`
 - **Run tests**: `npm test`
 - **Lint code**: `npm run lint`
+
+### Resetting the Database (Developer Use)
+
+To start fresh with a blank database:
+
+1. **Stop the server** (if running)
+   ```bash
+   # Press Ctrl+C in the terminal running the server
+   ```
+
+2. **Remove database files**
+   ```bash
+   rm -f mydb.db mydb.wal testdb
+   rm -rf test_files/
+   ```
+
+3. **Restart the server**
+   ```bash
+   npm run dev
+   ```
+
+The database will be recreated automatically on startup. All users, collections, and documents will be cleared.

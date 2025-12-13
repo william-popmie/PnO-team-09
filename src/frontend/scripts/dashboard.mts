@@ -138,12 +138,43 @@ function displayUserData(userData: { userId: string; username: string; hashedPas
         <label style="font-weight: 600; color: var(--muted); font-size: 13px; margin-bottom: 6px; display: block">
           Password (Hashed)
         </label>
-        <div style="padding: 12px; background: #1e293b; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.1); font-family: monospace; word-break: break-all; font-size: 11px; color: var(--muted)">
-          ${escapeHtml(userData.hashedPassword)}
+        <div style="position: relative">
+          <div id="passwordField" style="padding: 12px 68px 12px 12px; background: #1e293b; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.1); font-family: monospace; word-break: break-all; font-size: 11px; color: var(--muted)" data-password="${escapeHtml(userData.hashedPassword)}">
+            ••••••••••••••••••••••••••••••••••••••••••••••••
+          </div>
+          <button id="togglePassword" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: transparent; border: none; cursor: pointer; padding: 6px 10px; color: var(--accent); font-size: 12px; font-weight: 600; text-decoration: underline" title="Toggle password visibility">
+            <span id="toggleText">Show</span>
+          </button>
         </div>
+        <p style="color: var(--muted); font-size: 12px; margin-top: 8px; font-style: italic">
+          Note: We do not store your original password. This is a securely hashed version that cannot be reversed.
+        </p>
       </div>
     </div>
   `;
+
+  // Add event listener for password toggle
+  const toggleBtn = document.getElementById('togglePassword');
+  const passwordField = document.getElementById('passwordField');
+  const toggleText = document.getElementById('toggleText');
+  let isPasswordVisible = false;
+
+  if (toggleBtn && passwordField && toggleText) {
+    toggleBtn.addEventListener('click', () => {
+      isPasswordVisible = !isPasswordVisible;
+      const actualPassword = passwordField.getAttribute('data-password') || '';
+
+      if (isPasswordVisible) {
+        passwordField.textContent = actualPassword;
+        toggleText.textContent = 'Hide';
+        toggleBtn.setAttribute('title', 'Hide password');
+      } else {
+        passwordField.textContent = '••••••••••••••••••••••••••••••••••••••••••••••••';
+        toggleText.textContent = 'Show';
+        toggleBtn.setAttribute('title', 'Show password');
+      }
+    });
+  }
 }
 
 /**

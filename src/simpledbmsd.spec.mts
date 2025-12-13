@@ -333,4 +333,105 @@ describe('SimpleDBMS Daemon API', () => {
       expect(res.status).toBe(401);
     });
   });
+
+  describe('GDPR Compliance API', () => {
+    let authToken: string;
+    const testCollectionName = 'gdprTestCollection';
+
+    beforeAll(async () => {
+      const signupRes = await request(app).post('/api/signup').send({ username: 'gdpruser', password: 'gdprpass' });
+      authToken = (signupRes.body as { token: string }).token;
+
+      // Create a collection with some documents
+      await request(app)
+        .post('/api/createCollection')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ collectionName: testCollectionName });
+
+      await request(app)
+        .post('/api/createDocument')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          collectionName: testCollectionName,
+          documentName: 'TestDoc1',
+          documentContent: { data: 'sample1' },
+        });
+
+      await request(app)
+        .post('/api/createDocument')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          collectionName: testCollectionName,
+          documentName: 'TestDoc2',
+          documentContent: { data: 'sample2' },
+        });
+    });
+
+    it('should retrieve user data', async () => {
+      const res = await request(app).get('/api/getUserData').set('Authorization', `Bearer ${authToken}`);
+
+      expect(res.status).toBe(200);
+      expect((res.body as { success?: boolean }).success).toBe(true);
+      expect((res.body as { userData?: { userId?: string } }).userData?.userId).toBeDefined();
+      expect((res.body as { userData?: { username?: string } }).userData?.username).toBe('gdpruser');
+      expect((res.body as { userData?: { hashedPassword?: string } }).userData?.hashedPassword).toBeDefined();
+    });
+
+    it('should reject unauthorized access to user data', async () => {
+      const res = await request(app).get('/api/getUserData');
+
+      expect(res.status).toBe(401);
+    });
+
+    it('should retrieve all user data including collections and documents', async () => {
+      const res = await request(app).get('/api/getAllUserData').set('Authorization', `Bearer ${authToken}`);
+
+      expect(res.status).toBe(200);
+      expect((res.body as { userId?: string }).userId).toBeDefined();
+      expect((res.body as { username?: string }).username).toBe('gdpruser');
+      expect((res.body as { password?: string }).password).toBeDefined(); // Hashed password
+      expect((res.body as { collections?: Record<string, unknown[]> }).collections).toBeDefined();
+
+      const collections = (res.body as { collections?: Record<string, unknown[]> }).collections;
+      expect(collections?.[testCollectionName]).toBeDefined();
+      expect(Array.isArray(collections?.[testCollectionName])).toBe(true);
+      expect(collections?.[testCollectionName].length).toBeGreaterThanOrEqual(2); // At least 2 documents
+    });
+
+    it('should reject unauthorized access to all user data', async () => {
+      const res = await request(app).get('/api/getAllUserData');
+
+      expect(res.status).toBe(401);
+    });
+
+    it('should only include user-owned documents in data export', async () => {
+      // Create another user with their own collection and documents
+      const otherUserRes = await request(app).post('/api/signup').send({ username: 'otheruser', password: 'pass' });
+      const otherToken = (otherUserRes.body as { token: string }).token;
+
+      await request(app)
+        .post('/api/createCollection')
+        .set('Authorization', `Bearer ${otherToken}`)
+        .send({ collectionName: 'otherCollection' });
+
+      await request(app)
+        .post('/api/createDocument')
+        .set('Authorization', `Bearer ${otherToken}`)
+        .send({
+          collectionName: 'otherCollection',
+          documentName: 'OtherDoc',
+          documentContent: { data: 'other' },
+        });
+
+      // Fetch first user's data
+      const res = await request(app).get('/api/getAllUserData').set('Authorization', `Bearer ${authToken}`);
+
+      expect(res.status).toBe(200);
+      const collections = (res.body as { collections?: Record<string, unknown[]> }).collections;
+
+      // Should only have testCollectionName, not otherCollection
+      expect(collections?.[testCollectionName]).toBeDefined();
+      expect(collections?.['otherCollection']).toBeUndefined();
+    });
+  });
 });

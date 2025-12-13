@@ -34,7 +34,7 @@ interface UserDataResponse {
 
 const welcomeUser = document.getElementById('welcomeUser') as HTMLSpanElement;
 const logoutBtn = document.getElementById('logoutBtn') as HTMLButtonElement;
-const refreshData = document.getElementById('refreshData') as HTMLButtonElement;
+const downloadAllData = document.getElementById('downloadAllData') as HTMLButtonElement;
 const userDataView = document.getElementById('userDataView') as HTMLDivElement;
 const errorDiv = document.getElementById('error') as HTMLDivElement;
 
@@ -115,35 +115,32 @@ async function fetchUserData(): Promise<void> {
  */
 function displayUserData(userData: { userId: string; username: string; hashedPassword: string }): void {
   userDataView.innerHTML = `
-    <div style="display: flex; flex-direction: column; gap: 24px">
-      <div class="user-data-item">
-        <label style="font-weight: 600; color: var(--muted); font-size: 14px; margin-bottom: 8px; display: block">
+    <div style="display: flex; flex-direction: column; gap: 20px">
+      <div>
+        <label style="font-weight: 600; color: var(--muted); font-size: 13px; margin-bottom: 6px; display: block">
           User ID
         </label>
-        <div style="padding: 14px; background: #1e293b; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1); font-family: 'Courier New', monospace; color: var(--accent)">
+        <div style="padding: 12px; background: #1e293b; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.1); font-family: monospace; color: var(--accent); font-size: 14px">
           ${escapeHtml(userData.userId)}
         </div>
       </div>
 
-      <div class="user-data-item">
-        <label style="font-weight: 600; color: var(--muted); font-size: 14px; margin-bottom: 8px; display: block">
+      <div>
+        <label style="font-weight: 600; color: var(--muted); font-size: 13px; margin-bottom: 6px; display: block">
           Username
         </label>
-        <div style="padding: 14px; background: #1e293b; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1)">
+        <div style="padding: 12px; background: #1e293b; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.1); font-size: 14px">
           ${escapeHtml(userData.username)}
         </div>
       </div>
 
-      <div class="user-data-item">
-        <label style="font-weight: 600; color: var(--muted); font-size: 14px; margin-bottom: 8px; display: block">
+      <div>
+        <label style="font-weight: 600; color: var(--muted); font-size: 13px; margin-bottom: 6px; display: block">
           Password (Hashed)
         </label>
-        <div style="padding: 14px; background: #1e293b; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1); font-family: 'Courier New', monospace; word-break: break-all; font-size: 12px; color: var(--muted)">
+        <div style="padding: 12px; background: #1e293b; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.1); font-family: monospace; word-break: break-all; font-size: 11px; color: var(--muted)">
           ${escapeHtml(userData.hashedPassword)}
         </div>
-        <p style="color: var(--muted); font-size: 12px; margin-top: 8px; font-style: italic">
-          Your password is securely hashed and cannot be reversed to the original text.
-        </p>
       </div>
     </div>
   `;
@@ -158,6 +155,47 @@ function escapeHtml(text: string): string {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
+}
+
+/**
+ * Downloads all user data including collections and documents as a JSON file
+ * @return {Promise<void>}
+ */
+async function downloadAllStoredData(): Promise<void> {
+  try {
+    clearMessage();
+    showSuccess('Preparing your data for download...');
+
+    const response = await authenticatedFetch(`${API_BASE}/api/getAllUserData`, {
+      method: 'GET',
+    });
+
+    if (!response.ok) {
+      const data = (await response.json()) as { message?: string };
+      throw new Error(data.message || 'Failed to fetch all user data');
+    }
+
+    const allData = (await response.json()) as Record<string, unknown>;
+
+    // Create a blob from the JSON data
+    const jsonString = JSON.stringify(allData, null, 2);
+    const blob = new Blob([jsonString], { type: 'application/json' });
+
+    // Create download link and trigger download
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `user-data-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    showSuccess('Your data has been downloaded successfully!');
+  } catch (error) {
+    console.error('Error downloading data:', error);
+    showError(`Error: ${getErrorMessage(error)}`);
+  }
 }
 
 // ==========================
@@ -181,10 +219,10 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 /**
- * Refresh button handler
+ * Download all data button handler
  */
-refreshData.addEventListener('click', () => {
-  void fetchUserData();
+downloadAllData.addEventListener('click', () => {
+  void downloadAllStoredData();
 });
 
 /**

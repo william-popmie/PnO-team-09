@@ -736,6 +736,75 @@ app.get('/api/getUserData', authenticateToken, async (req: AuthenticatedRequest,
 });
 
 /**
+ * GET /api/getAllUserData
+ * Retrieve all user data including collections and documents (GDPR data export)
+ * @requires Authentication - Bearer token in Authorization header
+ * @returns {object} Complete user data export including all collections and documents
+ */
+app.get('/api/getAllUserData', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ success: false, message: 'User not authenticated' });
+      return;
+    }
+
+    const userId = req.user.userId;
+
+    // Get users collection
+    const usersCollection = await db.getCollection('users');
+    const user = await usersCollection.findById(userId);
+
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    const userData = user as unknown as {
+      id: string;
+      username: string;
+      password: string;
+      collections?: string[];
+    };
+
+    // Build collections data structure
+    const collectionsData: Record<string, Array<Record<string, unknown>>> = {};
+
+    if (userData.collections && Array.isArray(userData.collections)) {
+      for (const collectionName of userData.collections) {
+        try {
+          const collection = await db.getCollection(collectionName);
+          const allDocs = await collection.find();
+
+          // Filter documents belonging to this user
+          const userDocs = allDocs.filter((doc) => {
+            const docData = doc as unknown as { userId?: string };
+            return docData.userId === userId;
+          });
+
+          collectionsData[collectionName] = userDocs as Array<Record<string, unknown>>;
+        } catch (error) {
+          console.error(`Error fetching collection ${collectionName}:`, error);
+          collectionsData[collectionName] = [];
+        }
+      }
+    }
+
+    // Build complete data export
+    const completeData = {
+      userId: userData.id,
+      username: userData.username,
+      password: userData.password,
+      collections: collectionsData,
+    };
+
+    res.json(completeData);
+  } catch (error) {
+    console.error('Get all user data error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
  * POST /api/createCollection
  * Create a new collection for the authenticated user
  * @requires Authentication - Bearer token in Authorization header

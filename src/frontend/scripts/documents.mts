@@ -27,15 +27,17 @@ const deleteDocumentBtn = getEl<HTMLButtonElement>('deleteDocument');
 const confirmInsert = getEl<HTMLButtonElement>('confirmInsert');
 const confirmDelete = getEl<HTMLButtonElement>('confirmDelete');
 const insertIdInput = getEl<HTMLInputElement>('insertIdInput');
-const insertJsonInput = getEl<HTMLTextAreaElement>('insertJsonInput');
 const documentView = getEl<HTMLTextAreaElement>('documentView');
 const errorDiv = getEl<HTMLDivElement>('error');
+const documentFieldsContainer = getEl<HTMLDivElement>('documentFields');
+const addFieldBtn = getEl<HTMLButtonElement>('addFieldBtn');
 
 // =========================
 // State Management
 // =========================
 const allDocuments: Array<Record<string, unknown>> = [];
 let currentlyViewedDocument: string | null = null;
+let originalDocumentName: string | null = null; // Track which document is being edited
 const currentCollection = new URLSearchParams(window.location.search).get('collection') || 'unknown';
 collectionNameSpan.textContent = currentCollection;
 
@@ -70,10 +72,219 @@ function clearError(): void {
 function clearDocumentView(): void {
   documentView.value = '';
   insertIdInput.value = '';
-  insertJsonInput.value = '';
+  clearDocumentFields();
   currentlyViewedDocument = null;
   updateDeleteButtonVisibility();
   renderDocuments(allDocuments); // Re-render to remove viewing highlight
+}
+
+/**
+ * Adds a new key-value field row to the document fields container with nested object support
+ * @param {string} key - The field key
+ * @param {unknown} value - The field value (can be primitive or object)
+ * @param {number} level - Nesting level for indentation
+ * @param {HTMLElement} parent - Parent container element
+ * @return {HTMLElement} The created field row element
+ */
+function addDocumentField(key = '', value: unknown = '', level = 0, parent?: HTMLElement): HTMLElement {
+  const container = parent || documentFieldsContainer;
+
+  // Main field row wrapper
+  const fieldRow = document.createElement('div');
+  fieldRow.className = 'field-row';
+  fieldRow.style.paddingLeft = `${level * 24}px`;
+  fieldRow.dataset['level'] = String(level);
+
+  // Row content (expand button + inputs + action buttons)
+  const rowContent = document.createElement('div');
+  rowContent.className = 'field-row-content';
+
+  // Expand/collapse button for nested objects
+  const expandBtn = document.createElement('button');
+  expandBtn.textContent = '▶';
+  expandBtn.type = 'button';
+  expandBtn.className = 'btn btn-ghost expand-btn';
+  expandBtn.dataset['expanded'] = 'false';
+
+  const keyInput = document.createElement('input');
+  keyInput.type = 'text';
+  keyInput.placeholder = 'Field name';
+  keyInput.value = key;
+  keyInput.className = 'field-key';
+
+  const valueInput = document.createElement('input');
+  valueInput.type = 'text';
+  valueInput.placeholder = 'Value (or add nested fields)';
+  valueInput.className = 'field-value';
+
+  // Add nested field button
+  const addNestedBtn = document.createElement('button');
+  addNestedBtn.textContent = '+';
+  addNestedBtn.type = 'button';
+  addNestedBtn.title = 'Add nested field';
+  addNestedBtn.className = 'btn add-nested-btn';
+
+  // Remove field button
+  const removeBtn = document.createElement('button');
+  removeBtn.textContent = '✕';
+  removeBtn.type = 'button';
+  removeBtn.className = 'btn remove-field-btn';
+
+  // Nested fields container
+  const nestedContainer = document.createElement('div');
+  nestedContainer.className = 'nested-fields';
+  nestedContainer.dataset['nested'] = 'true';
+
+  // Handle nested value if it's an object
+  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    // This field represents an object, show expand button
+    expandBtn.classList.add('visible');
+    expandBtn.dataset['expanded'] = 'true';
+    expandBtn.style.transform = 'rotate(90deg)';
+    nestedContainer.classList.add('visible');
+    valueInput.value = ''; // Empty value for objects
+    valueInput.disabled = true;
+    valueInput.placeholder = '(nested object)';
+
+    // Add nested fields recursively
+    for (const [nestedKey, nestedValue] of Object.entries(value as Record<string, unknown>)) {
+      addDocumentField(nestedKey, nestedValue, level + 1, nestedContainer);
+    }
+  } else if (value !== null && value !== undefined && value !== '') {
+    // Primitive value
+    if (typeof value === 'string') {
+      valueInput.value = value;
+    } else if (typeof value === 'boolean' || typeof value === 'number') {
+      valueInput.value = String(value);
+    } else {
+      valueInput.value = JSON.stringify(value);
+    }
+  }
+
+  // Expand/collapse functionality
+  expandBtn.addEventListener('click', () => {
+    const isExpanded = expandBtn.dataset['expanded'] === 'true';
+    expandBtn.dataset['expanded'] = String(!isExpanded);
+    expandBtn.style.transform = isExpanded ? 'rotate(0deg)' : 'rotate(90deg)';
+    nestedContainer.classList.toggle('visible', !isExpanded);
+  });
+
+  // Add nested field functionality
+  addNestedBtn.addEventListener('click', () => {
+    // Show nested container and expand button
+    if (!expandBtn.classList.contains('visible')) {
+      expandBtn.classList.add('visible');
+      expandBtn.dataset['expanded'] = 'true';
+      expandBtn.style.transform = 'rotate(90deg)';
+      nestedContainer.classList.add('visible');
+      valueInput.value = '';
+      valueInput.disabled = true;
+      valueInput.placeholder = '(nested object)';
+    }
+
+    // Add a new empty nested field
+    addDocumentField('', '', level + 1, nestedContainer);
+  });
+
+  // Remove field functionality
+  removeBtn.addEventListener('click', () => {
+    fieldRow.remove();
+  });
+
+  // Re-enable value input if nested container becomes empty
+  const observer = new MutationObserver(() => {
+    if (nestedContainer.children.length === 0) {
+      expandBtn.classList.remove('visible');
+      nestedContainer.classList.remove('visible');
+      valueInput.disabled = false;
+      valueInput.placeholder = 'Value (or add nested fields)';
+    }
+  });
+  observer.observe(nestedContainer, { childList: true });
+
+  // Assemble the field row
+  rowContent.appendChild(expandBtn);
+  rowContent.appendChild(keyInput);
+  rowContent.appendChild(valueInput);
+  rowContent.appendChild(addNestedBtn);
+  rowContent.appendChild(removeBtn);
+
+  fieldRow.appendChild(rowContent);
+  fieldRow.appendChild(nestedContainer);
+  container.appendChild(fieldRow);
+
+  return fieldRow;
+}
+
+/**
+ * Clears all document fields from the container
+ * @return {void}
+ */
+function clearDocumentFields(): void {
+  documentFieldsContainer.innerHTML = '';
+}
+
+/**
+ * Converts document fields to JSON object recursively
+ * @param {HTMLElement} container - The container element with field rows
+ * @return {Record<string, unknown>} The JSON object
+ */
+function fieldsToJson(container: HTMLElement = documentFieldsContainer): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+
+  // Get direct children field rows (not nested ones)
+  const fieldRows = Array.from(container.children).filter((child) => child.classList.contains('field-row'));
+
+  fieldRows.forEach((row) => {
+    const keyInput = row.querySelector('.field-key') as HTMLInputElement;
+    const valueInput = row.querySelector('.field-value') as HTMLInputElement;
+    const nestedContainer = row.querySelector('.nested-fields') as HTMLElement;
+
+    if (keyInput && keyInput.value.trim()) {
+      const key = keyInput.value.trim();
+
+      // Check if this field has nested children
+      if (nestedContainer && nestedContainer.children.length > 0) {
+        // Recursively process nested fields
+        result[key] = fieldsToJson(nestedContainer);
+      } else if (valueInput) {
+        // Process primitive value
+        let value: unknown = valueInput.value;
+
+        if (typeof value === 'string') {
+          // Smart type conversion for primitives
+          if (value === 'true') value = true;
+          else if (value === 'false') value = false;
+          else if (value === 'null') value = null;
+          else if (value === '') value = '';
+          else if (!isNaN(Number(value)) && value !== '') value = Number(value);
+        }
+
+        result[key] = value;
+      }
+    }
+  });
+
+  return result;
+}
+
+/**
+ * Populates document fields from JSON object recursively
+ * @param {Record<string, unknown>} data - The JSON object
+ * @return {void}
+ */
+function jsonToFields(data: Record<string, unknown>): void {
+  clearDocumentFields();
+
+  for (const [key, value] of Object.entries(data)) {
+    // addDocumentField now handles nested objects recursively
+    addDocumentField(key, value);
+  }
+
+  // Add one empty field if no fields exist
+  if (Object.keys(data).length === 0) {
+    addDocumentField();
+  }
 }
 
 /**
@@ -82,6 +293,8 @@ function clearDocumentView(): void {
  */
 function updateDeleteButtonVisibility(): void {
   deleteDocumentBtn.style.display = currentlyViewedDocument ? 'block' : 'none';
+  const editBtn = document.getElementById('editDocument');
+  if (editBtn) editBtn.style.display = currentlyViewedDocument ? 'block' : 'none';
 }
 
 /**
@@ -193,10 +406,6 @@ async function createDocument(id: string, content: Record<string, unknown>): Pro
     const result = (await response.json()) as { success: boolean; message: string };
     console.log('Document created:', result.message);
 
-    // Refresh documents list after creation
-    const documents = await fetchDocuments();
-    allDocuments.splice(0, allDocuments.length, ...documents);
-    renderDocuments(allDocuments);
     return result.success;
   } catch (error) {
     console.error('Failed to create document:', error);
@@ -219,8 +428,8 @@ async function updateDocument(id: string, data: Record<string, unknown>): Promis
       method: 'PUT',
       body: JSON.stringify({
         collectionName: currentCollection,
-        documentData: data,
-        id: id,
+        documentName: id,
+        newDocumentContent: data,
       }),
     });
 
@@ -235,10 +444,6 @@ async function updateDocument(id: string, data: Record<string, unknown>): Promis
     const result = (await response.json()) as { success: boolean; message: string };
     console.log('Document updated:', result);
 
-    // Refresh documents list after update
-    const documents = await fetchDocuments();
-    allDocuments.splice(0, allDocuments.length, ...documents);
-    renderDocuments(allDocuments);
     return true;
   } catch (error) {
     console.error('Failed to update document:', error);
@@ -254,7 +459,7 @@ async function updateDocument(id: string, data: Record<string, unknown>): Promis
  */
 async function deleteDocument(id: string): Promise<boolean> {
   try {
-    console.log('🗑️ Deleting document via API:', id);
+    console.log('Deleting document via API:', id);
 
     const response = await authenticatedFetch(`${API_BASE}/api/deleteDocument`, {
       method: 'DELETE',
@@ -278,7 +483,7 @@ async function deleteDocument(id: string): Promise<boolean> {
     }
 
     const result = (await response.json()) as { success: boolean; message: string };
-    console.log('✅ Document deleted:', result.message);
+    console.log('Document deleted:', result.message);
 
     // Clear document view if the deleted document was being viewed
     if (currentlyViewedDocument === id) {
@@ -364,8 +569,9 @@ async function selectDocument(doc: Record<string, unknown>): Promise<void> {
     const docJson = JSON.stringify(documentContent, null, 2);
     documentView.value = docJson;
     insertIdInput.value = documentName;
-    insertJsonInput.value = docJson;
+    jsonToFields(documentContent); // Populate fields from content
     currentlyViewedDocument = documentName;
+    originalDocumentName = null; // Reset when viewing a document (not editing yet)
     renderDocuments(allDocuments); // Re-render to highlight viewed document
     updateDeleteButtonVisibility();
     console.log('Document content loaded:', documentContent);
@@ -401,6 +607,46 @@ async function handleDeleteDocument(): Promise<void> {
   }
 }
 
+/**
+ * Handles edit document button click - opens modal with document data for editing
+ * @return {void}
+ * @throws {Error} Handled internally and displayed to user via showError
+ */
+async function handleEditDocument(): Promise<void> {
+  try {
+    clearError();
+
+    if (!currentlyViewedDocument) {
+      showError('No document selected to edit');
+      return;
+    }
+
+    // Store original document name
+    originalDocumentName = currentlyViewedDocument;
+
+    // Update modal UI for edit mode
+    const modalTitle = document.querySelector('#insertModalOverlay .modal-title') as HTMLElement;
+    if (modalTitle) modalTitle.textContent = 'Edit Document';
+    if (confirmInsert) confirmInsert.textContent = 'Edit';
+
+    // Fetch the document content
+    const content = await fetchDocumentContentByName(currentlyViewedDocument);
+
+    // Prefill the modal with document data (name is read-only during edit)
+    insertIdInput.value = currentlyViewedDocument;
+    insertIdInput.disabled = true; // Disable name editing
+    jsonToFields(content); // Populate fields from content
+
+    // Open the modal
+    const insertModal = document.getElementById('insertModalOverlay');
+    insertModal?.classList.add('show');
+
+    console.log('Edit modal opened for document:', currentlyViewedDocument);
+  } catch (e) {
+    showError('Failed to load document for editing: ' + getErrorMessage(e));
+  }
+}
+
 // =========================
 // Event Handlers
 // =========================
@@ -430,29 +676,47 @@ async function handleInsertDocument(): Promise<void> {
   try {
     clearError();
     const id = insertIdInput.value.trim();
-    const jsonText = insertJsonInput.value.trim();
 
-    if (!id || !jsonText) {
-      showError('Please provide both ID and JSON data');
+    if (!id) {
+      showError('Please provide a document name');
       return;
     }
 
-    const data = JSON.parse(jsonText) as Record<string, unknown>;
-    const exists = allDocuments.some((doc) => getDocumentId(doc) === id);
-    const success = exists ? await updateDocument(id, data) : await createDocument(id, data);
+    const data = fieldsToJson();
+
+    if (Object.keys(data).length === 0) {
+      showError('Please add at least one field');
+      return;
+    }
+
+    // Check if we're in edit mode (originalDocumentName is set)
+    const isEditMode = originalDocumentName !== null;
+    const success =
+      isEditMode && originalDocumentName
+        ? await updateDocument(originalDocumentName, data)
+        : await createDocument(id, data);
 
     if (success) {
       insertIdInput.value = '';
-      insertJsonInput.value = '';
+      insertIdInput.disabled = false; // Re-enable name input
+      clearDocumentFields();
       documentView.value = '';
       currentlyViewedDocument = null;
+      originalDocumentName = null; // Reset edit state
       updateDeleteButtonVisibility();
-      console.log(`Document ${exists ? 'updated' : 'created'} successfully`);
+      console.log(`Document ${isEditMode ? 'updated' : 'created'} successfully`);
+
+      // Close the modal
+      const insertModal = document.getElementById('insertModalOverlay');
+      insertModal?.classList.remove('show');
+
+      // Refresh the complete document list from backend
+      await handleRefreshDocuments();
     } else {
-      showError(`Failed to ${exists ? 'update' : 'create'} document`);
+      showError(`Failed to ${isEditMode ? 'update' : 'create'} document`);
     }
   } catch (e) {
-    showError('Invalid JSON or error: ' + getErrorMessage(e));
+    showError('Invalid data or error: ' + getErrorMessage(e));
   }
 }
 
@@ -470,14 +734,6 @@ insertDocument.addEventListener('click', () => {
 
 confirmInsert.addEventListener('click', () => {
   void handleInsertDocument();
-});
-
-// Allow Enter key to submit document insert
-insertIdInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    confirmInsert.click();
-  }
 });
 
 confirmDelete.addEventListener('click', () => {
@@ -650,7 +906,11 @@ function initializeModals(): void {
   const cancelInsertBtn = document.getElementById('cancelInsert');
   const confirmInsertBtn = document.getElementById('confirmInsert');
   const nameInput = document.getElementById('insertIdInput') as HTMLInputElement;
-  const jsonInput = document.getElementById('insertJsonInput') as HTMLTextAreaElement;
+
+  // Add Field button
+  addFieldBtn.addEventListener('click', () => {
+    addDocumentField();
+  });
 
   // Delete modal
   deleteBtn?.addEventListener('click', () => {
@@ -663,21 +923,39 @@ function initializeModals(): void {
 
   // Insert modal
   insertBtn?.addEventListener('click', () => {
+    originalDocumentName = null; // Reset edit mode
+    insertIdInput.disabled = false; // Enable name input for new document
+    const modalTitle = document.querySelector('#insertModalOverlay .modal-title') as HTMLElement;
+    if (modalTitle) modalTitle.textContent = 'Insert New Document';
+    if (confirmInsertBtn) confirmInsertBtn.textContent = 'Insert';
+    if (nameInput) nameInput.value = '';
+    clearDocumentFields();
+    addDocumentField(); // Start with one empty field
     insertModal?.classList.add('show');
     nameInput?.focus();
   });
 
   cancelInsertBtn?.addEventListener('click', () => {
+    originalDocumentName = null;
+    insertIdInput.disabled = false;
     insertModal?.classList.remove('show');
     if (nameInput) nameInput.value = '';
-    if (jsonInput) jsonInput.value = '';
+    clearDocumentFields();
   });
 
   // Close insert modal when confirm button is clicked
   confirmInsertBtn?.addEventListener('click', () => {
+    originalDocumentName = null;
+    insertIdInput.disabled = false;
     insertModal?.classList.remove('show');
     if (nameInput) nameInput.value = '';
-    if (jsonInput) jsonInput.value = '';
+    clearDocumentFields();
+  });
+
+  // Edit button
+  const editBtn = document.getElementById('editDocument');
+  editBtn?.addEventListener('click', () => {
+    void handleEditDocument();
   });
 
   // Close modals when clicking overlay
@@ -689,9 +967,11 @@ function initializeModals(): void {
 
   insertModal?.addEventListener('click', (e) => {
     if (e.target === insertModal) {
+      originalDocumentName = null;
+      insertIdInput.disabled = false;
       insertModal.classList.remove('show');
       if (nameInput) nameInput.value = '';
-      if (jsonInput) jsonInput.value = '';
+      clearDocumentFields();
     }
   });
 
@@ -702,9 +982,11 @@ function initializeModals(): void {
         deleteModal.classList.remove('show');
       }
       if (insertModal?.classList.contains('show')) {
+        originalDocumentName = null;
+        insertIdInput.disabled = false;
         insertModal.classList.remove('show');
         if (nameInput) nameInput.value = '';
-        if (jsonInput) jsonInput.value = '';
+        clearDocumentFields();
       }
     }
     // Enter key confirms delete when delete modal is open

@@ -28,6 +28,7 @@
             <div class="meta">Documents List</div>
             <div class="header-buttons">
               <button id="deleteDocument" class="btn btn-ghost" style="display: none">Delete</button>
+              <button id="editDocument" class="btn btn-ghost" style="display: none">Edit</button>
               <button id="refreshDocuments" class="btn btn-ghost">Refresh</button>
               <button id="insertDocument" class="btn btn-primary">Insert Document</button>
             </div>
@@ -133,12 +134,23 @@
 
     <!-- Modal for inserting document -->
     <div id="insertModalOverlay" class="modal-overlay">
-      <div class="modal-content">
+      <div class="modal-content" style="max-width: 600px">
         <h2 class="modal-title">Insert New Document</h2>
         <label for="insertIdInput">Document name</label>
         <input id="insertIdInput" type="text" placeholder="name of the document" />
-        <label for="insertJsonInput">Document JSON</label>
-        <textarea id="insertJsonInput" placeholder='{"name": "Alice", "age": 30}' style="min-height: 120px"></textarea>
+
+        <div class="spacer"></div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px">
+          <label style="margin: 0">Document Fields</label>
+          <button id="addFieldBtn" class="btn btn-ghost" type="button" style="padding: 8px 12px; font-size: 14px">
+            + Add Field
+          </button>
+        </div>
+
+        <div id="documentFields" style="max-height: 400px; overflow-y: auto; margin-bottom: 16px">
+          <!-- Dynamic fields will be added here -->
+        </div>
+
         <div class="actions">
           <button id="cancelInsert" class="btn btn-ghost">Cancel</button>
           <button id="confirmInsert" class="btn btn-primary">Insert</button>

@@ -5,30 +5,35 @@ A lightweight web interface for SimpleDBMS - a document database management syst
 ## Getting Started
 
 ### Prerequisites
+
 - Node.js (v18 or higher)
 - npm
 
 ### Installation & Setup
 
 1. **Clone the repository**
+
    ```bash
    git clone <repository-url>
    cd team-09
    ```
 
 2. **Install dependencies**
+
    ```bash
    npm install
    ```
 
 3. **Configure environment variables**
-   
+
    Create a `.env` file in the project root:
+
    ```bash
    touch .env
    ```
 
    Add the following configuration to `.env`:
+
    ```env
    PORT=3000
    JWT_SECRET=my-super-secret-jwt-key-change-this-in-production-12345
@@ -40,10 +45,11 @@ A lightweight web interface for SimpleDBMS - a document database management syst
    - `JWT_SECRET`: Used to sign and verify JSON Web Tokens for API authentication. Should be a long, random string.
    - `SESSION_SECRET`: Used to sign session cookies for browser-based authentication. Should be a different random string.
    - `ENCRYPTION_KEY`: 64-character hex string used to encrypt/decrypt document content. **Critical:** If this changes, all existing encrypted documents become unreadable.
-   
+
    > In production, use strong random strings. Generate with `openssl rand -base64 32` for JWT/SESSION secrets or `openssl rand -hex 32` for ENCRYPTION_KEY.
 
 4. **Build and run the server**
+
    ```bash
    npm run dev
    ```
@@ -53,6 +59,7 @@ A lightweight web interface for SimpleDBMS - a document database management syst
 ## Usage
 
 Once the server is running, open your browser and navigate to:
+
 - **Main Dashboard**: `http://localhost:3000/`
 - **Login**: `http://localhost:3000/login.html`
 - **Signup**: `http://localhost:3000/signup.html`
@@ -62,10 +69,12 @@ Once the server is running, open your browser and navigate to:
 The project includes a pre-populated demo account for testing and demonstrations. When you create a new database, a demo account is automatically created with sample data including customers, products, orders, inventory, and analytics.
 
 **Demo Credentials:**
+
 - **Username**: `demo`
 - **Password**: `demo123`
 
 The demo account includes:
+
 - 5 collections (customers, products, orders, inventory, analytics)
 - 50+ documents with realistic data
 - Nested objects and arrays to showcase complex data structures
@@ -103,11 +112,13 @@ frontend/
 To start fresh with a blank database:
 
 1. **Stop the server** (if running)
+
    ```bash
    # Press Ctrl+C in the terminal running the server
    ```
 
 2. **Reset the database**
+
    ```bash
    npm run reset-db
    ```

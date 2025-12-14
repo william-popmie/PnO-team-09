@@ -16,7 +16,8 @@
     "prettier-check": "prettier --check src/",
     "prettier-fix": "prettier --write src/",
     "trivialdbms.test": "tsx src/trivialdbms.test.mts",
-    "dev": "tsc --build && node build/simpledbmsd.mjs"
+    "dev": "tsc --build && node build/simpledbmsd.mjs",
+    "reset-db": "rm -f mydb.db mydb.wal testdb && rm -rf test_files/ && echo 'Database reset complete. Run npm run dev to start with fresh database.'"
   },
   "devDependencies": {
     "@eslint/js": "9.39.0",
@@ -43,6 +44,7 @@
     "argon2": "0.44.0",
     "bcryptjs": "3.0.3",
     "cors": "2.8.5",
+    "dotenv": "17.2.3",
     "express": "^4.18.2",
     "express-session": "1.18.2",
     "jsonwebtoken": "9.0.2",

@@ -2,6 +2,7 @@
 // also used Claude to help with debugging
 // @date 2025-11-22
 
+import 'dotenv/config';
 import express from 'express';
 import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
@@ -19,6 +20,8 @@ import {
   type AuthenticatedRequest,
 } from './authentication.mjs';
 import { PasswordHasher } from './password-hashing.mjs';
+import { readFile } from 'fs/promises';
+import { existsSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -74,12 +77,100 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 let db: SimpleDBMS;
 
+/**
+ * Load dummy demo account data from JSON file
+ * This creates a demo user with pre-populated collections and documents
+ */
+async function loadDummyAccount() {
+  try {
+    const dummyDataPath = path.join(__dirname, '../data/dummy-account.json');
+
+    if (!existsSync(dummyDataPath)) {
+      console.log('No dummy-account.json found, skipping demo data initialization.');
+      return;
+    }
+
+    const dummyDataContent = await readFile(dummyDataPath, 'utf-8');
+    const dummyData = JSON.parse(dummyDataContent) as {
+      username: string;
+      password: string;
+      collections: Array<{
+        name: string;
+        documents: Array<{
+          name: string;
+          content: Record<string, unknown>;
+        }>;
+      }>;
+    };
+
+    // Check if demo user already exists
+    const usersCollection = await db.getCollection('users');
+    const existingUsers = await usersCollection.find();
+    const demoUserExists = existingUsers.some((user) => {
+      const userData = user as unknown as { username: string };
+      return userData.username && userData.username.toLowerCase() === dummyData.username.toLowerCase();
+    });
+
+    if (demoUserExists) {
+      console.log('Demo user already exists, skipping initialization.');
+      return;
+    }
+
+    console.log('Creating demo account...');
+
+    // Hash the password
+    const hashedPassword = await passwordHasher.hashPassword(dummyData.password);
+
+    // Create collections list
+    const collectionNames = dummyData.collections.map((col) => col.name);
+
+    // Create the demo user
+    const demoUser = await usersCollection.insert({
+      username: dummyData.username,
+      password: hashedPassword,
+      collections: collectionNames,
+      createdAt: new Date().toISOString(),
+    });
+
+    console.log(`Demo user '${dummyData.username}' created with ID: ${demoUser.id}`);
+
+    // Create collections and insert documents
+    for (const collectionData of dummyData.collections) {
+      const collection = await db.getCollection(collectionData.name);
+      console.log(`  Creating collection: ${collectionData.name}`);
+
+      for (const docData of collectionData.documents) {
+        // Encrypt the document content
+        const encryptedBuffer = encryptionService.encrypt(Buffer.from(JSON.stringify(docData.content)));
+
+        await collection.insert({
+          name: docData.name,
+          userId: demoUser.id,
+          createdAt: new Date().toISOString(),
+          content: encryptedBuffer.toString('base64') as unknown as Record<string, DocumentValue>,
+        });
+      }
+
+      console.log(`    Added ${collectionData.documents.length} documents to ${collectionData.name}`);
+    }
+
+    console.log(
+      `Demo account setup complete! Login with username: '${dummyData.username}' password: '${dummyData.password}'`,
+    );
+  } catch (error) {
+    console.error('Failed to load dummy account:', error);
+    // Don't throw - this is optional initialization
+  }
+}
+
 async function initDB(customDbPath?: string, customWalPath?: string) {
   try {
     const dbPath = customDbPath || process.argv[2] || 'mydb.db';
     const walPath = customWalPath || process.argv[3] || 'mydb.wal';
     const dbFile = new RealFile(dbPath);
     const walFile = new RealFile(walPath);
+    let isNewDatabase = false;
+
     try {
       db = await SimpleDBMS.open(dbFile, walFile);
       console.log('Database opened successfully.');
@@ -91,9 +182,15 @@ async function initDB(customDbPath?: string, customWalPath?: string) {
       await walFile.close();
       db = await SimpleDBMS.create(dbFile, walFile);
       console.log('Database created successfully.');
+      isNewDatabase = true;
     }
 
     encryptionService = EncryptionService.fromHexKey(masterKey);
+
+    // Load dummy account data if this is a new database
+    if (isNewDatabase) {
+      await loadDummyAccount();
+    }
   } catch (error) {
     console.error('Failed to initialize database:', error);
     throw error;
@@ -1216,4 +1313,4 @@ if (process.env['NODE_ENV'] !== 'test') {
     });
 }
 
-export { app, initDB };
+export { app, loadDummyAccount, initDB };

@@ -3,7 +3,7 @@
 
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { app, initDB } from './simpledbmsd.mjs';
+import { app, initDB, loadDummyAccount } from './simpledbmsd.mjs';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -18,6 +18,8 @@ describe('SimpleDBMS Daemon API', () => {
     dbPath = path.join(tempDir, 'test.db');
     walPath = path.join(tempDir, 'test.wal');
     await initDB(dbPath, walPath);
+    // Load dummy account data for testing
+    await loadDummyAccount();
   });
 
   afterAll(async () => {
@@ -331,6 +333,24 @@ describe('SimpleDBMS Daemon API', () => {
         .send({ collectionName, documentName: 'Unauthorized', documentContent: {} });
 
       expect(res.status).toBe(401);
+    });
+  });
+
+  describe('Dummy Account Data', () => {
+    let demoToken: string;
+
+    beforeAll(async () => {
+      // Login with demo account
+      const loginRes = await request(app).post('/api/login').send({ username: 'demo', password: 'demo12345' });
+      demoToken = (loginRes.body as { token: string }).token;
+    });
+
+    it('should login with demo account', async () => {
+      const res = await request(app).post('/api/login').send({ username: 'demo', password: 'demo12345' });
+
+      expect(res.status).toBe(200);
+      expect((res.body as { success?: boolean }).success).toBe(true);
+      expect((res.body as { token?: string }).token).toBeDefined();
     });
   });
 });

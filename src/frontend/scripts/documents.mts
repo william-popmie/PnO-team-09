@@ -130,10 +130,6 @@ async function fetchDocuments(): Promise<Array<Record<string, unknown>>> {
     };
     console.log(documents.message);
 
-    //remove duplicates
-    const uniqueNames = Array.from(new Set(documents.documentNames));
-    documents.documentNames = uniqueNames;
-
     // Map document names to objects to satisfy the return type expected by the UI
     return documents.documentNames.map((name) => ({ id: name, name: name }));
   } catch (error) {

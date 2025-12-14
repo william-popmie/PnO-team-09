@@ -736,6 +736,8 @@ export class Collection {
       }
     }
 
+    // Delete old entry from primary tree and insert updated one
+    await this.primaryTree.delete(id);
     await this.primaryTree.insert(id, updated);
 
     if (this.onChangeCallback) {

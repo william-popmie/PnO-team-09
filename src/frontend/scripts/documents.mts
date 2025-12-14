@@ -36,6 +36,7 @@ const errorDiv = getEl<HTMLDivElement>('error');
 // =========================
 const allDocuments: Array<Record<string, unknown>> = [];
 let currentlyViewedDocument: string | null = null;
+let originalDocumentName: string | null = null; // Track which document is being edited
 const currentCollection = new URLSearchParams(window.location.search).get('collection') || 'unknown';
 collectionNameSpan.textContent = currentCollection;
 
@@ -82,6 +83,8 @@ function clearDocumentView(): void {
  */
 function updateDeleteButtonVisibility(): void {
   deleteDocumentBtn.style.display = currentlyViewedDocument ? 'block' : 'none';
+  const editBtn = document.getElementById('editDocument');
+  if (editBtn) editBtn.style.display = currentlyViewedDocument ? 'block' : 'none';
 }
 
 /**
@@ -126,6 +129,10 @@ async function fetchDocuments(): Promise<Array<Record<string, unknown>>> {
       documentNames: string[];
     };
     console.log(documents.message);
+
+    //remove duplicates
+    const uniqueNames = Array.from(new Set(documents.documentNames));
+    documents.documentNames = uniqueNames;
 
     // Map document names to objects to satisfy the return type expected by the UI
     return documents.documentNames.map((name) => ({ id: name, name: name }));
@@ -193,10 +200,6 @@ async function createDocument(id: string, content: Record<string, unknown>): Pro
     const result = (await response.json()) as { success: boolean; message: string };
     console.log('Document created:', result.message);
 
-    // Refresh documents list after creation
-    const documents = await fetchDocuments();
-    allDocuments.splice(0, allDocuments.length, ...documents);
-    renderDocuments(allDocuments);
     return result.success;
   } catch (error) {
     console.error('Failed to create document:', error);
@@ -219,8 +222,8 @@ async function updateDocument(id: string, data: Record<string, unknown>): Promis
       method: 'PUT',
       body: JSON.stringify({
         collectionName: currentCollection,
-        documentData: data,
-        id: id,
+        documentName: id,
+        newDocumentContent: data,
       }),
     });
 
@@ -235,10 +238,6 @@ async function updateDocument(id: string, data: Record<string, unknown>): Promis
     const result = (await response.json()) as { success: boolean; message: string };
     console.log('Document updated:', result);
 
-    // Refresh documents list after update
-    const documents = await fetchDocuments();
-    allDocuments.splice(0, allDocuments.length, ...documents);
-    renderDocuments(allDocuments);
     return true;
   } catch (error) {
     console.error('Failed to update document:', error);
@@ -254,7 +253,7 @@ async function updateDocument(id: string, data: Record<string, unknown>): Promis
  */
 async function deleteDocument(id: string): Promise<boolean> {
   try {
-    console.log('🗑️ Deleting document via API:', id);
+    console.log('Deleting document via API:', id);
 
     const response = await authenticatedFetch(`${API_BASE}/api/deleteDocument`, {
       method: 'DELETE',
@@ -278,7 +277,7 @@ async function deleteDocument(id: string): Promise<boolean> {
     }
 
     const result = (await response.json()) as { success: boolean; message: string };
-    console.log('✅ Document deleted:', result.message);
+    console.log('Document deleted:', result.message);
 
     // Clear document view if the deleted document was being viewed
     if (currentlyViewedDocument === id) {
@@ -401,6 +400,47 @@ async function handleDeleteDocument(): Promise<void> {
   }
 }
 
+/**
+ * Handles edit document button click - opens modal with document data for editing
+ * @return {void}
+ * @throws {Error} Handled internally and displayed to user via showError
+ */
+async function handleEditDocument(): Promise<void> {
+  try {
+    clearError();
+
+    if (!currentlyViewedDocument) {
+      showError('No document selected to edit');
+      return;
+    }
+
+    // Store original document name
+    originalDocumentName = currentlyViewedDocument;
+
+    // Update modal UI for edit mode
+    const modalTitle = document.querySelector('#insertModalOverlay .modal-title') as HTMLElement;
+    if (modalTitle) modalTitle.textContent = 'Edit Document';
+    if (confirmInsert) confirmInsert.textContent = 'Edit';
+
+    // Fetch the document content
+    const content = await fetchDocumentContentByName(currentlyViewedDocument);
+
+    // Prefill the modal with document data (name is read-only during edit)
+    insertIdInput.value = currentlyViewedDocument;
+    insertIdInput.disabled = true; // Disable name editing
+    insertJsonInput.value = JSON.stringify(content, null, 2);
+
+    // Open the modal
+    const insertModal = document.getElementById('insertModalOverlay');
+    insertModal?.classList.add('show');
+    insertJsonInput.focus();
+
+    console.log('Edit modal opened for document:', currentlyViewedDocument);
+  } catch (e) {
+    showError('Failed to load document for editing: ' + getErrorMessage(e));
+  }
+}
+
 // =========================
 // Event Handlers
 // =========================
@@ -438,18 +478,32 @@ async function handleInsertDocument(): Promise<void> {
     }
 
     const data = JSON.parse(jsonText) as Record<string, unknown>;
-    const exists = allDocuments.some((doc) => getDocumentId(doc) === id);
-    const success = exists ? await updateDocument(id, data) : await createDocument(id, data);
+
+    // Check if we're in edit mode (originalDocumentName is set)
+    const isEditMode = originalDocumentName !== null;
+    const success =
+      isEditMode && originalDocumentName
+        ? await updateDocument(originalDocumentName, data)
+        : await createDocument(id, data);
 
     if (success) {
       insertIdInput.value = '';
+      insertIdInput.disabled = false; // Re-enable name input
       insertJsonInput.value = '';
       documentView.value = '';
       currentlyViewedDocument = null;
+      originalDocumentName = null; // Reset edit state
       updateDeleteButtonVisibility();
-      console.log(`Document ${exists ? 'updated' : 'created'} successfully`);
+      console.log(`Document ${isEditMode ? 'updated' : 'created'} successfully`);
+
+      // Close the modal
+      const insertModal = document.getElementById('insertModalOverlay');
+      insertModal?.classList.remove('show');
+
+      // Refresh the complete document list from backend
+      await handleRefreshDocuments();
     } else {
-      showError(`Failed to ${exists ? 'update' : 'create'} document`);
+      showError(`Failed to ${isEditMode ? 'update' : 'create'} document`);
     }
   } catch (e) {
     showError('Invalid JSON or error: ' + getErrorMessage(e));
@@ -663,11 +717,20 @@ function initializeModals(): void {
 
   // Insert modal
   insertBtn?.addEventListener('click', () => {
+    originalDocumentName = null; // Reset edit mode
+    insertIdInput.disabled = false; // Enable name input for new document
+    const modalTitle = document.querySelector('#insertModalOverlay .modal-title') as HTMLElement;
+    if (modalTitle) modalTitle.textContent = 'Insert New Document';
+    if (confirmInsertBtn) confirmInsertBtn.textContent = 'Insert';
+    if (nameInput) nameInput.value = '';
+    if (jsonInput) jsonInput.value = '';
     insertModal?.classList.add('show');
     nameInput?.focus();
   });
 
   cancelInsertBtn?.addEventListener('click', () => {
+    originalDocumentName = null;
+    insertIdInput.disabled = false;
     insertModal?.classList.remove('show');
     if (nameInput) nameInput.value = '';
     if (jsonInput) jsonInput.value = '';
@@ -675,9 +738,17 @@ function initializeModals(): void {
 
   // Close insert modal when confirm button is clicked
   confirmInsertBtn?.addEventListener('click', () => {
+    originalDocumentName = null;
+    insertIdInput.disabled = false;
     insertModal?.classList.remove('show');
     if (nameInput) nameInput.value = '';
     if (jsonInput) jsonInput.value = '';
+  });
+
+  // Edit button
+  const editBtn = document.getElementById('editDocument');
+  editBtn?.addEventListener('click', () => {
+    void handleEditDocument();
   });
 
   // Close modals when clicking overlay
@@ -689,6 +760,8 @@ function initializeModals(): void {
 
   insertModal?.addEventListener('click', (e) => {
     if (e.target === insertModal) {
+      originalDocumentName = null;
+      insertIdInput.disabled = false;
       insertModal.classList.remove('show');
       if (nameInput) nameInput.value = '';
       if (jsonInput) jsonInput.value = '';
@@ -702,6 +775,8 @@ function initializeModals(): void {
         deleteModal.classList.remove('show');
       }
       if (insertModal?.classList.contains('show')) {
+        originalDocumentName = null;
+        insertIdInput.disabled = false;
         insertModal.classList.remove('show');
         if (nameInput) nameInput.value = '';
         if (jsonInput) jsonInput.value = '';

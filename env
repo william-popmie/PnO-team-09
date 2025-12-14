@@ -1,0 +1,2 @@
+JWT_SECRET=my-super-secret-jwt-key-change-this-in-production-12345
+ENCRYPTION_KEY=293cec95e993a8616da16817bd42fcd1a12c81f2591812c7aa50939ccb3dd8c8

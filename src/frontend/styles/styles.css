@@ -2,14 +2,16 @@
    @date 2025-19-11 */
 
 :root {
-  --bg: #0f1724; /* deep navy */
-  --card: #0b1220;
-  --muted: #9aa4b2;
-  --accent: #5eead4; /* mint */
-  --accent-2: #60a5fa; /* blue */
-  --glass: rgba(255, 255, 255, 0.03);
-  --error: #ef4444; /* red */
-  --success: #22c55e; /* green */
+  --bg: #0a0a0a; /* pitch deck dark */
+  --card: #1a1a1a;
+  --muted: #a0a0a0;
+  --accent: #00bfff; /* bright blue */
+  --accent-2: #0099ff; /* deeper blue */
+  --accent-highlight: #00d4ff; /* cyan highlight */
+  --glass: rgba(255, 255, 255, 0.04);
+  --error: #ff3b3b; /* vibrant red */
+  --success: #00ff88; /* neon green */
+  --border: rgba(0, 191, 255, 0.15);
 }
 html,
 body {
@@ -26,10 +28,10 @@ body {
     'Helvetica Neue',
     Arial;
   margin: 0;
-  background: #0f1724;
-  color: #e6eef6;
+  background: var(--bg);
+  color: #ffffff;
   -webkit-font-smoothing: antialiased;
-  font-size: 16px; /* Base font size verhoogd */
+  font-size: 16px;
   line-height: 1.5;
 }
 .container {
@@ -62,14 +64,15 @@ header {
   align-items: center;
   justify-content: center;
   font-weight: 700;
-  color: #04203a;
-  box-shadow: 0 6px 18px rgba(2, 6, 23, 0.6);
+  color: #000000;
+  box-shadow: 0 8px 24px rgba(0, 191, 255, 0.3);
   font-size: 18px;
 }
 h1 {
   font-size: 28px;
   margin: 0;
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: -0.5px;
 }
 p.lead {
   margin: 0;
@@ -86,8 +89,8 @@ p.lead {
   background: var(--card);
   border-radius: 12px;
   padding: 24px;
-  box-shadow: 0 6px 18px rgba(2, 6, 23, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.03);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--border);
 }
 label {
   display: block;
@@ -102,11 +105,19 @@ textarea {
   width: 100%;
   padding: 14px;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.04);
-  background: var(--glass);
+  border: 1px solid rgba(0, 191, 255, 0.2);
+  background: rgba(26, 26, 26, 0.8);
   color: inherit;
   font-size: 16px;
   box-sizing: border-box;
+  transition: all 0.2s ease;
+}
+input[type='text']:focus,
+input[type='password']:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(0, 191, 255, 0.1);
 }
 input::placeholder {
   color: var(--muted);
@@ -132,16 +143,29 @@ textarea {
 }
 .btn-primary {
   background: var(--accent);
-  color: #04203a;
+  color: #000000;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  font-size: 14px;
 }
 .btn-primary:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(94, 234, 212, 0.3);
+  box-shadow: 0 6px 20px rgba(0, 191, 255, 0.4);
+  background: var(--accent-highlight);
 }
 .btn-ghost {
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  color: var(--muted);
+  border: 1px solid rgba(0, 191, 255, 0.3);
+  color: var(--accent);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 14px;
+  letter-spacing: 0.3px;
+}
+.btn-ghost:hover {
+  background: rgba(0, 191, 255, 0.1);
+  border-color: var(--accent);
 }
 
 #documentsView {
@@ -197,8 +221,8 @@ footer {
   background: rgba(255, 255, 255, 0.02);
 }
 .collection-item.selected {
-  background: rgba(94, 234, 212, 0.1);
-  border: 1px solid rgba(94, 234, 212, 0.2);
+  background: rgba(0, 191, 255, 0.15);
+  border: 1px solid var(--accent);
 }
 .collection-checkbox {
   width: 16px;
@@ -220,7 +244,7 @@ footer {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #0f1724;
+  background: var(--bg);
 }
 .login-card {
   width: 100%;
@@ -301,16 +325,17 @@ footer {
   background: var(--card);
   border-radius: 12px;
   padding: 24px;
-  box-shadow: 0 12px 32px rgba(2, 6, 23, 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.8), 0 0 0 1px var(--border);
+  border: 1px solid var(--border);
   min-width: 400px;
   max-width: 90vw;
 }
 .modal-title {
   font-size: 18px;
-  font-weight: 600;
+  font-weight: 700;
   margin: 0 0 16px 0;
-  color: #e6eef6;
+  color: #ffffff;
+  letter-spacing: -0.3px;
 }
 .modal-content .actions {
   margin-top: 16px;
@@ -336,8 +361,9 @@ footer {
   border-color: rgba(255, 255, 255, 0.1);
 }
 .document-item.selected {
-  background: rgba(94, 234, 212, 0.1);
+  background: rgba(0, 191, 255, 0.1);
   border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(0, 191, 255, 0.3);
 }
 .document-item.viewing {
   background: rgba(96, 165, 250, 0.15);

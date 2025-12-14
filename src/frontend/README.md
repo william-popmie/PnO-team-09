@@ -33,13 +33,15 @@ A lightweight web interface for SimpleDBMS - a document database management syst
    PORT=3000
    JWT_SECRET=my-super-secret-jwt-key-change-this-in-production-12345
    SESSION_SECRET=my-session-secret-key-also-change-this-67890
+   ENCRYPTION_KEY=my-encryption-secret-key-also-change-this-37151
    ```
 
    **About the secrets:**
    - `JWT_SECRET`: Used to sign and verify JSON Web Tokens for API authentication. Should be a long, random string.
    - `SESSION_SECRET`: Used to sign session cookies for browser-based authentication. Should be a different random string.
+   - `ENCRYPTION_KEY`: 64-character hex string used to encrypt/decrypt document content. **Critical:** If this changes, all existing encrypted documents become unreadable.
    
-   > ⚠️ In production, use strong random strings (e.g., generate with `openssl rand -base64 32`)
+   > ⚠️ In production, use strong random strings. Generate with `openssl rand -base64 32` for JWT/SESSION secrets or `openssl rand -hex 32` for ENCRYPTION_KEY.
 
 4. **Build and run the server**
    ```bash

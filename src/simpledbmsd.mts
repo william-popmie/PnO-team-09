@@ -2,6 +2,7 @@
 // also used Claude to help with debugging
 // @date 2025-11-22
 
+import 'dotenv/config';
 import express from 'express';
 import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';

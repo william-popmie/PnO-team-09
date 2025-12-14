@@ -351,6 +351,12 @@ describe('SimpleDBMS Daemon API', () => {
       expect(res.status).toBe(200);
       expect((res.body as { success?: boolean }).success).toBe(true);
       expect((res.body as { token?: string }).token).toBeDefined();
+
+      // Verify the demoToken from beforeAll is valid
+      const collectionsRes = await request(app)
+        .get('/api/fetchCollections')
+        .set('Authorization', `Bearer ${demoToken}`);
+      expect(collectionsRes.status).toBe(200);
     });
   });
 });

@@ -41,7 +41,7 @@ A lightweight web interface for SimpleDBMS - a document database management syst
    - `SESSION_SECRET`: Used to sign session cookies for browser-based authentication. Should be a different random string.
    - `ENCRYPTION_KEY`: 64-character hex string used to encrypt/decrypt document content. **Critical:** If this changes, all existing encrypted documents become unreadable.
    
-   > ⚠️ In production, use strong random strings. Generate with `openssl rand -base64 32` for JWT/SESSION secrets or `openssl rand -hex 32` for ENCRYPTION_KEY.
+   > In production, use strong random strings. Generate with `openssl rand -base64 32` for JWT/SESSION secrets or `openssl rand -hex 32` for ENCRYPTION_KEY.
 
 4. **Build and run the server**
    ```bash

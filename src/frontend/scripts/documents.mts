@@ -27,9 +27,10 @@ const deleteDocumentBtn = getEl<HTMLButtonElement>('deleteDocument');
 const confirmInsert = getEl<HTMLButtonElement>('confirmInsert');
 const confirmDelete = getEl<HTMLButtonElement>('confirmDelete');
 const insertIdInput = getEl<HTMLInputElement>('insertIdInput');
-const insertJsonInput = getEl<HTMLTextAreaElement>('insertJsonInput');
 const documentView = getEl<HTMLTextAreaElement>('documentView');
 const errorDiv = getEl<HTMLDivElement>('error');
+const documentFieldsContainer = getEl<HTMLDivElement>('documentFields');
+const addFieldBtn = getEl<HTMLButtonElement>('addFieldBtn');
 
 // =========================
 // State Management
@@ -71,10 +72,219 @@ function clearError(): void {
 function clearDocumentView(): void {
   documentView.value = '';
   insertIdInput.value = '';
-  insertJsonInput.value = '';
+  clearDocumentFields();
   currentlyViewedDocument = null;
   updateDeleteButtonVisibility();
   renderDocuments(allDocuments); // Re-render to remove viewing highlight
+}
+
+/**
+ * Adds a new key-value field row to the document fields container with nested object support
+ * @param {string} key - The field key
+ * @param {unknown} value - The field value (can be primitive or object)
+ * @param {number} level - Nesting level for indentation
+ * @param {HTMLElement} parent - Parent container element
+ * @return {HTMLElement} The created field row element
+ */
+function addDocumentField(key = '', value: unknown = '', level = 0, parent?: HTMLElement): HTMLElement {
+  const container = parent || documentFieldsContainer;
+
+  // Main field row wrapper
+  const fieldRow = document.createElement('div');
+  fieldRow.className = 'field-row';
+  fieldRow.style.paddingLeft = `${level * 24}px`;
+  fieldRow.dataset['level'] = String(level);
+
+  // Row content (expand button + inputs + action buttons)
+  const rowContent = document.createElement('div');
+  rowContent.className = 'field-row-content';
+
+  // Expand/collapse button for nested objects
+  const expandBtn = document.createElement('button');
+  expandBtn.textContent = '▶';
+  expandBtn.type = 'button';
+  expandBtn.className = 'btn btn-ghost expand-btn';
+  expandBtn.dataset['expanded'] = 'false';
+
+  const keyInput = document.createElement('input');
+  keyInput.type = 'text';
+  keyInput.placeholder = 'Field name';
+  keyInput.value = key;
+  keyInput.className = 'field-key';
+
+  const valueInput = document.createElement('input');
+  valueInput.type = 'text';
+  valueInput.placeholder = 'Value (or add nested fields)';
+  valueInput.className = 'field-value';
+
+  // Add nested field button
+  const addNestedBtn = document.createElement('button');
+  addNestedBtn.textContent = '+';
+  addNestedBtn.type = 'button';
+  addNestedBtn.title = 'Add nested field';
+  addNestedBtn.className = 'btn add-nested-btn';
+
+  // Remove field button
+  const removeBtn = document.createElement('button');
+  removeBtn.textContent = '✕';
+  removeBtn.type = 'button';
+  removeBtn.className = 'btn remove-field-btn';
+
+  // Nested fields container
+  const nestedContainer = document.createElement('div');
+  nestedContainer.className = 'nested-fields';
+  nestedContainer.dataset['nested'] = 'true';
+
+  // Handle nested value if it's an object
+  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    // This field represents an object, show expand button
+    expandBtn.classList.add('visible');
+    expandBtn.dataset['expanded'] = 'true';
+    expandBtn.style.transform = 'rotate(90deg)';
+    nestedContainer.classList.add('visible');
+    valueInput.value = ''; // Empty value for objects
+    valueInput.disabled = true;
+    valueInput.placeholder = '(nested object)';
+
+    // Add nested fields recursively
+    for (const [nestedKey, nestedValue] of Object.entries(value as Record<string, unknown>)) {
+      addDocumentField(nestedKey, nestedValue, level + 1, nestedContainer);
+    }
+  } else if (value !== null && value !== undefined && value !== '') {
+    // Primitive value
+    if (typeof value === 'string') {
+      valueInput.value = value;
+    } else if (typeof value === 'boolean' || typeof value === 'number') {
+      valueInput.value = String(value);
+    } else {
+      valueInput.value = JSON.stringify(value);
+    }
+  }
+
+  // Expand/collapse functionality
+  expandBtn.addEventListener('click', () => {
+    const isExpanded = expandBtn.dataset['expanded'] === 'true';
+    expandBtn.dataset['expanded'] = String(!isExpanded);
+    expandBtn.style.transform = isExpanded ? 'rotate(0deg)' : 'rotate(90deg)';
+    nestedContainer.classList.toggle('visible', !isExpanded);
+  });
+
+  // Add nested field functionality
+  addNestedBtn.addEventListener('click', () => {
+    // Show nested container and expand button
+    if (!expandBtn.classList.contains('visible')) {
+      expandBtn.classList.add('visible');
+      expandBtn.dataset['expanded'] = 'true';
+      expandBtn.style.transform = 'rotate(90deg)';
+      nestedContainer.classList.add('visible');
+      valueInput.value = '';
+      valueInput.disabled = true;
+      valueInput.placeholder = '(nested object)';
+    }
+
+    // Add a new empty nested field
+    addDocumentField('', '', level + 1, nestedContainer);
+  });
+
+  // Remove field functionality
+  removeBtn.addEventListener('click', () => {
+    fieldRow.remove();
+  });
+
+  // Re-enable value input if nested container becomes empty
+  const observer = new MutationObserver(() => {
+    if (nestedContainer.children.length === 0) {
+      expandBtn.classList.remove('visible');
+      nestedContainer.classList.remove('visible');
+      valueInput.disabled = false;
+      valueInput.placeholder = 'Value (or add nested fields)';
+    }
+  });
+  observer.observe(nestedContainer, { childList: true });
+
+  // Assemble the field row
+  rowContent.appendChild(expandBtn);
+  rowContent.appendChild(keyInput);
+  rowContent.appendChild(valueInput);
+  rowContent.appendChild(addNestedBtn);
+  rowContent.appendChild(removeBtn);
+
+  fieldRow.appendChild(rowContent);
+  fieldRow.appendChild(nestedContainer);
+  container.appendChild(fieldRow);
+
+  return fieldRow;
+}
+
+/**
+ * Clears all document fields from the container
+ * @return {void}
+ */
+function clearDocumentFields(): void {
+  documentFieldsContainer.innerHTML = '';
+}
+
+/**
+ * Converts document fields to JSON object recursively
+ * @param {HTMLElement} container - The container element with field rows
+ * @return {Record<string, unknown>} The JSON object
+ */
+function fieldsToJson(container: HTMLElement = documentFieldsContainer): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+
+  // Get direct children field rows (not nested ones)
+  const fieldRows = Array.from(container.children).filter((child) => child.classList.contains('field-row'));
+
+  fieldRows.forEach((row) => {
+    const keyInput = row.querySelector('.field-key') as HTMLInputElement;
+    const valueInput = row.querySelector('.field-value') as HTMLInputElement;
+    const nestedContainer = row.querySelector('.nested-fields') as HTMLElement;
+
+    if (keyInput && keyInput.value.trim()) {
+      const key = keyInput.value.trim();
+
+      // Check if this field has nested children
+      if (nestedContainer && nestedContainer.children.length > 0) {
+        // Recursively process nested fields
+        result[key] = fieldsToJson(nestedContainer);
+      } else if (valueInput) {
+        // Process primitive value
+        let value: unknown = valueInput.value;
+
+        if (typeof value === 'string') {
+          // Smart type conversion for primitives
+          if (value === 'true') value = true;
+          else if (value === 'false') value = false;
+          else if (value === 'null') value = null;
+          else if (value === '') value = '';
+          else if (!isNaN(Number(value)) && value !== '') value = Number(value);
+        }
+
+        result[key] = value;
+      }
+    }
+  });
+
+  return result;
+}
+
+/**
+ * Populates document fields from JSON object recursively
+ * @param {Record<string, unknown>} data - The JSON object
+ * @return {void}
+ */
+function jsonToFields(data: Record<string, unknown>): void {
+  clearDocumentFields();
+
+  for (const [key, value] of Object.entries(data)) {
+    // addDocumentField now handles nested objects recursively
+    addDocumentField(key, value);
+  }
+
+  // Add one empty field if no fields exist
+  if (Object.keys(data).length === 0) {
+    addDocumentField();
+  }
 }
 
 /**
@@ -359,8 +569,9 @@ async function selectDocument(doc: Record<string, unknown>): Promise<void> {
     const docJson = JSON.stringify(documentContent, null, 2);
     documentView.value = docJson;
     insertIdInput.value = documentName;
-    insertJsonInput.value = docJson;
+    jsonToFields(documentContent); // Populate fields from content
     currentlyViewedDocument = documentName;
+    originalDocumentName = null; // Reset when viewing a document (not editing yet)
     renderDocuments(allDocuments); // Re-render to highlight viewed document
     updateDeleteButtonVisibility();
     console.log('Document content loaded:', documentContent);
@@ -424,12 +635,11 @@ async function handleEditDocument(): Promise<void> {
     // Prefill the modal with document data (name is read-only during edit)
     insertIdInput.value = currentlyViewedDocument;
     insertIdInput.disabled = true; // Disable name editing
-    insertJsonInput.value = JSON.stringify(content, null, 2);
+    jsonToFields(content); // Populate fields from content
 
     // Open the modal
     const insertModal = document.getElementById('insertModalOverlay');
     insertModal?.classList.add('show');
-    insertJsonInput.focus();
 
     console.log('Edit modal opened for document:', currentlyViewedDocument);
   } catch (e) {
@@ -466,14 +676,18 @@ async function handleInsertDocument(): Promise<void> {
   try {
     clearError();
     const id = insertIdInput.value.trim();
-    const jsonText = insertJsonInput.value.trim();
 
-    if (!id || !jsonText) {
-      showError('Please provide both ID and JSON data');
+    if (!id) {
+      showError('Please provide a document name');
       return;
     }
 
-    const data = JSON.parse(jsonText) as Record<string, unknown>;
+    const data = fieldsToJson();
+
+    if (Object.keys(data).length === 0) {
+      showError('Please add at least one field');
+      return;
+    }
 
     // Check if we're in edit mode (originalDocumentName is set)
     const isEditMode = originalDocumentName !== null;
@@ -485,7 +699,7 @@ async function handleInsertDocument(): Promise<void> {
     if (success) {
       insertIdInput.value = '';
       insertIdInput.disabled = false; // Re-enable name input
-      insertJsonInput.value = '';
+      clearDocumentFields();
       documentView.value = '';
       currentlyViewedDocument = null;
       originalDocumentName = null; // Reset edit state
@@ -502,7 +716,7 @@ async function handleInsertDocument(): Promise<void> {
       showError(`Failed to ${isEditMode ? 'update' : 'create'} document`);
     }
   } catch (e) {
-    showError('Invalid JSON or error: ' + getErrorMessage(e));
+    showError('Invalid data or error: ' + getErrorMessage(e));
   }
 }
 
@@ -520,14 +734,6 @@ insertDocument.addEventListener('click', () => {
 
 confirmInsert.addEventListener('click', () => {
   void handleInsertDocument();
-});
-
-// Allow Enter key to submit document insert
-insertIdInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    confirmInsert.click();
-  }
 });
 
 confirmDelete.addEventListener('click', () => {
@@ -700,7 +906,11 @@ function initializeModals(): void {
   const cancelInsertBtn = document.getElementById('cancelInsert');
   const confirmInsertBtn = document.getElementById('confirmInsert');
   const nameInput = document.getElementById('insertIdInput') as HTMLInputElement;
-  const jsonInput = document.getElementById('insertJsonInput') as HTMLTextAreaElement;
+
+  // Add Field button
+  addFieldBtn.addEventListener('click', () => {
+    addDocumentField();
+  });
 
   // Delete modal
   deleteBtn?.addEventListener('click', () => {
@@ -719,7 +929,8 @@ function initializeModals(): void {
     if (modalTitle) modalTitle.textContent = 'Insert New Document';
     if (confirmInsertBtn) confirmInsertBtn.textContent = 'Insert';
     if (nameInput) nameInput.value = '';
-    if (jsonInput) jsonInput.value = '';
+    clearDocumentFields();
+    addDocumentField(); // Start with one empty field
     insertModal?.classList.add('show');
     nameInput?.focus();
   });
@@ -729,7 +940,7 @@ function initializeModals(): void {
     insertIdInput.disabled = false;
     insertModal?.classList.remove('show');
     if (nameInput) nameInput.value = '';
-    if (jsonInput) jsonInput.value = '';
+    clearDocumentFields();
   });
 
   // Close insert modal when confirm button is clicked
@@ -738,7 +949,7 @@ function initializeModals(): void {
     insertIdInput.disabled = false;
     insertModal?.classList.remove('show');
     if (nameInput) nameInput.value = '';
-    if (jsonInput) jsonInput.value = '';
+    clearDocumentFields();
   });
 
   // Edit button
@@ -760,7 +971,7 @@ function initializeModals(): void {
       insertIdInput.disabled = false;
       insertModal.classList.remove('show');
       if (nameInput) nameInput.value = '';
-      if (jsonInput) jsonInput.value = '';
+      clearDocumentFields();
     }
   });
 
@@ -775,7 +986,7 @@ function initializeModals(): void {
         insertIdInput.disabled = false;
         insertModal.classList.remove('show');
         if (nameInput) nameInput.value = '';
-        if (jsonInput) jsonInput.value = '';
+        clearDocumentFields();
       }
     }
     // Enter key confirms delete when delete modal is open

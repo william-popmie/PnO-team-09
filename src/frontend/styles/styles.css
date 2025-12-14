@@ -390,3 +390,74 @@ footer {
     grid-template-columns: 1fr;
   }
 }
+
+/* Field Builder Styles */
+.field-row {
+  margin-bottom: 8px;
+}
+
+.field-row-content {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.expand-btn {
+  padding: 4px 8px;
+  min-width: auto;
+  font-size: 10px;
+  transition: transform 0.2s;
+  display: none;
+}
+
+.expand-btn.visible {
+  display: inline-block;
+}
+
+.field-key {
+  flex: 1;
+  min-width: 120px;
+}
+
+.field-value {
+  flex: 2;
+  min-width: 180px;
+}
+
+.add-nested-btn {
+  padding: 8px 12px;
+  min-width: auto;
+  background: rgba(34, 197, 94, 0.1);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.add-nested-btn:hover {
+  background: rgba(34, 197, 94, 0.2);
+  border-color: #22c55e;
+}
+
+.remove-field-btn {
+  padding: 8px 12px;
+  min-width: auto;
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.remove-field-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: #ef4444;
+}
+
+.nested-fields {
+  display: none;
+  margin-left: 32px;
+  margin-top: 8px;
+  padding-left: 12px;
+  border-left: 2px solid rgba(244, 114, 182, 0.3);
+}
+
+.nested-fields.visible {
+  display: block;
+}

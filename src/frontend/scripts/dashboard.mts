@@ -237,8 +237,9 @@ async function downloadAllStoredData(): Promise<void> {
  * Initialize the dashboard on page load
  */
 document.addEventListener('DOMContentLoaded', () => {
+  const sessionToken = localStorage.getItem('sessionToken');
   const username = localStorage.getItem('username');
-  if (!username) {
+  if (!sessionToken || !username) {
     handleTokenExpiration();
     return;
   }

@@ -3,7 +3,7 @@
 
 /// <reference lib="dom" />
 
-import { API_BASE, authenticatedFetch, getErrorMessage, handleTokenExpiration } from './utils.mjs';
+import { API_BASE, authenticatedFetch, getErrorMessage } from './utils.mjs';
 
 // =========================
 // Constants & Initialization
@@ -368,7 +368,7 @@ function initializeApp(): void {
   const sessionToken = localStorage.getItem('sessionToken');
   const username = localStorage.getItem('username');
   if (!sessionToken || !username) {
-    handleTokenExpiration();
+    window.location.href = 'login.html';
     return;
   }
 

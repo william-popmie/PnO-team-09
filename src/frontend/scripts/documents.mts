@@ -41,6 +41,11 @@ let originalDocumentName: string | null = null; // Track which document is being
 const currentCollection = new URLSearchParams(window.location.search).get('collection') || 'unknown';
 collectionNameSpan.textContent = currentCollection;
 
+// Pagination state
+const ITEMS_PER_PAGE = 10;
+let currentPage = 1;
+let totalPages = 1;
+
 // =========================
 // Utility Functions
 // =========================
@@ -520,7 +525,17 @@ function renderDocuments(docs: Array<Record<string, unknown>>): void {
     return;
   }
 
-  docs.forEach((doc) => {
+  // Calculate pagination
+  totalPages = Math.ceil(docs.length / ITEMS_PER_PAGE);
+  if (currentPage > totalPages) currentPage = totalPages;
+  if (currentPage < 1) currentPage = 1;
+
+  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, docs.length);
+  const paginatedDocs = docs.slice(startIndex, endIndex);
+
+  // Render paginated documents
+  paginatedDocs.forEach((doc) => {
     const id = getDocumentId(doc);
     const item = document.createElement('div');
     item.className = 'document-item';
@@ -544,7 +559,73 @@ function renderDocuments(docs: Array<Record<string, unknown>>): void {
     documentsView.appendChild(item);
   });
 
+  // Render pagination controls
+  renderPaginationControls(docs.length, startIndex, endIndex);
+
   updateDeleteButtonVisibility();
+}
+
+/**
+ * Renders pagination controls at the bottom of the document list
+ * @param {number} totalDocs - Total number of documents
+ * @param {number} startIndex - Starting index of current page
+ * @param {number} endIndex - Ending index of current page
+ * @return {void}
+ */
+function renderPaginationControls(totalDocs: number, startIndex: number, endIndex: number): void {
+  const paginationDiv = document.createElement('div');
+  paginationDiv.className = 'pagination-controls';
+  paginationDiv.style.cssText =
+    'display: flex; justify-content: space-between; align-items: center; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border);';
+
+  // Page info
+  const pageInfo = document.createElement('div');
+  pageInfo.style.cssText = 'color: var(--muted); font-size: 14px;';
+  pageInfo.textContent = `Showing ${startIndex + 1}-${endIndex} of ${totalDocs}`;
+
+  // Navigation buttons
+  const navButtons = document.createElement('div');
+  navButtons.style.cssText = 'display: flex; gap: 8px;';
+
+  // Previous button
+  const prevBtn = document.createElement('button');
+  prevBtn.className = 'btn btn-ghost';
+  prevBtn.textContent = 'Previous';
+  prevBtn.disabled = currentPage === 1;
+  prevBtn.style.cssText = currentPage === 1 ? 'opacity: 0.5; cursor: not-allowed;' : '';
+  prevBtn.addEventListener('click', () => {
+    if (currentPage > 1) {
+      currentPage--;
+      renderDocuments(allDocuments);
+    }
+  });
+
+  // Page indicator
+  const pageIndicator = document.createElement('span');
+  pageIndicator.style.cssText =
+    'color: var(--accent); font-weight: 600; padding: 0 12px; display: flex; align-items: center;';
+  pageIndicator.textContent = `Page ${currentPage} of ${totalPages}`;
+
+  // Next button
+  const nextBtn = document.createElement('button');
+  nextBtn.className = 'btn btn-ghost';
+  nextBtn.textContent = 'Next';
+  nextBtn.disabled = currentPage === totalPages;
+  nextBtn.style.cssText = currentPage === totalPages ? 'opacity: 0.5; cursor: not-allowed;' : '';
+  nextBtn.addEventListener('click', () => {
+    if (currentPage < totalPages) {
+      currentPage++;
+      renderDocuments(allDocuments);
+    }
+  });
+
+  navButtons.appendChild(prevBtn);
+  navButtons.appendChild(pageIndicator);
+  navButtons.appendChild(nextBtn);
+
+  paginationDiv.appendChild(pageInfo);
+  paginationDiv.appendChild(navButtons);
+  documentsView.appendChild(paginationDiv);
 }
 
 /**

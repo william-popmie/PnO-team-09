@@ -10,11 +10,11 @@ export interface LogEntry {
 }
 
 export function validateLogEntry(entry: LogEntry): void {
-    if (entry.term < 0) {
+    if (!Number.isInteger(entry.term) || entry.term < 0) {
         throw new Error(`Invalid term: ${entry.term}. Term must be a non-negative integer.`);
     }
 
-    if (entry.index < 0) {
+    if (!Number.isInteger(entry.index) || entry.index < 0) {
         throw new Error(`Invalid index: ${entry.index}. Index must be a non-negative integer.`);
     }
 

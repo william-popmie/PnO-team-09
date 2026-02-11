@@ -1,8 +1,7 @@
-import { after, afterEach } from "node:test";
 import { ConsoleLogger } from "./Logger";
-import { describe, it, beforeEach, vi, expect } from "vitest";
+import { describe, it, beforeEach, afterEach, vi, expect } from "vitest";
 
-describe('Logger.ts ConsoleLogger', () => {
+describe('Logger.ts, ConsoleLogger', () => {
 
     let logSpy: ReturnType<typeof vi.spyOn>;
 

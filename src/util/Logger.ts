@@ -15,9 +15,12 @@ export interface Logger {
 }
 
 export class ConsoleLogger implements Logger {
+
+    private static readonly levels: LogLevel[] = ['debug', 'info', 'warn', 'error']; // static => class level, 
+
     constructor(
-        private nodeId: NodeId,
-        private minDebugLevel: LogLevel = "info"
+        private readonly nodeId: NodeId,
+        private readonly minDebugLevel: LogLevel = "info"
     ){}
 
     debug(message: string, context?: LogContext): void {
@@ -48,9 +51,8 @@ export class ConsoleLogger implements Logger {
     }
 
     private shouldLog(logLevel: LogLevel): boolean {
-        const levels: LogLevel[] = ['debug', 'info', 'warn', 'error'];
-        const lowIdx = levels.indexOf(this.minDebugLevel);
-        const currIdx = levels.indexOf(logLevel);
+        const lowIdx = ConsoleLogger.levels.indexOf(this.minDebugLevel);
+        const currIdx = ConsoleLogger.levels.indexOf(logLevel);
 
         return currIdx >= lowIdx
     }

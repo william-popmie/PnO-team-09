@@ -364,16 +364,33 @@ export class Collection {
           ids.add(docId);
         }
       } else if (ops.$in !== undefined) {
-        for (const value of ops.$in) {
-          const prefix = serializeFieldValue(value) + ':';
-          const startKey = prefix;
-          const endKey = prefix + '\uffff';
+        const sortedValues = ops.$in
+          .map((v) => ({ original: v, serialized: serializeFieldValue(v) }))
+          .sort((a, b) => (a.serialized < b.serialized ? -1 : a.serialized > b.serialized ? 1 : 0));
 
-          for await (const { value: docId } of indexTree.range(startKey, endKey, {
-            inclusiveStart: true,
-            inclusiveEnd: true,
-          })) {
+        if (sortedValues.length === 0) return ids;
+
+        const firstKey = sortedValues[0].serialized + ':';
+        const lastKey = sortedValues[sortedValues.length - 1].serialized + ':\uffff';
+
+        let valueIndex = 0;
+        for await (const { key, value: docId } of indexTree.range(firstKey, lastKey, {
+          inclusiveStart: true,
+          inclusiveEnd: true,
+        })) {
+          const colonIndex = key.lastIndexOf(':');
+          const serializedValue = key.substring(0, colonIndex);
+
+          while (valueIndex < sortedValues.length && sortedValues[valueIndex].serialized < serializedValue) {
+            valueIndex++;
+          }
+
+          if (valueIndex < sortedValues.length && sortedValues[valueIndex].serialized === serializedValue) {
             ids.add(docId);
+          }
+
+          if (valueIndex >= sortedValues.length) {
+            break;
           }
         }
       }

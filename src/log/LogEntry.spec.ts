@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach, vi, expect } from "vitest";
+import { describe, it, expect } from "vitest";
 import { LogEntry, validateLogEntry, validateLogSequence, commandsEqual, entriesEqual, logsEqual } from "./LogEntry";
 
 describe('LogEntry.ts, validateLogEntry', () => {

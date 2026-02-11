@@ -310,12 +310,22 @@ export class Collection {
   private async applyFilterOps(filterOps: FilterOperators): Promise<Set<string> | null> {
     let bestField: string | null = null;
     let bestOps: FilterOperators[string] | null = null;
+    let bestScore = Infinity;
 
     for (const [field, ops] of Object.entries(filterOps)) {
-      if (this.secondaryIndexes.has(field)) {
+      if (!this.secondaryIndexes.has(field)) continue;
+
+      let score = Infinity;
+      if (ops.$eq !== undefined) score = 1;
+      else if (ops.$in !== undefined) score = ops.$in.length;
+      else if (ops.$gt !== undefined || ops.$gte !== undefined || ops.$lt !== undefined || ops.$lte !== undefined) {
+        score = 100;
+      }
+
+      if (score < bestScore) {
+        bestScore = score;
         bestField = field;
         bestOps = ops;
-        break;
       }
     }
 

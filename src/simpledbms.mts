@@ -1,6 +1,6 @@
-// @author MaartenHaine, Jari Daemen
+// @author MaartenHaine, Jari Daemen, Frederick Hillen
 // used Claude for debugging
-// @date 2025-11-22
+// @date 2026-02-11
 
 import { BPlusTree } from './b-plus-tree.mjs';
 import { FBNodeStorage, FBLeafNode, FBInternalNode } from './node-storage/fb-node-storage.mjs';
@@ -456,9 +456,58 @@ export class Collection {
       candidateIds = await this.applyFilterOps(query.filterOps);
 
       if (candidateIds) {
-        for (const id of candidateIds) {
-          const doc = await this.primaryTree.search(id);
-          if (doc) {
+        const RANDOM_LOOKUP_THRESHOLD = 100;
+
+        if (candidateIds.size <= RANDOM_LOOKUP_THRESHOLD) {
+          for (const id of candidateIds) {
+            const doc = await this.primaryTree.search(id);
+            if (doc) {
+              let matches = true;
+              for (const [field, ops] of Object.entries(query.filterOps)) {
+                const value = doc[field];
+                if (ops.$eq !== undefined && value !== ops.$eq) matches = false;
+                if (ops.$ne !== undefined && value === ops.$ne) matches = false;
+                if (
+                  ops.$gt !== undefined &&
+                  ops.$gt !== null &&
+                  value !== null &&
+                  !((value as unknown as number) > (ops.$gt as unknown as number))
+                )
+                  matches = false;
+                if (
+                  ops.$gte !== undefined &&
+                  ops.$gte !== null &&
+                  value !== null &&
+                  !((value as unknown as number) >= (ops.$gte as unknown as number))
+                )
+                  matches = false;
+                if (
+                  ops.$lt !== undefined &&
+                  ops.$lt !== null &&
+                  value !== null &&
+                  !((value as unknown as number) < (ops.$lt as unknown as number))
+                )
+                  matches = false;
+                if (
+                  ops.$lte !== undefined &&
+                  ops.$lte !== null &&
+                  value !== null &&
+                  !((value as unknown as number) <= (ops.$lte as unknown as number))
+                )
+                  matches = false;
+                if (ops.$in !== undefined && !ops.$in.includes(value)) matches = false;
+                if (ops.$nin !== undefined && ops.$nin.includes(value)) matches = false;
+              }
+
+              if (matches && (!query.filter || query.filter(doc))) {
+                results.push(doc);
+              }
+            }
+          }
+        } else {
+          for await (const { value: doc } of this.primaryTree.entries()) {
+            if (!candidateIds.has(doc.id)) continue;
+
             let matches = true;
             for (const [field, ops] of Object.entries(query.filterOps)) {
               const value = doc[field];

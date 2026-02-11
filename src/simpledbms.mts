@@ -308,9 +308,8 @@ export class Collection {
    * @returns {Promise<Set<string> | null>} A set of document IDs that match the query, or null if no index is available.
    */
   private async applyFilterOps(filterOps: FilterOperators): Promise<Set<string> | null> {
-    let bestField: string | null = null;
-    let bestOps: FilterOperators[string] | null = null;
-    let bestScore = Infinity;
+    const MAX_INTERSECTIONS = 3;
+    const indexedFields: Array<{ field: string; ops: FilterOperators[string]; score: number }> = [];
 
     for (const [field, ops] of Object.entries(filterOps)) {
       if (!this.secondaryIndexes.has(field)) continue;
@@ -322,54 +321,23 @@ export class Collection {
         score = 100;
       }
 
-      if (score < bestScore) {
-        bestScore = score;
-        bestField = field;
-        bestOps = ops;
-      }
+      indexedFields.push({ field, ops, score });
     }
 
-    if (!bestField || !bestOps) {
+    if (indexedFields.length === 0) {
       return null;
     }
 
-    const indexTree = this.secondaryIndexes.get(bestField)!;
-    const matchingIds = new Set<string>();
+    indexedFields.sort((a, b) => a.score - b.score);
 
-    if (bestOps.$eq !== undefined) {
-      const value = bestOps.$eq;
-      const prefix = serializeFieldValue(value) + ':';
-      const startKey = prefix;
-      const endKey = prefix + '\uffff';
+    const collectIdsForOps = async (
+      indexTree: BPlusTree<string, string, FBLeafNode<string, string>, FBInternalNode<string, string>>,
+      ops: FilterOperators[string],
+    ): Promise<Set<string>> => {
+      const ids = new Set<string>();
 
-      for await (const { value: docId } of indexTree.range(startKey, endKey, {
-        inclusiveStart: true,
-        inclusiveEnd: true,
-      })) {
-        matchingIds.add(docId);
-      }
-    } else if (
-      bestOps.$gt !== undefined ||
-      bestOps.$gte !== undefined ||
-      bestOps.$lt !== undefined ||
-      bestOps.$lte !== undefined
-    ) {
-      const minVal = bestOps.$gt !== undefined ? bestOps.$gt : bestOps.$gte;
-      const maxVal = bestOps.$lt !== undefined ? bestOps.$lt : bestOps.$lte;
-      const minInclusive = bestOps.$gte !== undefined;
-      const maxInclusive = bestOps.$lte !== undefined;
-
-      const startKey = minVal !== undefined && minVal !== null ? serializeFieldValue(minVal) + ':' : '';
-      const endKey = maxVal !== undefined && maxVal !== null ? serializeFieldValue(maxVal) + ':\uffff' : '\uffff';
-
-      for await (const { value: docId } of indexTree.range(startKey, endKey, {
-        inclusiveStart: minInclusive,
-        inclusiveEnd: maxInclusive,
-      })) {
-        matchingIds.add(docId);
-      }
-    } else if (bestOps.$in !== undefined) {
-      for (const value of bestOps.$in) {
+      if (ops.$eq !== undefined) {
+        const value = ops.$eq;
         const prefix = serializeFieldValue(value) + ':';
         const startKey = prefix;
         const endKey = prefix + '\uffff';
@@ -378,12 +346,83 @@ export class Collection {
           inclusiveStart: true,
           inclusiveEnd: true,
         })) {
-          matchingIds.add(docId);
+          ids.add(docId);
         }
+      } else if (ops.$gt !== undefined || ops.$gte !== undefined || ops.$lt !== undefined || ops.$lte !== undefined) {
+        const minVal = ops.$gt !== undefined ? ops.$gt : ops.$gte;
+        const maxVal = ops.$lt !== undefined ? ops.$lt : ops.$lte;
+        const minInclusive = ops.$gte !== undefined;
+        const maxInclusive = ops.$lte !== undefined;
+
+        const startKey = minVal !== undefined && minVal !== null ? serializeFieldValue(minVal) + ':' : '';
+        const endKey = maxVal !== undefined && maxVal !== null ? serializeFieldValue(maxVal) + ':\uffff' : '\uffff';
+
+        for await (const { value: docId } of indexTree.range(startKey, endKey, {
+          inclusiveStart: minInclusive,
+          inclusiveEnd: maxInclusive,
+        })) {
+          ids.add(docId);
+        }
+      } else if (ops.$in !== undefined) {
+        for (const value of ops.$in) {
+          const prefix = serializeFieldValue(value) + ':';
+          const startKey = prefix;
+          const endKey = prefix + '\uffff';
+
+          for await (const { value: docId } of indexTree.range(startKey, endKey, {
+            inclusiveStart: true,
+            inclusiveEnd: true,
+          })) {
+            ids.add(docId);
+          }
+        }
+      }
+
+      return ids;
+    };
+
+    const intersectSets = (a: Set<string>, b: Set<string>): Set<string> => {
+      const [small, large] = a.size <= b.size ? [a, b] : [b, a];
+      const result = new Set<string>();
+      for (const value of small) {
+        if (large.has(value)) {
+          result.add(value);
+        }
+      }
+      return result;
+    };
+
+    let resultSet: Set<string> | null = null;
+    let intersectionCount = 0;
+
+    for (const { field, ops } of indexedFields) {
+      const indexTree = this.secondaryIndexes.get(field)!;
+      const ids = await collectIdsForOps(indexTree, ops);
+
+      if (!resultSet) {
+        resultSet = ids;
+        intersectionCount++;
+        continue;
+      }
+
+      if (intersectionCount >= MAX_INTERSECTIONS) {
+        break;
+      }
+
+      const previousSize = resultSet.size;
+      resultSet = intersectSets(resultSet, ids);
+      intersectionCount++;
+
+      if (resultSet.size === 0) {
+        break;
+      }
+
+      if (resultSet.size >= 0.9 * previousSize) {
+        break;
       }
     }
 
-    return matchingIds;
+    return resultSet;
   }
 
   /**

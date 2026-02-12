@@ -87,6 +87,233 @@ export class LogManager implements LogManagerInterface {
         return entry.index;
     }
 
+    async appendEntries(entries: LogEntry[]): Promise<number> {
+        this.ensureInitialized();
+
+        if (entries.length === 0) {
+            return this.lastIndex;
+        }
+
+        for (let i = 0; i < entries.length; i++) {
+            const expectedIndex = this.lastIndex + 1 + i;
+            if (entries[i].index !== expectedIndex) {
+                throw new LogInconsistencyError(`Entry index ${entries[i].index} does not match expected index ${expectedIndex}`);
+            }
+        }
+
+        await this.safeStorage(async () => {
+            const operation: StorageOperation[] = [];
+
+            for (const entry of entries) {
+                validateLogEntry(entry);
+
+                operation.push({
+                    type: 'set',
+                    key: this.makeLogKey(entry.index),
+                    value: StorageCodec.encodeJSON(entry)
+                });
+            }
+
+            const lastEntry = entries[entries.length - 1];
+
+            operation.push({
+                type: 'set',
+                key: LAST_INDEX_KEY,
+                value: StorageCodec.encodeNumber(lastEntry.index)
+            });
+            operation.push({
+                type: 'set',
+                key: LAST_TERM_KEY,
+                value: StorageCodec.encodeNumber(lastEntry.term)
+            });
+
+            await this.storage.batch(operation);
+
+            this.lastIndex = lastEntry.index;
+            this.lastTerm = lastEntry.term;
+        }, `appendEntries (${entries.length} entries)`);
+
+        return this.lastIndex;
+    }
+
+    async getEntry(index: number): Promise<LogEntry | null> {
+        this.ensureInitialized();
+
+        if (index < 1 || index > this.lastIndex) {
+            return null;
+        }
+
+        return await this.safeStorage(async () => {
+            const entryBuf = await this.storage.get(this.makeLogKey(index));
+            const entry = entryBuf ? StorageCodec.decodeJSON<LogEntry>(entryBuf) : null;
+            return entry;
+        }, `getEntry (${index})`);
+    }
+
+    async getEntries(fromIndex: number, toIndex: number): Promise<LogEntry[]> {
+        this.ensureInitialized();
+
+        if (fromIndex < 1 || toIndex > this.lastIndex || fromIndex > toIndex) {
+            throw new LogInconsistencyError(`Invalid index range: from ${fromIndex} to ${toIndex}`);
+        }
+
+        const entries: LogEntry[] = [];
+
+        for (let i = fromIndex; i <= toIndex; i++) {
+            const entry = await this.getEntry(i);
+            if (!entry) {
+                throw new LogInconsistencyError(`Missing log entry at index ${i}`);
+            }
+            entries.push(entry);
+        }
+
+        return entries;
+    }
+
+    getFirstIndex(): number {
+        this.ensureInitialized();
+        if (this.lastIndex === 0) {
+            throw new LogInconsistencyError('No log entries found');
+        }
+        return 1;
+    }
+
+    async getTermAtIndex(index: number): Promise<number | null> {
+        this.ensureInitialized();
+
+        const entry = await this.getEntry(index);
+        return entry ? entry.term : null;
+    }
+
+    async hasMatchingEntry(index: number, term: number): Promise<boolean> {
+        this.ensureInitialized();
+
+        if (index === 0) {
+            return true;
+        }
+
+        const entry = await this.getEntry(index);
+        return entry !== null && entry.term === term;
+    }
+
+    async getLastEntry(): Promise<LogEntry | null> {
+        this.ensureInitialized();
+
+        if (this.lastIndex === 0) {
+            return null;
+        }
+
+        return await this.getEntry(this.lastIndex);
+    }
+
+    getLastIndex(): number {
+        this.ensureInitialized();
+        return this.lastIndex;
+    }
+
+    getLastTerm(): number {
+        this.ensureInitialized();
+        return this.lastTerm;
+    }
+
+    async deleteEntriesFrom(index: number): Promise<void> {
+        this.ensureInitialized();
+
+        if (index < 1) {
+            throw new LogInconsistencyError(`Cannot delete from index ${index} as it is less than 1`);
+        }
+
+        if (index > this.lastIndex) {
+            throw new LogInconsistencyError(`Cannot delete from index ${index} as it is beyond last index ${this.lastIndex}`);
+        }
+
+        await this.safeStorage(async () => {
+            const operation: StorageOperation[] = [];
+
+            for (let i = index; i <= this.lastIndex; i++) {
+                operation.push({
+                    type: 'delete',
+                    key: this.makeLogKey(i)
+                });
+            }
+
+            const newLastIndex = index - 1;
+
+            if (newLastIndex === 0) {
+                operation.push({
+                    type: 'delete',
+                    key: LAST_INDEX_KEY
+                });
+
+                operation.push({
+                    type: 'delete',
+                    key: LAST_TERM_KEY
+                });
+
+                this.lastTerm = 0;
+
+            } else {
+                const prevEntry = await this.getEntry(newLastIndex);
+
+                this.lastTerm = prevEntry ? prevEntry.term : 0;
+
+                operation.push({
+                    type: 'set',
+                    key: LAST_INDEX_KEY,
+                    value: StorageCodec.encodeNumber(newLastIndex)
+                });
+                
+                operation.push({
+                    type: 'set',
+                    key: LAST_TERM_KEY,
+                    value: StorageCodec.encodeNumber(this.lastTerm)
+                });
+            }
+
+            await this.storage.batch(operation);
+
+            this.lastIndex = newLastIndex;
+
+        }, `deleteEntriesFrom (${index})`);
+    }
+
+    async clear(): Promise<void> {
+        this.ensureInitialized();
+
+        if (this.lastIndex === 0) {
+            return;
+        }
+
+        /*
+        await this.safeStorage(async () => {
+            const operation: StorageOperation[] = [];
+            for (let i = 1; i <= this.lastIndex; i++) {
+                operation.push({
+                    type: 'delete',
+                    key: this.makeLogKey(i)
+                });
+            }
+
+            operation.push({
+                type: 'delete',
+                key: LAST_INDEX_KEY
+            });
+
+            operation.push({
+                type: 'delete',
+                key: LAST_TERM_KEY
+            });
+
+            await this.storage.batch(operation);
+
+            this.lastIndex = 0;
+            this.lastTerm = 0;
+        }, 'clear');
+        */
+
+        await this.deleteEntriesFrom(1);
+    }
+
     private async safeStorage<T>(fn : () => Promise<T>, context: string): Promise<T> {
         try {
             return await fn();

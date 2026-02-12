@@ -61,28 +61,25 @@ export class InMemoryStorage implements Storage {
         this.ensureOpen();
 
         for (const operation of operations) {
-            if (operation.type === "set" && !operation.value) {
+            if (operation.type === "set" && operation.value === undefined) {
                 throw new StorageError("Value is required for set operation");
             }
         }
 
         const tempData = new Map(this.data);
 
-        try {
-            for (const operation of operations) {
-                if (operation.type === "set") {
-                    tempData.set(operation.key, Buffer.from(operation.value!));
-                } else if (operation.type === "delete") {
-                    tempData.delete(operation.key);
-                } else {
-                    throw new StorageError(`Invalid operation type: ${operation.type}`);
-                }
+        // no try catch needed since it's in memory and no I/O disk or network
+        for (const operation of operations) {
+            if (operation.type === "set") {
+                tempData.set(operation.key, Buffer.from(operation.value!));
+            } else if (operation.type === "delete") {
+                tempData.delete(operation.key);
+            } else {
+                throw new StorageError(`Invalid operation type: ${operation.type}`);
             }
+        }
 
-            this.data = tempData;
-        } catch (error) {
-            throw new StorageError(`Batch operation failed: ${error instanceof Error ? error.message : String(error)}`);
-        };
+        this.data = tempData;
     }
 
     keys(): string[] {
@@ -150,6 +147,11 @@ export class StorageCodec {
     }
 
     static decodeString(buffer: Buffer): string {
+
+        if (!Buffer.isBuffer(buffer)) {
+            throw new StorageError(`Value must be a Buffer, got ${typeof buffer}`);
+        }
+
         return buffer.toString(StorageCodec.encoding);
     }
 
@@ -158,7 +160,7 @@ export class StorageCodec {
             const jsonString = JSON.stringify(obj);
             return Buffer.from(jsonString, StorageCodec.encoding);
         } catch (error) {
-            throw new StorageError(`Failed to encode JSON: ${error instanceof Error ? error.message : String(error)}`);
+            throw new StorageError(`Failed to encode JSON: ${(error as Error).message}`); // json.stringify can only throw syntax errors
         }
     }
 
@@ -167,7 +169,7 @@ export class StorageCodec {
             const bufStr = buffer.toString(StorageCodec.encoding);
             return JSON.parse(bufStr);
         } catch (error) {
-            throw new StorageError(`Failed to decode JSON: ${error instanceof Error ? error.message : String(error)}`);
+            throw new StorageError(`Failed to decode JSON: ${(error as Error).message}`); // idem
         }
     }
 }

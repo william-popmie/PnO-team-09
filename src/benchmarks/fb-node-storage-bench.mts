@@ -212,7 +212,7 @@ async function compareScalability() {
   console.log('Testing with in-place updates (overwriteBlock implementation)');
   console.log('='.repeat(70));
 
-  const sizes = [100, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000];
+  const sizes = [100, 500, 1000, 2000, 5000, 10000, 20000, 50000];
   const results = [];
 
   for (const size of sizes) {

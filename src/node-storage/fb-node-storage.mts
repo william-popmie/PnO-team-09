@@ -138,15 +138,18 @@ export class FBNodeStorage<Keystype, ValuesType>
       version: 1,
     };
     const buffer = Buffer.from(JSON.stringify(payload), 'utf-8');
+
+    // In-place update: if node already has a blockId, overwrite it
+    if (node.blockId !== undefined && node.blockId !== NO_BLOCK) {
+      await this.FBfile.overwriteBlock(node.blockId, buffer);
+      // No old block to reclaim - same blockId
+      return undefined;
+    }
+
+    // First time: allocate new block
     const newBlockId = await this.FBfile.allocateAndWrite(buffer);
-    const oldBlockId = node.blockId;
     node.blockId = newBlockId;
     this.cache.set(newBlockId, node);
-
-    if (typeof oldBlockId === 'number' && oldBlockId !== NO_BLOCK && oldBlockId !== newBlockId) {
-      this.cache.delete(oldBlockId);
-      return oldBlockId;
-    }
     return undefined;
   }
 
@@ -162,15 +165,18 @@ export class FBNodeStorage<Keystype, ValuesType>
       version: 1,
     };
     const buffer = Buffer.from(JSON.stringify(payload), 'utf-8');
+
+    // In-place update: if node already has a blockId, overwrite it
+    if (node.blockId !== undefined && node.blockId !== NO_BLOCK) {
+      await this.FBfile.overwriteBlock(node.blockId, buffer);
+      // No old block to reclaim - same blockId
+      return undefined;
+    }
+
+    // First time: allocate new block
     const newBlockId = await this.FBfile.allocateAndWrite(buffer);
-    const oldBlockId = node.blockId;
     node.blockId = newBlockId;
     this.cache.set(newBlockId, node);
-
-    if (typeof oldBlockId === 'number' && oldBlockId !== NO_BLOCK && oldBlockId !== newBlockId) {
-      this.cache.delete(oldBlockId);
-      return oldBlockId;
-    }
     return undefined;
   }
 
@@ -231,7 +237,11 @@ export class FBNodeStorage<Keystype, ValuesType>
       nextBlockId?: number;
       prevBlockId?: number;
     };
-    type InternalPayload = { type: 'internal'; keys?: SerializedKey[]; childBlockIds?: number[] };
+    type InternalPayload = {
+      type: 'internal';
+      keys?: SerializedKey[];
+      childBlockIds?: number[];
+    };
 
     function isLeafPayload(x: unknown): x is LeafPayload {
       if (typeof x !== 'object' || x === null) return false;

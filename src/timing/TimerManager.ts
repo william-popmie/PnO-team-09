@@ -110,15 +110,15 @@ export class TimerManager implements TimerManagerIInterface {
     }
 
     private validateConfig(config: TimerConfig) {
-        if (config.electionTimeoutMin <= 0) {
+        if (!Number.isInteger(config.electionTimeoutMin) || config.electionTimeoutMin <= 0) {
             throw new TimerManagerError(`Invalid electionTimeoutMin: ${config.electionTimeoutMin}. Must be > 0.`);
         }
 
-        if (config.electionTimeoutMax < config.electionTimeoutMin) {
+        if (!Number.isInteger(config.electionTimeoutMax) || config.electionTimeoutMax < config.electionTimeoutMin) {
             throw new TimerManagerError(`Invalid election timeout range: max (${config.electionTimeoutMax}) must be >= min (${config.electionTimeoutMin}).`);
         }
 
-        if (config.heartbeatInterval <= 0) {
+        if (!Number.isInteger(config.heartbeatInterval) || config.heartbeatInterval <= 0) {
             throw new TimerManagerError(`Invalid heartbeatInterval: ${config.heartbeatInterval}. Must be > 0.`);
         }
 
@@ -126,9 +126,11 @@ export class TimerManager implements TimerManagerIInterface {
             throw new TimerManagerError(`Election timeout min (${config.electionTimeoutMin}) must be at least ${TimerManager.minRatio} times the heartbeat interval (${config.heartbeatInterval}).`);
         }
 
+        /* can never happen
         if (config.electionTimeoutMax < TimerManager.minRatio * config.heartbeatInterval) {
             throw new TimerManagerError(`Election timeout max (${config.electionTimeoutMax}) must be at least ${TimerManager.minRatio} times the heartbeat interval (${config.heartbeatInterval}).`);
         }
+        */
     }
 
     private getRandomElectionTimeout(): number {
@@ -137,9 +139,11 @@ export class TimerManager implements TimerManagerIInterface {
     }
 
     private scheduleNextHeartbeat(): void {
+        /* can never happen
         if (!this.heartbeatCallback) {
             return;
         }
+        */
 
         if (this.heartbeatCount >= TimerManager.maxHeartBeats) {
             this.logger.warn(`Reached maximum heartbeat count (${TimerManager.maxHeartBeats}). Stopping heartbeat timer to prevent potential issues.`);
@@ -155,9 +159,7 @@ export class TimerManager implements TimerManagerIInterface {
             } catch (error) {
                 this.logger.error(`Error in heartbeat timer callback`, error as Error);
             } finally {
-                if (this.heartbeatCallback) {
-                    this.scheduleNextHeartbeat();
-                }
+                this.scheduleNextHeartbeat();
             }
         }, this.getHeartbeatInterval());
     }

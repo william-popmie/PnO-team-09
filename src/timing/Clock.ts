@@ -137,10 +137,8 @@ export class MockClock implements Clock {
             .sort((a, b) => a.fireTime - b.fireTime);
 
         for (const timer of timersToFire) {
-            if (this.timers.has(timer.id)) {
-                this.timers.delete(timer.id);
-                timer.callback();
-            }
+            this.timers.delete(timer.id);
+            timer.callback();
         }    
     }
 

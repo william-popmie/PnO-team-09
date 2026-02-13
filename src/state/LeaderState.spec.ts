@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { LeaderState } from "./LeaderState";
 import { LeaderStateError } from "../util/Error";
-import { LogManager } from "../log/LogManager";
 
 describe('LeaderState.ts, LeaderState', () => {
     const peers = ['node1', 'node2', 'node3'];

@@ -11,6 +11,7 @@ import { type File } from './file/file.mjs';
 import { randomUUID } from 'crypto';
 
 // Document interface
+// shows all valid data types for the document
 export type DocumentValue =
   | string
   | number
@@ -20,6 +21,8 @@ export type DocumentValue =
   | DocumentValue[]
   | { [key: string]: DocumentValue };
 
+// Gives a documetn its own id. It is an interface that can be easily given as input
+// and as interface to implemented.
 export interface Document {
   id: string;
   [key: string]: DocumentValue;
@@ -179,17 +182,21 @@ export function isIndexableField(fieldName: string): boolean {
   return !fieldName.startsWith('_') && fieldName !== 'id';
 }
 
+//TODO: Make it so you can construct a collection without needing to give a BPlusTree as an input.
+// Maybe make a seperate function for that.
 // Collection class with secondary index support
 export class Collection {
   private primaryTree: BPlusTree<string, Document, FBLeafNode<string, Document>, FBInternalNode<string, Document>>;
 
+  //TODO: miss is kijken naar dat we primaryTree en secondaryIndexes tot 1 Map maken.
+  //TODO: secondaryIndexes en PrimaryTree tot 1 naamgeving komen. PrimaryIndex en SecondaryIndexes bv.
   // Secondary indexes: field name -> B+ Tree
   private secondaryIndexes: Map<
     string,
     BPlusTree<string, string, FBLeafNode<string, string>, FBInternalNode<string, string>>
   > = new Map();
 
-  private onChangeCallback?: () => Promise<void>;
+  private onChangeCallback?: () => Promise<void>; //TODO: What does this do?
 
   constructor(
     primaryTree: BPlusTree<string, Document, FBLeafNode<string, Document>, FBInternalNode<string, Document>>,
@@ -199,6 +206,7 @@ export class Collection {
     this.onChangeCallback = onChangeCallback;
   }
 
+  //TODO: check if nodestorage changes affected this function.
   /**
    * Creates a secondary index on a field.
    * @param {string} fieldName The field to index
@@ -266,6 +274,7 @@ export class Collection {
 
   /**
    * Sets secondary indexes (used when loading from disk).
+   *TODO: is this function really neceseary?
    */
   setIndexes(
     indexes: Map<string, BPlusTree<string, string, FBLeafNode<string, string>, FBInternalNode<string, string>>>,
@@ -279,6 +288,7 @@ export class Collection {
    * @param {Omit<Document, 'id'> & { id?: string }} doc The document to insert.
    * @returns {Promise<Document>} The inserted document.
    */
+  //TODO: is the omit really needed? Can't you just get it form the Document input itself?
   async insert(doc: Omit<Document, 'id'> & { id?: string }): Promise<Document> {
     const id = doc.id ?? randomUUID();
     const newDoc: Document = { ...doc, id };
@@ -883,7 +893,7 @@ export class Collection {
  */
 export class SimpleDBMS {
   private fbFile: FreeBlockFile;
-  private catalogTree!: BPlusTree<string, number, FBLeafNode<string, number>, FBInternalNode<string, number>>;
+  private catalogTree!: BPlusTree<string, number, FBLeafNode<string, number>, FBInternalNode<string, number>>; //TODO: waht does this do again?
   private catalogStorage!: FBNodeStorage<string, number>;
   private collections: Map<string, Collection> = new Map();
 

@@ -344,6 +344,22 @@ export class LogManager implements LogManagerInterface {
         return await this.appendEntries(entries);
     }
 
+    async matchesPrevLog(prevLogIndex: number, prevLogTerm: number): Promise<boolean> {
+        this.ensureInitialized();
+
+        if (prevLogIndex === 0) {
+            return prevLogTerm === 0;
+        }
+
+        const entry = await this.getEntry(prevLogIndex);
+
+        if (!entry) {
+            return false;
+        }
+
+        return entry.term === prevLogTerm;
+    }
+
     private async safeStorage<T>(fn : () => Promise<T>, context: string): Promise<T> {
         try {
             return await fn();

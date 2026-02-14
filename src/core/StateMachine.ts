@@ -138,13 +138,122 @@ export class StateMachine implements StateMachineInterface {
     }
 
     async handleRequestVote(from: NodeId, request: RequestVoteRequest): Promise<RequestVoteResponse> {
-        // TODO
-        throw new Error("Not implemented");
+        const currentTerm = this.persistentState.getCurrentTerm();
+
+        if (request.term < currentTerm) {
+            this.logger.info(`Node ${this.nodeId} received RequestVote from ${from} with stale term ${request.term}, current term is ${currentTerm}`);
+            return {
+                term: currentTerm,
+                voteGranted: false
+            };
+        }
+
+        if (request.term > currentTerm) {
+            this.logger.info(`Node ${this.nodeId} received RequestVote from ${from} with higher term ${request.term}, updating term and becoming Follower`);
+            await this.becomeFollower(request.term, null);
+
+        } else if (request.term === currentTerm && this.currentState !== RaftState.Follower) {
+            this.logger.info(`Node ${this.nodeId} received RequestVote from ${from} with current term ${request.term} but is not a Follower, becoming Follower`);
+            await this.becomeFollower(request.term, null);
+        }
+
+        const votedFor = this.persistentState.getVotedFor();
+
+        const canGrantVote = votedFor === null || votedFor === request.candidateId;
+
+        if (!canGrantVote) {
+            this.logger.info(`Node ${this.nodeId} cannot grant vote to ${request.candidateId} because it has already voted for ${votedFor}`);
+            return {
+                term: this.persistentState.getCurrentTerm(),
+                voteGranted: false
+            };
+        }
+
+        const isLogUpToDate = this.isLogUpToDate(request.lastLogIndex, request.lastLogTerm);
+
+        if (!isLogUpToDate) {
+            this.logger.info(`Node ${this.nodeId} cannot grant vote to ${request.candidateId} because its log is not up-to-date`);
+            return {
+                term: this.persistentState.getCurrentTerm(),
+                voteGranted: false
+            };
+        }
+
+        await this.persistentState.updateTermAndVote(request.term, request.candidateId);
+        this.logger.info(`Node ${this.nodeId} granted vote to ${request.candidateId} for term ${request.term}`);
+
+        this.timerManager.resetElectionTimer();
+
+        return {
+            term: this.persistentState.getCurrentTerm(),
+            voteGranted: true
+        };
+    }
+
+    private isLogUpToDate(candidateLastLogIndex: number, candidateLastLogTerm: number): boolean {
+        const lastLogIndex = this.logManager.getLastIndex();
+        const lastLogTerm = this.logManager.getLastTerm();
+
+        if (candidateLastLogTerm > lastLogTerm) {
+            return true;
+        }
+
+        if (candidateLastLogTerm < lastLogTerm) {
+            return false;
+        }
+
+        return candidateLastLogIndex >= lastLogIndex;
     }
 
     async handleAppendEntries(from: NodeId, request: AppendEntriesRequest): Promise<AppendEntriesResponse> {
-        // TODO
-        throw new Error("Not implemented");
+        const currentTerm = this.persistentState.getCurrentTerm();
+
+        if (request.term < currentTerm) {
+            this.logger.info(`Node ${this.nodeId} received AppendEntries from ${from} with stale term ${request.term}, current term is ${currentTerm}`);
+            return {
+                term: currentTerm,
+                success: false
+            };
+        }
+
+        if (request.term >= currentTerm) {
+            this.logger.info(`Node ${this.nodeId} received AppendEntries from ${from} with higher term ${request.term}, updating term and becoming Follower`);
+            await this.becomeFollower(request.term, request.leaderId);
+        }
+
+        if(!(await this.logManager.matchesPrevLog(request.prevLogIndex, request.prevLogTerm))) {
+            this.logger.info(`Node ${this.nodeId} log does not match prevLogIndex ${request.prevLogIndex} and prevLogTerm ${request.prevLogTerm} from ${from}`);
+
+            return {
+                term: this.persistentState.getCurrentTerm(),
+                success: false,
+            };
+        }
+
+        if (request.entries.length > 0) {
+            await this.logManager.appendEntriesFrom(request.prevLogIndex, request.entries);
+            this.logger.info(`Node ${this.nodeId} appended ${request.entries.length} entries from ${from}`);
+        }
+
+        const leaderCommit = request.leaderCommit;
+        const currentCommitIndex = this.volatileState.getCommitIndex();
+
+        if (leaderCommit > currentCommitIndex) {
+            const lastNewEntryIndex = request.prevLogIndex + request.entries.length;
+            const newCommitIndex = Math.min(leaderCommit, lastNewEntryIndex);
+            this.volatileState.setCommitIndex(newCommitIndex);
+            this.logger.info(`Node ${this.nodeId} updated commit index to ${newCommitIndex} based on leader ${from}`);
+        }
+
+        const matchIndex = request.prevLogIndex + request.entries.length;
+
+        this.logger.info(`Node ${this.nodeId} successfully processed AppendEntries from ${from}, matchIndex: ${matchIndex}`);
+
+        return {
+            term: this.persistentState.getCurrentTerm(),
+            success: true,
+            matchIndex
+        };
     }
 
     private async handleElectionTimeout(): Promise<void> {

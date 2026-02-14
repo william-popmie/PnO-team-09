@@ -224,9 +224,13 @@ export class StateMachine implements StateMachineInterface {
         if(!(await this.logManager.matchesPrevLog(request.prevLogIndex, request.prevLogTerm))) {
             this.logger.info(`Node ${this.nodeId} log does not match prevLogIndex ${request.prevLogIndex} and prevLogTerm ${request.prevLogTerm} from ${from}`);
 
+            const conflictInfo = await this.logManager.getConflictInfo(request.prevLogIndex);
+
             return {
                 term: this.persistentState.getCurrentTerm(),
                 success: false,
+                conflictIndex: conflictInfo.conflictIndex,
+                conflictTerm: conflictInfo.conflictTerm
             };
         }
 
@@ -413,6 +417,18 @@ export class StateMachine implements StateMachineInterface {
             this.leaderState.updateMatchIndex(from, response.matchIndex);
             this.logger.info(`Node ${this.nodeId} received successful AppendEntriesResponse from ${from}, matchIndex: ${response.matchIndex}`);
             await this.tryAdvanceCommitIndex();
+        } else {
+            if (response.conflictTerm !== undefined && response.conflictIndex !== undefined) {
+                this.logger.debug('using conflict info to backtrack nextIndex for peer', { peer: from, conflictTerm: response.conflictTerm, conflictIndex: response.conflictIndex, oldNextIndex: this.leaderState.getNextIndex(from) });
+
+                this.leaderState.updateNextIndexWithConflict(from, response.conflictTerm, response.conflictIndex, this.logManager);
+
+                this.logger.debug('updated nextIndex for peer after conflict', { peer: from, newNextIndex: this.leaderState.getNextIndex(from) });
+            } else {
+                this.logger.debug('no conflict info provided, simply decrementing nextIndex for peer', { peer: from, oldNextIndex: this.leaderState.getNextIndex(from) });
+                this.leaderState.decrementNextIndex(from);
+                this.logger.debug('decremented nextIndex for peer', { peer: from, newNextIndex: this.leaderState.getNextIndex(from) });
+            }
         }
     }
 

@@ -360,6 +360,34 @@ export class LogManager implements LogManagerInterface {
         return entry.term === prevLogTerm;
     }
 
+    async getConflictInfo(prevLogIndex: number): Promise<{ conflictIndex: number, conflictTerm: number }> {
+        this.ensureInitialized();
+
+        if (prevLogIndex > this.lastIndex) {
+            return { conflictIndex: this.lastIndex + 1, conflictTerm: 0 };
+        }
+
+        const entryConflict = await this.getEntry(prevLogIndex);
+
+        if (!entryConflict) {
+            return { conflictIndex: this.lastIndex + 1, conflictTerm: 0 };
+        }
+
+        const conflictTerm = entryConflict.term;
+
+        let conflictIndex = prevLogIndex;
+
+        while (conflictIndex > 1) {
+            const entry = await this.getEntry(conflictIndex - 1);
+            if (!entry || entry.term !== conflictTerm) {
+                break;
+            }
+            conflictIndex--;
+        }
+
+        return { conflictIndex, conflictTerm };
+    }
+
     private async safeStorage<T>(fn : () => Promise<T>, context: string): Promise<T> {
         try {
             return await fn();

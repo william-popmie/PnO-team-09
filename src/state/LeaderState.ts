@@ -192,6 +192,45 @@ export class LeaderState implements LeaderStateInterface {
         return [...this.peers];
     }
 
+    async updateNextIndexWithConflict(peerId: NodeId, conflictIndex: number, conflictTerm: number, logManager: LogManager): Promise<void> {
+        this.ensureValidPeer(peerId);
+
+        if (conflictTerm === 0) {
+            this.setNextIndex(peerId, conflictIndex);
+        } else {
+            const lastIndexOfTerm = await this.findLastIndexOfTerm(conflictTerm, logManager);
+
+            if (lastIndexOfTerm !== null) {
+                this.setNextIndex(peerId, lastIndexOfTerm + 1);
+            } else {
+                this.setNextIndex(peerId, conflictIndex);
+            }
+        }
+
+        const newNextIndex = this.getNextIndex(peerId);
+        if (newNextIndex < 1) {
+            this.setNextIndex(peerId, 1);
+        }
+    }
+
+    private async findLastIndexOfTerm(term: number, logManager: LogManager): Promise<number | null> {
+        const lastIndex = logManager.getLastIndex();
+
+        for (let idx = lastIndex; idx >= 1; idx--) {
+            const entryTerm = await logManager.getTermAtIndex(idx) ?? 0;
+
+            if (entryTerm === term) {
+                return idx;
+            }
+
+            if (entryTerm < term) {
+                break;
+            }
+        }
+
+        return null;
+    }
+
     private ensureValidPeer(peerId: NodeId): void {
         if (!this.peers.includes(peerId)) {
             throw new LeaderStateError(`Invalid peer ID: ${peerId}`);

@@ -340,7 +340,8 @@ export class RaftNode implements RaftNodeInterface {
                 this.volatileState.setLastApplied(nextIndex);
             } catch (error) {
                 this.logger.error(`Error applying log entry at index ${nextIndex} with command ${JSON.stringify(entry.command)}`, error as Error);
-                break;
+                
+                throw new RaftError(`Failed to apply log entry at index ${nextIndex}: ${(error as Error).message}`, 'ApplyEntryFailed');
             }
         }
     }

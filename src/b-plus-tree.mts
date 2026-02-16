@@ -4,7 +4,7 @@
 import type { NodeStorage, LeafNodeStorage, InternalNodeStorage } from './node-storage/node-storage.mjs';
 
 /**
- * A B+ tree implementation.
+ * A B+ tree implementation. 
  *
  * @template KeysType - The type of the keys in the B+ tree.
  * @template ValuesType - The type of the values in the B+ tree.

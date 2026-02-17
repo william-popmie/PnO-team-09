@@ -1,7 +1,5 @@
 // @author Tijn Gommers
 // @date 2025-11-18
-
-import { beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { MockFile } from './mockfile.mjs';
 import { describe as _describe, it as _it } from 'node:test';

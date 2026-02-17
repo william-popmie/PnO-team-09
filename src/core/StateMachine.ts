@@ -470,6 +470,7 @@ export class StateMachine implements StateMachineInterface {
                 const prevLogTerm = await this.logManager.getTermAtIndex(prevLogIndex) ?? 0;
 
                 const entries = await this.logManager.getEntriesFromIndex(nextIndex);
+                // error: getentriesfromindex() -> getentries(): invalid index range: from 1 to 2
 
                 request = {
                     term: currentTerm,
@@ -532,7 +533,7 @@ export class StateMachine implements StateMachineInterface {
                 if (response.conflictTerm !== undefined && response.conflictIndex !== undefined) {
                     this.logger.debug('using conflict info to backtrack nextIndex for peer', { peer: from, conflictTerm: response.conflictTerm, conflictIndex: response.conflictIndex, oldNextIndex: this.leaderState.getNextIndex(from) });
 
-                    this.leaderState.updateNextIndexWithConflict(from, response.conflictTerm, response.conflictIndex, this.logManager);
+                    this.leaderState.updateNextIndexWithConflict(from, response.conflictIndex, response.conflictTerm, this.logManager);
 
                     this.logger.debug('updated nextIndex for peer after conflict', { peer: from, newNextIndex: this.leaderState.getNextIndex(from) });
                 } else {

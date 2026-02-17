@@ -326,7 +326,7 @@ export class LogManager implements LogManagerInterface {
             return [];
         }
 
-        return await this.getEntries(index, this.lastIndex + 1);
+        return await this.getEntries(index, this.lastIndex);
     }
 
     async appendEntriesFrom(prevLogIndex: number, entries: LogEntry[]): Promise<number> {

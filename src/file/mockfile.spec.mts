@@ -3,17 +3,9 @@
 // @date 2025-11-18
 
 import assert from 'node:assert/strict';
+import { describe, it } from 'vitest';
 import { MockFile } from './mockfile.mjs';
-import { describe as _describe, it as _it } from 'node:test';
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-const describe = (name: string, fn: () => void): void => {
-  void _describe(name, fn);
-};
-const it = (name: string, fn: () => Promise<void>): void => {
-  void _it(name, fn);
-};
 /** Returns a Buffer filled with a single repeating byte value. */
 function filledBuffer(size: number, value: number): Buffer {
   return Buffer.alloc(size, value);
@@ -33,9 +25,11 @@ const SECTOR = 8; // small sector for easy reasoning
 // ─── Test suite ───────────────────────────────────────────────────────────────
 
 describe('MockFile', () => {
+
   // ── Guard helpers ───────────────────────────────────────────────────────────
 
   describe('open/close/create guards', () => {
+
     it('create() succeeds on a fresh file', async () => {
       const f = new MockFile(SECTOR);
       await f.create();
@@ -107,11 +101,13 @@ describe('MockFile', () => {
       const f = new MockFile(SECTOR);
       await assert.rejects(() => f.stat(), /not open/i);
     });
+
   });
 
   // ── stat / size ─────────────────────────────────────────────────────────────
 
   describe('stat()', () => {
+
     it('reports size 0 on a freshly created file', async () => {
       const f = new MockFile(SECTOR);
       await f.create();
@@ -134,11 +130,13 @@ describe('MockFile', () => {
       const { size } = await f.stat();
       assert.equal(size, SECTOR + 3);
     });
+
   });
 
   // ── truncate ────────────────────────────────────────────────────────────────
 
   describe('truncate()', () => {
+
     it('extends the file with zero-filled sectors', async () => {
       const f = new MockFile(SECTOR);
       await f.create();
@@ -178,11 +176,13 @@ describe('MockFile', () => {
       const { size } = await f.stat();
       assert.equal(size, SECTOR);
     });
+
   });
 
   // ── writev / read ───────────────────────────────────────────────────────────
 
   describe('writev() and read()', () => {
+
     it('write a single full sector and read it back', async () => {
       const f = new MockFile(SECTOR);
       await f.create();
@@ -246,7 +246,10 @@ describe('MockFile', () => {
       await f.create();
       await f.truncate(SECTOR);
       await f.sync();
-      await assert.rejects(() => f.read(Buffer.alloc(SECTOR + 1), { position: 0 }), /out of bounds|exceeds/i);
+      await assert.rejects(
+        () => f.read(Buffer.alloc(SECTOR + 1), { position: 0 }),
+        /out of bounds|exceeds/i,
+      );
     });
 
     it('read with negative position throws an assertion error', async () => {
@@ -254,7 +257,10 @@ describe('MockFile', () => {
       await f.create();
       await f.truncate(SECTOR);
       await f.sync();
-      await assert.rejects(() => f.read(Buffer.alloc(1), { position: -1 }), /non-negative/i);
+      await assert.rejects(
+        () => f.read(Buffer.alloc(1), { position: -1 }),
+        /non-negative/i,
+      );
     });
 
     it('pending write is visible before sync', async () => {
@@ -296,11 +302,13 @@ describe('MockFile', () => {
       assert.equal(result[SECTOR], 0x30);
       assert.equal(result[SECTOR + 1], 0x40);
     });
+
   });
 
   // ── sync ────────────────────────────────────────────────────────────────────
 
   describe('sync()', () => {
+
     it('clears newSectors after sync', async () => {
       const f = new MockFile(SECTOR);
       await f.create();
@@ -329,11 +337,13 @@ describe('MockFile', () => {
       await f.sync(); // still nothing pending
       assert.equal(f.getNewSectors().size, 0);
     });
+
   });
 
   // ── getNewSectors ───────────────────────────────────────────────────────────
 
   describe('getNewSectors()', () => {
+
     it('is empty on a freshly created file', async () => {
       const f = new MockFile(SECTOR);
       await f.create();
@@ -349,11 +359,13 @@ describe('MockFile', () => {
       const pending = f.getNewSectors();
       assert.equal(pending.get(0)!.length, 3);
     });
+
   });
 
   // ── create() reset behaviour ────────────────────────────────────────────────
 
   describe('create() resets state', () => {
+
     it('create() on a closed file resets size and sectors', async () => {
       const f = new MockFile(SECTOR);
       // First use
@@ -367,11 +379,13 @@ describe('MockFile', () => {
       assert.equal(size, 0);
       assert.equal(f.getNewSectors().size, 0);
     });
+
   });
 
   // ── crash simulations ───────────────────────────────────────────────────────
 
   describe('crashBasic()', () => {
+
     it('clears newSectors', async () => {
       const f = new MockFile(SECTOR);
       await f.create();
@@ -390,8 +404,8 @@ describe('MockFile', () => {
       // After crash the sector is either 0xaa or 0xbb — both are valid full sectors
       const buf = Buffer.alloc(SECTOR);
       await f.read(buf, { position: 0 });
-      const allAA = buf.every((b) => b === 0xaa);
-      const allBB = buf.every((b) => b === 0xbb);
+      const allAA = buf.every(b => b === 0xaa);
+      const allBB = buf.every(b => b === 0xbb);
       assert.ok(allAA || allBB, 'sector must be one of the staged write versions');
     });
 
@@ -406,9 +420,11 @@ describe('MockFile', () => {
       const buf = Buffer.alloc(2 * SECTOR);
       await assert.doesNotReject(() => f.read(buf, { position: 0 }));
     });
+
   });
 
   describe('crashFullLoss()', () => {
+
     it('resets file to empty closed state', async () => {
       const f = new MockFile(SECTOR);
       await f.create();
@@ -437,9 +453,11 @@ describe('MockFile', () => {
       f.crashFullLoss();
       assert.equal(f.getNewSectors().size, 0);
     });
+
   });
 
   describe('crashPartialCorruption()', () => {
+
     it('clears newSectors', async () => {
       const f = new MockFile(SECTOR);
       await f.create();
@@ -484,12 +502,14 @@ describe('MockFile', () => {
       f.crashPartialCorruption();
       const buf = Buffer.alloc(SECTOR);
       await f.read(buf, { position: 0 });
-      const diffCount = [...buf].filter((b) => b !== 0x00).length;
+      const diffCount = [...buf].filter(b => b !== 0x00).length;
       assert.equal(diffCount, 1, 'exactly one byte should be corrupted (XOR 0xff → 0xff)');
     });
+
   });
 
   describe('crashMixed()', () => {
+
     it('clears newSectors', async () => {
       const f = new MockFile(SECTOR);
       await f.create();
@@ -523,11 +543,18 @@ describe('MockFile', () => {
         await assert.doesNotReject(() => f.read(buf, { position: 0 }));
       }
     });
+
   });
 
   // ── sectorSize property ──────────────────────────────────────────────────────
 
   describe('sectorSize property', () => {
+
+    it('reflects the value passed to the constructor', () => {
+      const f = new MockFile(512);
+      assert.equal(f.sectorSize, 512);
+    });
+
     it('works with sector size of 1', async () => {
       const f = new MockFile(1);
       await f.create();
@@ -537,5 +564,7 @@ describe('MockFile', () => {
       await f.read(buf, { position: 0 });
       assert.equal(buf[0], 0x42);
     });
+
   });
+
 });

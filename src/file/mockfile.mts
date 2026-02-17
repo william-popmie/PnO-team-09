@@ -1,4 +1,5 @@
 // @author Tijn Gommers
+// @author Wout Van Hemelrijck
 // @date 2025-11-18
 
 import assert from 'node:assert/strict';
@@ -116,7 +117,7 @@ export class MockFile implements File {
   public close(): Promise<void> {
     this.ensureOpen();
     if (this.newSectors.size !== 0) {
-      throw new Error("Cannot close file: there are unsynced pending writes. Call sync() first.");
+      throw new Error('Cannot close file: there are unsynced pending writes. Call sync() first.');
     }
     this.openFlag = false;
     return Promise.resolve();
@@ -158,11 +159,7 @@ export class MockFile implements File {
     let sectorOrdinal = Math.floor(position / this.sectorSize);
     let offsetInSector = position - sectorOrdinal * this.sectorSize;
     while (buffer.length > this.sectorSize - offsetInSector) {
-      this.writeSector(
-        offsetInSector,
-        buffer.subarray(0, this.sectorSize - offsetInSector),
-        sectorOrdinal,
-      );
+      this.writeSector(offsetInSector, buffer.subarray(0, this.sectorSize - offsetInSector), sectorOrdinal);
       buffer = buffer.subarray(this.sectorSize - offsetInSector);
       sectorOrdinal++;
       offsetInSector = 0;

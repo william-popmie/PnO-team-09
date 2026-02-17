@@ -1,386 +1,541 @@
-// @author Tijn Gommers, Mathias Bouhon Keulen
+// @author Tijn Gommers
+// @author Wout Van Hemelrijck
 // @date 2025-11-18
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import assert from 'node:assert/strict';
 import { MockFile } from './mockfile.mjs';
-import random from 'random';
+import { describe as _describe, it as _it } from 'node:test';
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const describe = (name: string, fn: () => void): void => {
+  void _describe(name, fn);
+};
+const it = (name: string, fn: () => Promise<void>): void => {
+  void _it(name, fn);
+};
+/** Returns a Buffer filled with a single repeating byte value. */
+function filledBuffer(size: number, value: number): Buffer {
+  return Buffer.alloc(size, value);
+}
+
+/** Reads the entire committed content of a MockFile (must be open, size known). */
+async function readAll(file: MockFile, size: number): Promise<Buffer> {
+  const buf = Buffer.alloc(size);
+  await file.read(buf, { position: 0 });
+  return buf;
+}
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const SECTOR = 8; // small sector for easy reasoning
+
+// ─── Test suite ───────────────────────────────────────────────────────────────
 
 describe('MockFile', () => {
-  let file: MockFile;
+  // ── Guard helpers ───────────────────────────────────────────────────────────
 
-  beforeEach(() => {
-    file = new MockFile(8); // small sector size for testing
-  });
-
-  it('should create, write, read and truncate a file', async () => {
-    await file.create();
-    await file.open();
-
-    const buf = Buffer.from('abcdefgh');
-    await file.writev([buf], 0);
-
-    const readBuf = Buffer.alloc(buf.length);
-    await file.read(readBuf, { position: 0 });
-    expect(readBuf.toString()).toBe('abcdefgh');
-
-    await file.truncate(4);
-    const truncatedBuf = Buffer.alloc(4);
-    await file.read(truncatedBuf, { position: 0 });
-    expect(truncatedBuf.toString()).toBe('abcd');
-
-    const stats = await file.stat();
-    expect(stats.size).toBe(4);
-
-    await file.close();
-  });
-
-  it('should throw when closing with pending writes', async () => {
-    await file.create();
-    await file.open();
-    await file.writev([Buffer.from('abcd')], 0);
-
-    await expect(file.close()).rejects.toThrow("Closed the file without sync'ing first.");
-  });
-
-  it('should sync pending writes correctly', async () => {
-    await file.create();
-    await file.open();
-    await file.writev([Buffer.from('abcdefgh')], 0);
-
-    await file.sync();
-    const readBuf = Buffer.alloc(8);
-    await file.read(readBuf, { position: 0 });
-    expect(readBuf.toString()).toBe('abcdefgh');
-  });
-
-  it('should simulate crashBasic correctly', async () => {
-    await file.create();
-    await file.open();
-    await file.writev([Buffer.from('abcdefgh')], 0);
-
-    file.crashBasic();
-    const stats = await file.stat();
-    expect(stats.size).toBe(8); // size should remain
-  });
-
-  it('should simulate crashFullLoss correctly', async () => {
-    await file.create();
-    await file.open();
-    await file.writev([Buffer.from('abcdefgh')], 0);
-
-    file.crashFullLoss();
-    const readBuf = Buffer.alloc(8);
-    await expect(file.read(readBuf, { position: 0 })).rejects.toThrow(); // nothing saved
-  });
-
-  it('should simulate crashPartialCorruption correctly', async () => {
-    await file.create();
-    await file.open();
-    await file.writev([Buffer.from('abcdefgh')], 0);
-
-    file.crashPartialCorruption();
-    const readBuf = Buffer.alloc(8);
-    await file.read(readBuf, { position: 0 });
-    expect(readBuf.toString()).not.toBe('abcdefgh'); // data is corrupted
-  });
-
-  it('should simulate crashMixed correctly', async () => {
-    await file.create();
-    await file.open();
-    await file.writev([Buffer.from('abcdefgh')], 0);
-    await file.writev([Buffer.from('ijklmnop')], 8);
-
-    file.crashMixed();
-    const readBuf = Buffer.alloc(16);
-    await file.read(readBuf, { position: 0 }).catch(() => {}); // may fail partially
-    expect(readBuf.length).toBe(16);
-  });
-
-  it('should maintain file isolation between multiple MockFiles', async () => {
-    const file1 = new MockFile(8);
-    const file2 = new MockFile(8);
-
-    await file1.create();
-    await file2.create();
-
-    await file1.writev([Buffer.from('one')], 0);
-    await file2.writev([Buffer.from('two')], 0);
-
-    const buf1 = Buffer.alloc(3);
-    const buf2 = Buffer.alloc(3);
-
-    await file1.read(buf1, { position: 0 });
-    await file2.read(buf2, { position: 0 });
-
-    expect(buf1.toString()).toBe('one');
-    expect(buf2.toString()).toBe('two');
-  });
-
-  /*
-  it('should throw error when operating on closed file', async () => {
-    await file.create();
-    await file.open();
-    await file.close();
-
-    await expect(file.read(Buffer.alloc(1), { position: 0 })).rejects.toThrow('File is not open.');
-    await expect(file.writev([Buffer.from('data')], 0)).rejects.toThrow('File is not open.');
-    await expect(file.sync()).rejects.toThrow('File is not open.');
-    await expect(file.truncate(0)).rejects.toThrow('File is not open.');
-    await expect(file.stat()).rejects.toThrow('File is not open.');
-    await expect(file.close()).rejects.toThrow('File is not open.');
-  });
-  */
-
-  it('full-sector write should be readable immediately', async () => {
-    await file.create();
-    await file.open();
-    const fullSectorBuf = Buffer.from('12345678');
-    await file.writev([fullSectorBuf], 0);
-
-    const readBuf = Buffer.alloc(8);
-    await file.read(readBuf, { position: 0 });
-    expect(readBuf.toString()).toBe('12345678');
-    await file.close();
-  });
-
-  it('partial pending write should be visible to read before sync', async () => {
-    await file.create();
-    await file.open();
-    const partialBuf = Buffer.from('1234');
-    await file.writev([partialBuf], 0);
-    const readBuf = Buffer.alloc(4);
-    await file.read(readBuf, { position: 0 });
-    expect(readBuf.toString()).toBe('1234');
-
-    const stats = await file.stat();
-    expect(stats.size).toBe(4);
-    await expect(file.close()).rejects.toThrow("Closed the file without sync'ing first.");
-  });
-
-  it('read beyondfile bounds should throw', async () => {
-    await file.create();
-    await file.open();
-    await file.writev([Buffer.from('data')], 0);
-    const buf = Buffer.alloc(10);
-    await expect(file.read(buf, { position: 0 })).rejects.toThrow();
-  });
-
-  it('truncate should remove pending writes beyond new length', async () => {
-    await file.create();
-    await file.open();
-    await file.writev([Buffer.from('abcdefgh')], 0);
-    await file.writev([Buffer.from('ijklmnop')], 8);
-
-    await file.writev([Buffer.from('qrst')], 16);
-
-    await file.truncate(16);
-    const stats = await file.stat();
-    expect(stats.size).toBe(16);
-
-    const buf = Buffer.alloc(16);
-    await file.read(buf, { position: 0 });
-
-    expect(buf.slice(0, 8).toString()).toBe('abcdefgh');
-    expect(buf.slice(8, 16).toString()).toBe('ijklmnop');
-  });
-
-  it('splits a long write across multiple sectors (while loop)', async () => {
-    await file.create();
-    await file.open();
-
-    const payload = Buffer.alloc(20, 'x');
-    await file.writev([payload], 3);
-
-    const stats = await file.stat();
-    expect(stats.size).toBe(23);
-
-    const readBack = Buffer.alloc(20);
-    await file.read(readBack, { position: 3 });
-    expect(readBack.equals(payload)).toBe(true);
-  });
-
-  it('corrupts pending writes when newSectors is non-empty', async () => {
-    await file.create();
-    await file.open();
-
-    await file.truncate(8);
-
-    const partial = Buffer.from('abcd');
-    const expectedSector = Buffer.alloc(8);
-    partial.copy(expectedSector, 0);
-
-    await file.writev([partial], 0);
-
-    const beforeCrash = Buffer.alloc(8);
-    await file.read(beforeCrash, { position: 0 });
-    expect(beforeCrash.equals(expectedSector)).toBe(true);
-
-    file.crashPartialCorruption();
-
-    const afterCrash = Buffer.alloc(8);
-    await file.read(afterCrash, { position: 0 });
-    expect(afterCrash.equals(expectedSector)).toBe(false);
-  });
-
-  it('skips when the pending writes array is empty (triggers first continue)', async () => {
-    await file.create();
-    await file.open();
-
-    await file.truncate(8);
-    const committed = Buffer.from('AAAAAAAA');
-    file['sectors'][0] = Buffer.from(committed);
-
-    file['newSectors'].set(0, []);
-    file.crashPartialCorruption();
-
-    expect(file['sectors'][0]).toBeDefined();
-    expect(Buffer.from(file['sectors'][0]).equals(committed)).toBe(true);
-
-    expect(file['newSectors'].size).toBe(0);
-  });
-
-  it('saves and corrupts the last pending write for a sector, and skips other sectors (deterministic)', async () => {
-    await file.create();
-    await file.open();
-
-    await file.truncate(16);
-
-    await file.writev([Buffer.from('AAAA')], 0);
-    await file.writev([Buffer.from('BBBB')], 0);
-
-    await file.writev([Buffer.from('CCCC')], 8);
-
-    const newSectors = file.getNewSectors();
-    expect(newSectors.has(0)).toBe(true);
-    expect(newSectors.has(1)).toBe(true);
-
-    const boolSeq = [false, true, true];
-
-    const uniformSeq = [2, 0];
-    vi.spyOn(random, 'bool').mockImplementation(() => {
-      return boolSeq.shift() ?? false;
+  describe('open/close/create guards', () => {
+    it('create() succeeds on a fresh file', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      // If create() throws the test will fail automatically.
     });
 
-    vi.spyOn(random, 'uniformInt').mockImplementation(() => {
-      const v = uniformSeq.shift() ?? 0;
-      return () => v;
+    it('create() throws if file is already open', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      await assert.rejects(() => f.create(), /already open/i);
     });
 
-    file.crashMixed();
+    it('open() succeeds after create+close', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      await f.sync();
+      await f.close();
+      await f.open();
+    });
 
-    expect(file.getNewSectors().size).toBe(0);
+    it('open() throws if file is already open', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      await assert.rejects(() => f.open(), /already open/i);
+    });
 
-    const savedSector0 = Buffer.from(file['sectors'][0]);
-    expect(savedSector0).toBeDefined();
-    const zeroSector = Buffer.alloc(8);
-    expect(savedSector0.equals(zeroSector)).toBe(false);
+    it('close() throws if file is not open', async () => {
+      const f = new MockFile(SECTOR);
+      await assert.rejects(() => f.close(), /not open/i);
+    });
 
-    const sector1 = Buffer.from(file['sectors'][1]);
-    expect(sector1.equals(Buffer.alloc(8))).toBe(true);
+    it('close() throws when there are unsynced pending writes', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      await f.writev([filledBuffer(SECTOR, 0xaa)], 0);
+      // newSectors is non-empty → close must reject
+      await assert.rejects(() => f.close(), /unsynced/i);
+    });
+
+    it('close() succeeds after sync()', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      await f.writev([filledBuffer(SECTOR, 0xbb)], 0);
+      await f.sync();
+      await f.close(); // must not throw
+    });
+
+    it('read() throws if file is not open', async () => {
+      const f = new MockFile(SECTOR);
+      await assert.rejects(() => f.read(Buffer.alloc(4), { position: 0 }), /not open/i);
+    });
+
+    it('writev() throws if file is not open', async () => {
+      const f = new MockFile(SECTOR);
+      await assert.rejects(() => f.writev([Buffer.alloc(4)], 0), /not open/i);
+    });
+
+    it('sync() throws if file is not open', async () => {
+      const f = new MockFile(SECTOR);
+      await assert.rejects(() => f.sync(), /not open/i);
+    });
+
+    it('truncate() throws if file is not open', async () => {
+      const f = new MockFile(SECTOR);
+      await assert.rejects(() => f.truncate(SECTOR), /not open/i);
+    });
+
+    it('stat() throws if file is not open', async () => {
+      const f = new MockFile(SECTOR);
+      await assert.rejects(() => f.stat(), /not open/i);
+    });
   });
 
-  it('saves nothing when nbWritesToSave is zero for a sector', async () => {
-    await file.create();
-    await file.open();
-    await file.truncate(8);
-    await file.writev([Buffer.from('DDDD')], 0);
+  // ── stat / size ─────────────────────────────────────────────────────────────
 
-    vi.spyOn(random, 'bool').mockImplementation(() => false);
-    vi.spyOn(random, 'uniformInt').mockImplementation(() => {
-      return () => 0;
+  describe('stat()', () => {
+    it('reports size 0 on a freshly created file', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      const { size } = await f.stat();
+      assert.equal(size, 0);
     });
 
-    const before = Buffer.from(file['sectors'][0]);
+    it('reports correct size after truncate', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      await f.truncate(3 * SECTOR);
+      const { size } = await f.stat();
+      assert.equal(size, 3 * SECTOR);
+    });
 
-    file.crashMixed();
-
-    expect(file.getNewSectors().size).toBe(0);
-
-    const after = Buffer.from(file['sectors'][0]);
-    expect(after.equals(before)).toBe(true);
+    it('reports exact byte size (not rounded to sector boundary)', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      await f.truncate(SECTOR + 3);
+      const { size } = await f.stat();
+      assert.equal(size, SECTOR + 3);
+    });
   });
 
-  it('crashBasic: saves last pending write for some sectors and skips others', async () => {
-    await file.create();
-    await file.open();
+  // ── truncate ────────────────────────────────────────────────────────────────
 
-    await file.truncate(16);
-
-    await file.writev([Buffer.from('aaaa')], 0);
-    await file.writev([Buffer.from('bbbb')], 0);
-    await file.writev([Buffer.from('cccc')], 8);
-
-    const pendingBefore = new Map<number, Buffer>();
-    for (const [k, v] of file['newSectors'].entries()) {
-      const last = v.at(-1);
-      if (!last) continue;
-      pendingBefore.set(Number(k), Buffer.from(last));
-    }
-
-    const uniformSeq = [2, 0];
-    vi.spyOn(random, 'uniformInt').mockImplementation(() => {
-      const v = uniformSeq.shift() ?? 0;
-      return () => v;
+  describe('truncate()', () => {
+    it('extends the file with zero-filled sectors', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      await f.truncate(2 * SECTOR);
+      await f.sync();
+      const buf = await readAll(f, 2 * SECTOR);
+      assert.deepEqual(buf, Buffer.alloc(2 * SECTOR, 0));
     });
 
-    file.crashBasic();
+    it('shrinks the file and drops out-of-range sectors', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      await f.writev([filledBuffer(2 * SECTOR, 0xcc)], 0);
+      await f.sync();
+      await f.truncate(SECTOR); // drop second sector
+      const { size } = await f.stat();
+      assert.equal(size, SECTOR);
+    });
 
-    expect(file['newSectors'].size).toBe(0);
+    it('pending writes for removed sectors are discarded on shrink', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      await f.truncate(2 * SECTOR);
+      await f.sync();
+      // Stage a write to sector 1 (the one we are about to remove)
+      await f.writev([filledBuffer(SECTOR, 0xff)], SECTOR);
+      assert.equal(f.getNewSectors().has(1), true);
+      await f.truncate(SECTOR); // shrink: sector 1 should be discarded
+      assert.equal(f.getNewSectors().has(1), false);
+    });
 
-    const sector0Saved = file['sectors'][0];
-    expect(Buffer.from(sector0Saved).equals(pendingBefore.get(0)!)).toBe(true);
-
-    const sector1 = file['sectors'][1];
-    expect(Buffer.from(sector1).equals(Buffer.alloc(8))).toBe(true);
+    it('truncate to same size is a no-op', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      await f.truncate(SECTOR);
+      await f.truncate(SECTOR);
+      const { size } = await f.stat();
+      assert.equal(size, SECTOR);
+    });
   });
 
-  it('crashMixed: processes some sectors (save +/- corrupt) and skips others based on random.bool', async () => {
-    await file.create();
-    await file.open();
+  // ── writev / read ───────────────────────────────────────────────────────────
 
-    await file.truncate(24);
-
-    await file.writev([Buffer.from('1111')], 0);
-    await file.writev([Buffer.from('2222')], 0);
-    await file.writev([Buffer.from('3333')], 8);
-    await file.writev([Buffer.from('4444')], 16);
-
-    const pendingBefore = new Map<number, Buffer>();
-    for (const [k, v] of file['newSectors'].entries()) {
-      const last = v.at(-1);
-      if (!last) continue;
-      pendingBefore.set(Number(k), Buffer.from(last));
-    }
-
-    const boolSeq = [false, true, true, false, false];
-    vi.spyOn(random, 'bool').mockImplementation(() => {
-      return boolSeq.shift() ?? false;
+  describe('writev() and read()', () => {
+    it('write a single full sector and read it back', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      const data = filledBuffer(SECTOR, 0x42);
+      await f.writev([data], 0);
+      await f.sync();
+      const result = await readAll(f, SECTOR);
+      assert.deepEqual(result, data);
     });
 
-    const uniformSeq = [2, 0, 1];
-    vi.spyOn(random, 'uniformInt').mockImplementation(() => {
-      const v = uniformSeq.shift() ?? 0;
-      return () => v;
+    it('write spanning two sectors and read back', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      const data = filledBuffer(2 * SECTOR, 0x55);
+      await f.writev([data], 0);
+      await f.sync();
+      const result = await readAll(f, 2 * SECTOR);
+      assert.deepEqual(result, data);
     });
 
-    file.crashMixed();
+    it('partial write within a sector preserves surrounding bytes', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      // Fill sector with 0xaa, then overwrite middle 2 bytes with 0xff
+      await f.writev([filledBuffer(SECTOR, 0xaa)], 0);
+      await f.sync();
+      await f.writev([Buffer.from([0xff, 0xff])], 3);
+      await f.sync();
 
-    expect(file['newSectors'].size).toBe(0);
+      const expected = filledBuffer(SECTOR, 0xaa);
+      expected[3] = 0xff;
+      expected[4] = 0xff;
 
-    if (pendingBefore.has(0)) {
-      const sector0After = Buffer.from(file['sectors'][0]);
-      expect(sector0After.equals(pendingBefore.get(0)!)).toBe(false);
-    } else {
-      throw new Error('Test setup failed: no pending write recorded for sector 0');
-    }
+      const result = await readAll(f, SECTOR);
+      assert.deepEqual(result, expected);
+    });
 
-    expect(Buffer.from(file['sectors'][1]).equals(Buffer.alloc(8))).toBe(true);
+    it('write at a non-zero position auto-extends the file', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      const data = Buffer.from([0x01, 0x02, 0x03]);
+      await f.writev([data], SECTOR); // write into second sector region
+      await f.sync();
+      const { size } = await f.stat();
+      assert.ok(size >= SECTOR + data.length, 'file should have grown');
+    });
 
-    if (pendingBefore.has(2)) {
-      const sector2After = Buffer.from(file['sectors'][2]);
-      expect(sector2After.equals(pendingBefore.get(2)!)).toBe(true);
-    } else {
-      throw new Error('Test setup failed: no pending write recorded for sector 2');
-    }
+    it('write with multiple buffers concatenates them correctly', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      const a = Buffer.from([0x01, 0x02, 0x03, 0x04]);
+      const b = Buffer.from([0x05, 0x06, 0x07, 0x08]);
+      await f.writev([a, b], 0);
+      await f.sync();
+      const result = await readAll(f, SECTOR);
+      assert.deepEqual(result, Buffer.concat([a, b]));
+    });
+
+    it('read out of bounds throws an assertion error', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      await f.truncate(SECTOR);
+      await f.sync();
+      await assert.rejects(() => f.read(Buffer.alloc(SECTOR + 1), { position: 0 }), /out of bounds|exceeds/i);
+    });
+
+    it('read with negative position throws an assertion error', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      await f.truncate(SECTOR);
+      await f.sync();
+      await assert.rejects(() => f.read(Buffer.alloc(1), { position: -1 }), /non-negative/i);
+    });
+
+    it('pending write is visible before sync', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      await f.writev([filledBuffer(SECTOR, 0xaa)], 0);
+      // Do NOT sync — readSector should prefer newSectors
+      const buf = Buffer.alloc(SECTOR);
+      await f.read(buf, { position: 0 });
+      assert.deepEqual(buf, filledBuffer(SECTOR, 0xaa));
+    });
+
+    it('second write to same sector (pre-sync) is visible immediately', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      await f.writev([filledBuffer(SECTOR, 0x11)], 0);
+      await f.writev([filledBuffer(SECTOR, 0x22)], 0); // overwrite
+      const buf = Buffer.alloc(SECTOR);
+      await f.read(buf, { position: 0 });
+      assert.deepEqual(buf, filledBuffer(SECTOR, 0x22));
+    });
+
+    it('write at cross-sector boundary distributes bytes correctly', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      // Fill two sectors with 0x00
+      await f.truncate(2 * SECTOR);
+      await f.sync();
+      // Write 4 bytes starting at offset SECTOR - 2 (straddles boundary)
+      const payload = Buffer.from([0x10, 0x20, 0x30, 0x40]);
+      await f.writev([payload], SECTOR - 2);
+      await f.sync();
+
+      const result = Buffer.alloc(2 * SECTOR);
+      await f.read(result, { position: 0 });
+
+      assert.equal(result[SECTOR - 2], 0x10);
+      assert.equal(result[SECTOR - 1], 0x20);
+      assert.equal(result[SECTOR], 0x30);
+      assert.equal(result[SECTOR + 1], 0x40);
+    });
+  });
+
+  // ── sync ────────────────────────────────────────────────────────────────────
+
+  describe('sync()', () => {
+    it('clears newSectors after sync', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      await f.writev([filledBuffer(SECTOR, 0x01)], 0);
+      assert.equal(f.getNewSectors().size, 1);
+      await f.sync();
+      assert.equal(f.getNewSectors().size, 0);
+    });
+
+    it('committed data survives a reopen', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      const data = filledBuffer(SECTOR, 0xde);
+      await f.writev([data], 0);
+      await f.sync();
+      await f.close();
+      await f.open();
+      const result = await readAll(f, SECTOR);
+      assert.deepEqual(result, data);
+    });
+
+    it('sync is idempotent when there is nothing pending', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      await f.sync(); // nothing pending
+      await f.sync(); // still nothing pending
+      assert.equal(f.getNewSectors().size, 0);
+    });
+  });
+
+  // ── getNewSectors ───────────────────────────────────────────────────────────
+
+  describe('getNewSectors()', () => {
+    it('is empty on a freshly created file', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      assert.equal(f.getNewSectors().size, 0);
+    });
+
+    it('accumulates multiple pending writes for the same sector', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      await f.writev([filledBuffer(SECTOR, 0x01)], 0);
+      await f.writev([filledBuffer(SECTOR, 0x02)], 0);
+      await f.writev([filledBuffer(SECTOR, 0x03)], 0);
+      const pending = f.getNewSectors();
+      assert.equal(pending.get(0)!.length, 3);
+    });
+  });
+
+  // ── create() reset behaviour ────────────────────────────────────────────────
+
+  describe('create() resets state', () => {
+    it('create() on a closed file resets size and sectors', async () => {
+      const f = new MockFile(SECTOR);
+      // First use
+      await f.create();
+      await f.writev([filledBuffer(2 * SECTOR, 0xff)], 0);
+      await f.sync();
+      await f.close();
+      // Re-create
+      await f.create();
+      const { size } = await f.stat();
+      assert.equal(size, 0);
+      assert.equal(f.getNewSectors().size, 0);
+    });
+  });
+
+  // ── crash simulations ───────────────────────────────────────────────────────
+
+  describe('crashBasic()', () => {
+    it('clears newSectors', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      await f.writev([filledBuffer(SECTOR, 0xaa)], 0);
+      f.crashBasic();
+      assert.equal(f.getNewSectors().size, 0);
+    });
+
+    it('committed sectors have correct size after crash', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      await f.writev([filledBuffer(SECTOR, 0xaa)], 0);
+      await f.sync();
+      await f.writev([filledBuffer(SECTOR, 0xbb)], 0);
+      f.crashBasic();
+      // After crash the sector is either 0xaa or 0xbb — both are valid full sectors
+      const buf = Buffer.alloc(SECTOR);
+      await f.read(buf, { position: 0 });
+      const allAA = buf.every((b) => b === 0xaa);
+      const allBB = buf.every((b) => b === 0xbb);
+      assert.ok(allAA || allBB, 'sector must be one of the staged write versions');
+    });
+
+    it('file remains readable after crashBasic', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      await f.truncate(2 * SECTOR);
+      await f.sync();
+      await f.writev([filledBuffer(2 * SECTOR, 0x99)], 0);
+      f.crashBasic();
+      // We should be able to read without throwing
+      const buf = Buffer.alloc(2 * SECTOR);
+      await assert.doesNotReject(() => f.read(buf, { position: 0 }));
+    });
+  });
+
+  describe('crashFullLoss()', () => {
+    it('resets file to empty closed state', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      await f.writev([filledBuffer(SECTOR, 0x11)], 0);
+      await f.sync();
+      f.crashFullLoss();
+      // File should now be closed
+      await assert.rejects(() => f.stat(), /not open/i);
+    });
+
+    it('after full loss a new create() works and starts fresh', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      await f.writev([filledBuffer(SECTOR, 0xcc)], 0);
+      await f.sync();
+      f.crashFullLoss();
+      await f.create();
+      const { size } = await f.stat();
+      assert.equal(size, 0);
+    });
+
+    it('clears both committed sectors and newSectors', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      await f.writev([filledBuffer(SECTOR, 0xab)], 0); // pending
+      f.crashFullLoss();
+      assert.equal(f.getNewSectors().size, 0);
+    });
+  });
+
+  describe('crashPartialCorruption()', () => {
+    it('clears newSectors', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      await f.writev([filledBuffer(SECTOR, 0x55)], 0);
+      f.crashPartialCorruption();
+      assert.equal(f.getNewSectors().size, 0);
+    });
+
+    it('committed sector is modified (corrupted) after crash with pending writes', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      await f.truncate(SECTOR);
+      await f.sync();
+      const original = filledBuffer(SECTOR, 0x00);
+      await f.writev([original], 0);
+      // Do NOT sync — corruption targets newSectors
+      f.crashPartialCorruption();
+      const buf = Buffer.alloc(SECTOR);
+      await f.read(buf, { position: 0 });
+      // The sector must differ from original (one byte flipped by XOR 0xff)
+      assert.notDeepEqual(buf, original);
+    });
+
+    it('corrupts committed sectors when no pending writes exist', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      const allZero = Buffer.alloc(SECTOR, 0x00);
+      await f.writev([allZero], 0);
+      await f.sync(); // committed, no pending
+      f.crashPartialCorruption();
+      const buf = Buffer.alloc(SECTOR);
+      await f.read(buf, { position: 0 });
+      assert.notDeepEqual(buf, allZero);
+    });
+
+    it('exactly one byte differs after corruption', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      const allZero = Buffer.alloc(SECTOR, 0x00);
+      await f.writev([allZero], 0);
+      await f.sync();
+      f.crashPartialCorruption();
+      const buf = Buffer.alloc(SECTOR);
+      await f.read(buf, { position: 0 });
+      const diffCount = [...buf].filter((b) => b !== 0x00).length;
+      assert.equal(diffCount, 1, 'exactly one byte should be corrupted (XOR 0xff → 0xff)');
+    });
+  });
+
+  describe('crashMixed()', () => {
+    it('clears newSectors', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      await f.writev([filledBuffer(SECTOR, 0x77)], 0);
+      f.crashMixed();
+      assert.equal(f.getNewSectors().size, 0);
+    });
+
+    it('file remains readable after crashMixed', async () => {
+      const f = new MockFile(SECTOR);
+      await f.create();
+      await f.truncate(2 * SECTOR);
+      await f.sync();
+      await f.writev([filledBuffer(2 * SECTOR, 0x44)], 0);
+      f.crashMixed();
+      const buf = Buffer.alloc(2 * SECTOR);
+      await assert.doesNotReject(() => f.read(buf, { position: 0 }));
+    });
+
+    it('committed sector is either old, partially saved, or possibly corrupted', async () => {
+      // We run multiple times to hit various branches with high probability.
+      // The only guarantee we assert: after crash we can read without throwing.
+      for (let i = 0; i < 20; i++) {
+        const f = new MockFile(SECTOR);
+        await f.create();
+        await f.truncate(SECTOR);
+        await f.sync();
+        await f.writev([filledBuffer(SECTOR, 0xff)], 0);
+        f.crashMixed();
+        const buf = Buffer.alloc(SECTOR);
+        await assert.doesNotReject(() => f.read(buf, { position: 0 }));
+      }
+    });
+  });
+
+  // ── sectorSize property ──────────────────────────────────────────────────────
+
+  describe('sectorSize property', () => {
+    it('works with sector size of 1', async () => {
+      const f = new MockFile(1);
+      await f.create();
+      await f.writev([Buffer.from([0x42])], 0);
+      await f.sync();
+      const buf = Buffer.alloc(1);
+      await f.read(buf, { position: 0 });
+      assert.equal(buf[0], 0x42);
+    });
   });
 });

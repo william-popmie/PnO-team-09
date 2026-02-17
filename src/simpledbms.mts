@@ -203,6 +203,7 @@ export class Collection {
    * Creates a secondary index on a field.
    * @param {string} fieldName The field to index
    * @param {FBNodeStorage<string, string>} storage The storage to use for the index B+ Tree
+   * @throws {Error} If the field is not indexable (starts with _ or is 'id')
    * @returns {Promise<void>} A promise that resolves when the index is created
    */
   async createIndex(fieldName: string, storage: FBNodeStorage<string, string>): Promise<void> {

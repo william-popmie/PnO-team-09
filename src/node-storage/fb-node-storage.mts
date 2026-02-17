@@ -108,6 +108,7 @@ export class FBNodeStorage<Keystype, ValuesType>
     children: (FBLeafNode<Keystype, ValuesType> | FBInternalNode<Keystype, ValuesType>)[],
     keys: Keystype[],
   ): Promise<FBInternalNode<Keystype, ValuesType>> {
+    // First pass: ensure all children have blockIds
     for (const child of children) {
       if (child.blockId === undefined || child.blockId === NO_BLOCK) {
         if (child.isLeaf) {
@@ -120,6 +121,15 @@ export class FBNodeStorage<Keystype, ValuesType>
       }
     }
 
+    // Second pass: re-persist all leaf children to sync nextBlockId/prevBlockId pointers
+    // This is necessary after splits where pointer relationships were established
+    for (const child of children) {
+      if (child.isLeaf) {
+        const old = await this.persistLeaf(child);
+        if (typeof old === 'number') this.enqueueForReclaim(old);
+      }
+    }
+
     const node = await this.createInternalNode(children, keys);
     if (node.blockId === undefined || node.blockId === NO_BLOCK) {
       const old = await this.persistInternal(node);
@@ -129,6 +139,16 @@ export class FBNodeStorage<Keystype, ValuesType>
   }
 
   async persistLeaf(node: FBLeafNode<Keystype, ValuesType>): Promise<number | undefined> {
+    // Sync blockId fields from object references before persisting
+    // Only update if the object reference exists and has a valid blockId
+    if (node.nextLeaf && node.nextLeaf.blockId !== undefined && node.nextLeaf.blockId !== NO_BLOCK) {
+      node.nextBlockId = node.nextLeaf.blockId;
+    }
+
+    if (node.prevLeaf && node.prevLeaf.blockId !== undefined && node.prevLeaf.blockId !== NO_BLOCK) {
+      node.prevBlockId = node.prevLeaf.blockId;
+    }
+
     const payload = {
       type: 'leaf',
       keys: node.keys.map((key) => serializeKey(key)),

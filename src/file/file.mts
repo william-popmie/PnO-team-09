@@ -1,5 +1,4 @@
 // @author Tijn Gommers
-// @author Wout Van Hemelrijck
 // @date 2025-11-18
 
 import * as fsPromises from 'node:fs/promises';
@@ -12,13 +11,13 @@ export interface File {
   /**
    * The maximum N such that writes of size N at offsets that are multiples of N are atomic.
    */
-  sectorSize: number;
+  readonly sectorSize: number;
 
   /**
    * Creates a new file or overwrites an existing file.
    * @returns {Promise<void>} Resolves when the file is created.
    */
-  create(overwrite?: boolean): Promise<void>;
+  create(): Promise<void>;
 
   /**
    * Opens an existing file for reading and writing.
@@ -52,11 +51,11 @@ export interface File {
   /**
    * Reads data from the file into a buffer at the specified position.
    * @param {Buffer} buffer - The buffer to fill with read data.
-   * @param {{position: number}} options - Object containing the read position.
+   * @param {{position: number, offset?: number}} options - Object containing the read position and optional buffer offset.
    * @returns {Promise<void>} Resolves when the read completes.
    * @throws {Error} If the file is not currently open.
    */
-  read(buffer: Buffer, options: { position: number }): Promise<void>;
+  read(buffer: Buffer, options: { position: number; offset?: number }): Promise<void>;
 
   /**
    * Truncates the file to the specified length.
@@ -80,7 +79,7 @@ export interface File {
  */
 export class RealFile implements File {
   /** Sector size for atomic writes. */
-  public sectorSize: number = 512;
+  public readonly sectorSize: number;
 
   /** Absolute path to the file on disk. */
   public readonly filePath: string;
@@ -91,9 +90,11 @@ export class RealFile implements File {
   /**
    * Constructs a RealFile for a given path.
    * @param {string} filePath - Absolute or relative path to the file.
+   * @param {number} sectorSize - Sector size for atomic writes. Defaults to 4096 bytes.
    */
-  public constructor(filePath: string) {
+  public constructor(filePath: string, sectorSize: number = 4096) {
     this.filePath = filePath;
+    this.sectorSize = sectorSize;
     this.fileHandle = null;
   }
 
@@ -124,13 +125,10 @@ export class RealFile implements File {
    * @throws {Error} If the file is currently open.
    */
   public async delete(): Promise<void> {
-    if (this.isOpen()) throw new Error('Cannot delete an open file.');
-
-    if (!(await this.exists())) {
-      throw new Error(`Cannot delete: file does not exist at "${this.filePath}".`);
+    if (this.isOpen()) {
+      throw new Error('Cannot delete an open file.');
     }
-
-    await fsPromises.rm(this.filePath);
+    await fsPromises.rm(this.filePath, { force: true });
   }
 
   /**
@@ -138,13 +136,9 @@ export class RealFile implements File {
    * @returns {Promise<void>} Resolves when creation is complete.
    * @throws {Error} If the file is already open.
    */
-  public async create(overwrite = false): Promise<void> {
+  public async create(): Promise<void> {
     if (this.isOpen()) throw new Error('File is already open.');
-    if (!overwrite && (await this.exists())) {
-      throw new Error(`File already exists at "${this.filePath}". Pass overwrite=true to overwrite it.`);
-    }
     this.fileHandle = await fsPromises.open(this.filePath, 'w+');
-    await this._detectSectorSize(); // automatisch na aanmaken
   }
 
   /**
@@ -155,7 +149,6 @@ export class RealFile implements File {
   public async open(): Promise<void> {
     if (this.isOpen()) throw new Error('File is already open.');
     this.fileHandle = await fsPromises.open(this.filePath, 'r+');
-    await this._detectSectorSize(); // automatisch na openen
   }
 
   /**
@@ -164,9 +157,8 @@ export class RealFile implements File {
    * @throws {Error} If the file is not currently open.
    */
   public async close(): Promise<void> {
-    const fh = this.fileHandle;
-    if (!fh) throw new Error('File is not open.');
-    await fh.close();
+    if (!this.isOpen()) throw new Error('File is not open.');
+    await this.fileHandle!.close();
     this.fileHandle = null;
   }
 
@@ -176,9 +168,8 @@ export class RealFile implements File {
    * @throws {Error} If the file is not currently open.
    */
   public async sync(): Promise<void> {
-    const fh = this.fileHandle;
-    if (!fh) throw new Error('File is not open.');
-    await fh.sync();
+    if (!this.isOpen()) throw new Error('File is not open.');
+    await this.fileHandle!.sync();
   }
 
   /**
@@ -189,37 +180,21 @@ export class RealFile implements File {
    * @throws {Error} If the file is not currently open.
    */
   public async writev(buffers: Buffer[], position: number): Promise<void> {
-    const fh = this.fileHandle;
-    if (!fh) throw new Error('File is not open.');
-
-    const totalExpected = buffers.reduce((sum, b) => sum + b.byteLength, 0);
-    const { bytesWritten } = await fh.writev(buffers, position);
-
-    if (bytesWritten !== totalExpected) {
-      throw new Error(
-        `Partial write: expected ${totalExpected} bytes, but wrote ${bytesWritten} bytes at position ${position}.`,
-      );
-    }
+    if (!this.isOpen()) throw new Error('File is not open.');
+    await this.fileHandle!.writev(buffers, position);
   }
 
   /**
    * Reads from the file into a buffer.
    * @param {Buffer} buffer - Buffer to fill with data.
-   * @param {{position: number}} options - Position to start reading.
+   * @param {{position: number, offset?: number}} options - Position to start reading and optional buffer offset.
    * @returns {Promise<void>} Resolves when reading is complete.
    * @throws {Error} If the file is not currently open.
    */
-  public async read(buffer: Buffer, options: { position: number }): Promise<void> {
-    const fh = this.fileHandle;
-    if (!fh) throw new Error('File is not open.');
-
-    const { bytesRead } = await fh.read(buffer, 0, buffer.length, options.position);
-
-    if (bytesRead !== buffer.length) {
-      throw new Error(
-        `Partial read: expected ${buffer.length} bytes, but read ${bytesRead} bytes at position ${options.position}.`,
-      );
-    }
+  public async read(buffer: Buffer, options: { position: number; offset?: number }): Promise<void> {
+    if (!this.isOpen()) throw new Error('File is not open.');
+    const bufferOffset = options.offset ?? 0;
+    await this.fileHandle!.read(buffer, bufferOffset, buffer.length - bufferOffset, options.position);
   }
 
   /**
@@ -229,9 +204,9 @@ export class RealFile implements File {
    * @throws {Error} If the file is not currently open.
    */
   public async truncate(length: number): Promise<void> {
-    const fh = this.fileHandle;
-    if (!fh) throw new Error('File is not open.');
-    await fh.truncate(length);
+    if (length < 0) throw new Error('File is not open.');
+    if (!this.isOpen()) throw new Error('File is not open.');
+    await this.fileHandle!.truncate(length);
   }
 
   /**
@@ -240,21 +215,8 @@ export class RealFile implements File {
    * @throws {Error} If the file is not currently open.
    */
   public async stat(): Promise<{ size: number }> {
-    const fh = this.fileHandle;
-    if (!fh) throw new Error('File is not open.');
-    const stats = await fh.stat();
+    if (!this.isOpen()) throw new Error('File is not open.');
+    const stats = await this.fileHandle!.stat();
     return { size: stats.size };
-  }
-
-  /**
-   * Detects and stores the OS-recommended I/O block size as sectorSize.
-   * Note: on Windows, blksize is always reported as 4096 regardless of
-   * the actual physical sector size.
-   */
-  private async _detectSectorSize(): Promise<void> {
-    const fh = this.fileHandle;
-    if (!fh) throw new Error('File is not open.');
-    const stats = await fh.stat();
-    this.sectorSize = stats.blksize ?? 512;
   }
 }

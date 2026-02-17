@@ -250,7 +250,7 @@ describe('MockFile', () => {
 
     await file.writev([Buffer.from('CCCC')], 8);
 
-    const newSectors = file.getnewSectors();
+    const newSectors = file.getNewSectors();
     expect(newSectors.has(0)).toBe(true);
     expect(newSectors.has(1)).toBe(true);
 
@@ -268,7 +268,7 @@ describe('MockFile', () => {
 
     file.crashMixed();
 
-    expect(file.getnewSectors().size).toBe(0);
+    expect(file.getNewSectors().size).toBe(0);
 
     const savedSector0 = Buffer.from(file['sectors'][0]);
     expect(savedSector0).toBeDefined();
@@ -294,7 +294,7 @@ describe('MockFile', () => {
 
     file.crashMixed();
 
-    expect(file.getnewSectors().size).toBe(0);
+    expect(file.getNewSectors().size).toBe(0);
 
     const after = Buffer.from(file['sectors'][0]);
     expect(after.equals(before)).toBe(true);

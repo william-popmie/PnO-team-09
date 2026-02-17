@@ -88,7 +88,7 @@ export class MockFile implements File {
    * @returns {Promise<void>} Resolves immediately.
    * @throws {Error} If the file is already open.
    */
-  public create(overwrite = false): Promise<void> {
+  public async create(overwrite = false): Promise<void> {
     void overwrite;
     this.ensureClosed();
     this.openFlag = true;
@@ -114,7 +114,7 @@ export class MockFile implements File {
    * @returns {Promise<void>} Resolves when the file is closed.
    * @throws {Error} If the file is not open, or if there are unsynced pending writes.
    */
-  public close(): Promise<void> {
+  public async close(): Promise<void> {
     this.ensureOpen();
     if (this.newSectors.size !== 0) {
       throw new Error('Cannot close file: there are unsynced pending writes. Call sync() first.');
@@ -129,7 +129,7 @@ export class MockFile implements File {
    * @returns {Promise<void>} Resolves when sync is complete.
    * @throws {Error} If the file is not open.
    */
-  public sync(): Promise<void> {
+  public async sync(): Promise<void> {
     this.ensureOpen();
     for (const [sectorOrdinal, writes] of this.newSectors.entries()) {
       const last = writes.at(-1);
@@ -177,7 +177,7 @@ export class MockFile implements File {
    * @throws {Error} If the file is not open.
    * @throws {AssertionError} If the read range exceeds file bounds.
    */
-  public read(buffer: Buffer, options: { position: number }): Promise<void> {
+  public async read(buffer: Buffer, options: { position: number }): Promise<void> {
     this.ensureOpen();
     assert(options.position >= 0, 'Read position must be non-negative.');
     assert(
@@ -206,7 +206,7 @@ export class MockFile implements File {
    * @returns {Promise<void>} Resolves when truncation is complete.
    * @throws {Error} If the file is not open.
    */
-  public truncate(length: number): Promise<void> {
+  public async truncate(length: number): Promise<void> {
     this.ensureOpen();
     const sectorCount = Math.ceil(length / this.sectorSize);
     if (sectorCount < this.sectors.length) {
@@ -228,7 +228,7 @@ export class MockFile implements File {
    * @returns {Promise<{size: number}>} Object containing the file size in bytes.
    * @throws {Error} If the file is not open.
    */
-  public stat(): Promise<{ size: number }> {
+  public async stat(): Promise<{ size: number }> {
     this.ensureOpen();
     return Promise.resolve({ size: this.size });
   }

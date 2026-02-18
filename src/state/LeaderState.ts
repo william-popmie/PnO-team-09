@@ -62,8 +62,8 @@ export class LeaderState implements LeaderStateInterface {
         const matchIdx = this.matchIndex.get(peerId)!;
 
         if (index <= matchIdx) {
-            throw new LeaderStateError(`Next index must be greater than match index (${matchIdx}), got ${index}`);
-
+            // throw new LeaderStateError(`Next index must be greater than match index (${matchIdx}), got ${index}`);
+            index = matchIdx + 1;
         }
 
         this.nextIndex.set(peerId, index);

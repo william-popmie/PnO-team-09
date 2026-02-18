@@ -371,7 +371,8 @@ export class RaftNode implements RaftNodeInterface {
         });
     }
 
-    private async triggerReplication(): Promise<void> {
+    // private async triggerReplication(): Promise<void> {
+    async triggerReplication(): Promise<void> {
         if (this.stateMachine.isLeader()) {
             await this.stateMachine.triggerReplication();
         }

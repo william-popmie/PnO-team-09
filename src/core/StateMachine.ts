@@ -466,7 +466,7 @@ export class StateMachine implements StateMachineInterface {
             await this.stateLock.runExclusive(async () => {
                 if (!this.leaderState) {
                     // throw new RaftError("LeaderState is required to handle AppendEntriesResponse", "LEADER_STATE_REQUIRED");
-                    this.logger.error(`Node ${this.nodeId} is not a leader but trying to send AppendEntries to ${peer}`);
+                    this.logger.debug(`Node ${this.nodeId} is not a leader but trying to send AppendEntries to ${peer}`);
                     return;
                 }
 
@@ -506,7 +506,7 @@ export class StateMachine implements StateMachineInterface {
 
             if (!this.leaderState) {
                 // throw new RaftError("LeaderState is required to handle AppendEntriesResponse", "LEADER_STATE_REQUIRED");
-                this.logger.error(`Node ${this.nodeId} received AppendEntriesResponse from ${from} but has no LeaderState`);
+                this.logger.debug(`Node ${this.nodeId} received AppendEntriesResponse from ${from} but has no LeaderState`);
                 return;
             }
 

@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { StateMachine, RaftState } from './StateMachine';
 import { RaftError } from '../util/Error';
 import { stat } from 'node:fs';
-import { a } from 'vitest/dist/chunks/suite.d.BJWk38HB';
+import { a, b } from 'vitest/dist/chunks/suite.d.BJWk38HB';
+import { log } from 'node:console';
 
 describe('StateMachine.ts, StateMachine', () => {
 
@@ -56,6 +57,22 @@ describe('StateMachine.ts, StateMachine', () => {
     let onCommitIndexAdvanced: ReturnType<typeof vi.fn>;
 
     let stateMachine: StateMachine;
+
+    const baseRequest = {
+        term: 1,
+        candidateId: 'node2',
+        lastLogIndex: 0,
+        lastLogTerm: 0,
+    };
+
+    const baseRequest2 = {
+        term: 1,
+        leaderId: 'node2',
+        prevLogIndex: 0,
+        prevLogTerm: 0,
+        entries: [],
+        leaderCommit: 0,
+    };
 
     beforeEach(() => {
         persistentState = {
@@ -248,5 +265,248 @@ describe('StateMachine.ts, StateMachine', () => {
         await vi.waitFor(() => {
             expect(rpcHandler.sendAppendEntries).toHaveBeenCalledTimes(peers.length);
         });
+    });
+
+    it('should reject vote when request term is stale', async () => {
+        persistentState.getCurrentTerm.mockReturnValue(5);
+        const response = await stateMachine.handleRequestVote('node2', { ...baseRequest, term: 3 });
+        expect(response).toEqual({ term: 5, voteGranted: false });
+    });
+
+    it('should step down and update term when request term is higher', async () => {
+        const response = await stateMachine.handleRequestVote('node2', { ...baseRequest, term: 10 });
+        expect(persistentState.updateTermAndVote).toHaveBeenCalledWith(10, null);
+        expect(stateMachine.getCurrentState()).toBe(RaftState.Follower);
+    });
+
+    it('should reject vote when already voted for a different candidate in the same term', async () => {
+        persistentState.getVotedFor.mockReturnValue('node3');
+        const response = await stateMachine.handleRequestVote('node2', { ...baseRequest, term: 1 });
+        expect(response).toEqual({ term: 1, voteGranted: false });
+    });
+
+    it('should grant vote when voted for same candidate in the same term', async () => {
+        persistentState.getVotedFor.mockReturnValue('node2');
+        const response = await stateMachine.handleRequestVote('node2', { ...baseRequest, term: 1 });
+        expect(response).toEqual({ term: 1, voteGranted: true });
+    });
+
+    it('should reject vote when candidate log is not up-to-date term', async () => {
+        logManager.getLastTerm.mockReturnValue(3);
+        const response = await stateMachine.handleRequestVote('node2', { ...baseRequest, lastLogTerm: 2 });
+        expect(response.voteGranted).toBe(false);
+    });
+
+    it('should reject vote when canidate log is not up to date lower index same term', async () => {
+        logManager.getLastTerm.mockReturnValue(1);
+        logManager.getLastIndex.mockReturnValue(5);
+        const response = await stateMachine.handleRequestVote('node2', { ...baseRequest, lastLogTerm: 1, lastLogIndex: 3 });
+        expect(response.voteGranted).toBe(false);
+    });
+
+    it('should grant vote when candidate log is up-to-date', async () => {
+        const response = await stateMachine.handleRequestVote('node2', baseRequest);
+        expect(response.voteGranted).toBe(true);
+        expect(persistentState.updateTermAndVote).toHaveBeenCalledWith(1, 'node2');
+    });
+
+    it('should reset election timer when granting vote', async () => {
+        const response = await stateMachine.handleRequestVote('node2', baseRequest);
+        expect(timerManager.resetElectionTimer).toHaveBeenCalled();
+    });
+
+    it('should not reset election timer when rejecting vote', async () => {
+        persistentState.getVotedFor.mockReturnValue('node3');
+        const response = await stateMachine.handleRequestVote('node2', baseRequest);
+        expect(timerManager.resetElectionTimer).not.toHaveBeenCalled();
+    });
+
+    it('should reject when request term is stale', async () => {
+        persistentState.getCurrentTerm.mockReturnValue(5);
+        const response = await stateMachine.handleAppendEntries('node2', { ...baseRequest2, term: 3 });
+        expect(response).toEqual({ term: 5, success: false });
+    });
+
+    it('should step down and update leader when request term is higher', async () => {
+        const response = await stateMachine.handleAppendEntries('node2', { ...baseRequest2, term: 10 });
+        expect(persistentState.updateTermAndVote).toHaveBeenCalledWith(10, null);
+        expect(stateMachine.getCurrentState()).toBe(RaftState.Follower);
+        expect(stateMachine.getCurrentLeader()).toBe('node2');
+    });
+
+    it('should step down when same term received', async () => {
+        await stateMachine.becomeCandidate();
+        persistentState.getCurrentTerm.mockReturnValue(2);
+        const response = await stateMachine.handleAppendEntries('node2', { ...baseRequest2, term: 2 });
+        expect(stateMachine.getCurrentState()).toBe(RaftState.Follower);
+        expect(stateMachine.getCurrentLeader()).toBe('node2');
+    });
+
+    it('should return conflict info when log does not match', async () => {
+        logManager.matchesPrevLog.mockReturnValue(false);
+        logManager.getConflictInfo.mockReturnValue({ conflictIndex: 5, conflictTerm: 3 });
+        const response = await stateMachine.handleAppendEntries('node2', baseRequest2);
+        expect(response).toEqual({ term: 1, success: false, conflictIndex: 5, conflictTerm: 3 });
+    });
+
+    it('should append entries when log matches', async () => {
+        const entries = [{ index: 1, term: 1, command: { type: 'set', payload: { key: 'x', value: 10 } } }];
+        const response = await stateMachine.handleAppendEntries('node2', { ...baseRequest2, entries });
+        expect(logManager.appendEntriesFrom).toHaveBeenCalledWith(0, entries);
+        expect(response).toEqual({ term: 1, success: true, matchIndex: 1 });
+    });
+
+    it('should not call appendEntriesFrom when entries is empty', async () => {
+        await stateMachine.handleAppendEntries('node2', baseRequest2);
+        expect(logManager.appendEntriesFrom).not.toHaveBeenCalled();
+    });
+
+    it('should update commit index when leaderCommit is higher than current commit index', async () => {
+        volatileState.getCommitIndex.mockReturnValue(0);
+        const response = await stateMachine.handleAppendEntries('node2', { ...baseRequest2, prevLogIndex: 2, entries: [{ index: 3, term: 1, command: { type: 'set', payload: { key: 'x', value: 10 } } }], leaderCommit: 3 });
+        expect(volatileState.setCommitIndex).toHaveBeenCalledWith(3);
+        expect(onCommitIndexAdvanced).toHaveBeenCalledWith(3);
+    });
+
+    it('should not update commit index when leaderCommit is not higher than current commit index', async () => {
+        volatileState.getCommitIndex.mockReturnValue(3);
+        await stateMachine.handleAppendEntries('node2', { ...baseRequest2, leaderCommit: 3 });
+        expect(volatileState.setCommitIndex).not.toHaveBeenCalled();
+        expect(onCommitIndexAdvanced).not.toHaveBeenCalled();
+    });
+
+    it('should clamp new commit index to last new entry index', async () => {
+        volatileState.getCommitIndex.mockReturnValue(0);
+        await stateMachine.handleAppendEntries('node2', { ...baseRequest2, prevLogIndex: 1, entries: [{ index: 2, term: 1, command: { type: 'set', payload: { key: 'x', value: 10 } } }], leaderCommit: 10 });
+        expect(volatileState.setCommitIndex).toHaveBeenCalledWith(2);
+    });
+
+    it('should return correct matchindex on succes', async () => {
+        const response = await stateMachine.handleAppendEntries('node2', { ...baseRequest2, prevLogIndex: 3, entries: [{ index: 4, term: 1, command: { type: 'set', payload: { key: 'x', value: 10 } } }] });
+        expect(response).toEqual({ term: 1, success: true, matchIndex: 4 });
+    });
+
+    it('should become leader when majority of votes received', async () => {
+        rpcHandler.sendRequestVote.mockResolvedValue({ term: 1, voteGranted: true });
+        await stateMachine.becomeCandidate();
+        await vi.waitFor(() => {
+            expect(stateMachine.getCurrentState()).toBe(RaftState.Leader);
+        });
+    });
+
+    it('should become follower when response has higher term', async () => {
+        rpcHandler.sendRequestVote.mockResolvedValue({ term: 10, voteGranted: false });
+        await stateMachine.becomeCandidate();
+        await vi.waitFor(() => {
+            expect(stateMachine.getCurrentState()).toBe(RaftState.Follower);
+        });
+    });
+
+    it('should not become leader when vote is rejected', async () => {
+        rpcHandler.sendRequestVote.mockResolvedValue({ term: 1, voteGranted: false });
+        await stateMachine.becomeCandidate();
+        await vi.waitFor(() => {
+            expect(stateMachine.getCurrentState()).not.toBe(RaftState.Leader);
+        });
+        expect(stateMachine.getCurrentState()).toBe(RaftState.Candidate);
+    });
+
+    it('shoulld log error when sendRequestVote RPC fails', async () => {
+        rpcHandler.sendRequestVote.mockRejectedValue(new Error('RPC failed'));
+        await stateMachine.becomeCandidate();
+        await vi.waitFor(() => {
+            expect(logger.error).toHaveBeenCalled();
+        });
+    });
+
+    it('should ignore response with mismatched term', async () => {
+        persistentState.getCurrentTerm
+            .mockReturnValueOnce(1)
+            .mockReturnValueOnce(2)
+            .mockReturnValue(2);
+        rpcHandler.sendRequestVote.mockResolvedValue({ term: 1, voteGranted: true });
+        await stateMachine.becomeCandidate();
+        await vi.waitFor(() => {
+            expect(rpcHandler.sendRequestVote).toHaveBeenCalled();
+        });
+        expect(stateMachine.getCurrentState()).toBe(RaftState.Candidate);
+    });
+
+    it('should update match index on succes and try to advance commit index', async () => {
+        rpcHandler.sendAppendEntries.mockResolvedValue({ term: 1, success: true, matchIndex: 3 });
+        await stateMachine.becomeLeader();
+        await vi.waitFor(() => {
+            expect(logManager.getLastIndex).toHaveBeenCalled();
+        });
+    });
+
+    it('should become follower when response has higher term on appendEntries response', async () => {
+        rpcHandler.sendAppendEntries.mockResolvedValue({ term: 10, success: false, matchIndex: 0 });
+        await stateMachine.becomeLeader();
+        await vi.waitFor(() => {
+            expect(stateMachine.getCurrentState()).toBe(RaftState.Follower);
+        });
+    });
+
+    it('should decrement nextIndex when failure has no conflict info', async () => {
+        logManager.getLastIndex.mockReturnValue(5);
+        logManager.getEntriesFromIndex.mockReturnValue([]);
+        rpcHandler.sendAppendEntries.mockResolvedValue({ term: 1, success: false });
+        await stateMachine.becomeLeader();
+        await vi.waitFor(() => {
+            expect(rpcHandler.sendAppendEntries).toHaveBeenCalled();
+        });
+    });
+
+    it('should use conflict info to update nextIndex on appendEntries failure', async () => {
+        logManager.getTermAtIndex.mockResolvedValue(null);
+        rpcHandler.sendAppendEntries.mockResolvedValue({ term: 1, success: false, conflictIndex: 3, conflictTerm: 2 });
+        await stateMachine.becomeLeader();
+        await vi.waitFor(() => {
+            expect(rpcHandler.sendAppendEntries).toHaveBeenCalled();
+        });
+    });
+
+    it('should log error when sendAppendEntries RPC fails', async () => {
+        rpcHandler.sendAppendEntries.mockRejectedValue(new Error('RPC failed'));
+        await stateMachine.becomeLeader();
+        await vi.waitFor(() => {
+            expect(logger.error).toHaveBeenCalled();
+        });
+    });
+
+    it('should log error when succes response has undefined matchIndex', async () => {
+        rpcHandler.sendAppendEntries.mockResolvedValue({ term: 1, success: true, matchIndex: undefined });
+        await stateMachine.becomeLeader();
+        await vi.waitFor(() => {
+            expect(logger.error).toHaveBeenCalled();
+        });
+    });
+
+    it('should send appendEntreis to peers when leader', async () => {
+        await stateMachine.becomeLeader();
+        rpcHandler.sendAppendEntries.mockClear();
+        await stateMachine.triggerReplication();
+        await vi.waitFor(() => {
+            expect(rpcHandler.sendAppendEntries).toHaveBeenCalledTimes(peers.length);
+        });
+    });
+
+    it('should not send appendEntries when not leader', async () => {
+        await stateMachine.triggerReplication();
+        expect(rpcHandler.sendAppendEntries).not.toHaveBeenCalled();
+    });
+
+    it('should call onCommitIndexAdvanced when commit index advances as a follower', async () => {
+        volatileState.getCommitIndex.mockReturnValue(0);
+        await stateMachine.handleAppendEntries('node2', {
+            term: 1,
+            leaderId: 'node2',
+            prevLogIndex: 0,
+            prevLogTerm: 0,
+            entries: [{ index: 1, term: 1, command: { type: 'set', payload: { key: 'x', value: 10 } } }],
+            leaderCommit: 1
+        });
+        expect(onCommitIndexAdvanced).toHaveBeenCalledWith(1);
     });
 });

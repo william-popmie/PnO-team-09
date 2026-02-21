@@ -465,4 +465,433 @@ describe('RaftNode.ts, RaftNode', () => {
         await tickApplyLoop(1);
         expect((node as any)['applyLoopRunning']).toBe(true);
     });
+
+    it('should not apply when commitIndex equals lastApplied', async () => {
+        await node.start();
+        await tickApplyLoop(1);
+        expect(appStateMachine.apply).not.toHaveBeenCalled();
+    });
+
+    it('should apply commited entries and advance lastApplied', async () => {
+        await node.start();
+
+        const logManager = (node as any)['logManager'];
+        const volatileState = (node as any)['volatileState'];
+
+        await logManager.appendCommand({ type: 'set', payload: { key: 'x', value: 10}}, 1);
+        volatileState.setCommitIndex(1);
+
+        await tickApplyLoop();
+
+        await vi.waitFor(() => {
+            expect(appStateMachine.apply).toHaveBeenCalledWith({ type: 'set', payload: { key: 'x', value: 10}});
+            expect(volatileState.getLastApplied()).toBe(1);
+        });
+    });
+
+    it('should apply multiple entries in order', async () => {
+        await node.start();
+
+        const logManager = (node as any)['logManager'];
+        const volatileState = (node as any)['volatileState'];
+
+        await logManager.appendCommand({ type: 'set', payload: { key: 'x', value: 10}}, 1);
+        await logManager.appendCommand({ type: 'set', payload: { key: 'y', value: 20}}, 1);
+        await logManager.appendCommand({ type: 'set', payload: { key: 'z', value: 30}}, 1);
+        volatileState.setCommitIndex(3);
+
+        await tickApplyLoop();
+
+        await vi.waitFor(() => {
+            expect(appStateMachine.apply).toHaveBeenNthCalledWith(1, { type: 'set', payload: { key: 'x', value: 10}});
+            expect(appStateMachine.apply).toHaveBeenNthCalledWith(2, { type: 'set', payload: { key: 'y', value: 20}});
+            expect(appStateMachine.apply).toHaveBeenNthCalledWith(3, { type: 'set', payload: { key: 'z', value: 30}});
+            expect(volatileState.getLastApplied()).toBe(3);
+        });
+    });
+
+    it('should break and lor error when entry is missing', async () => {
+        await node.start();
+
+        const volatileState = (node as any)['volatileState'];
+        volatileState.setCommitIndex(1);
+
+        await tickApplyLoop();
+        expect(appStateMachine.apply).not.toHaveBeenCalled();
+    });
+
+    it('should break and log error when entry index mismatch', async () => {
+        await node.start();
+
+        const logManager = (node as any)['logManager'];
+        const volatileState = (node as any)['volatileState'];
+
+        await logManager.appendCommand({ type: 'set', payload: { key: 'x', value: 10}}, 1);
+        volatileState.setCommitIndex(1);
+
+        const entry = await logManager.getEntry(1);
+        vi.spyOn(logManager, 'getEntry').mockResolvedValue({ ...entry, index: 2 });
+
+        await tickApplyLoop();
+        expect(appStateMachine.apply).not.toHaveBeenCalled();
+    });
+
+    it('should call process.exit(1) and stop loop when apply throws', async () => {
+        await node.start();
+
+        const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as any);
+
+        appStateMachine.apply.mockRejectedValue(new Error('apply error'));
+
+        const logManager = (node as any)['logManager'];
+        const volatileState = (node as any)['volatileState'];
+
+        await logManager.appendCommand({ type: 'set', payload: { key: 'x', value: 10}}, 1);
+        volatileState.setCommitIndex(1);
+
+        await tickApplyLoop();
+
+        await vi.waitFor(() => {
+            expect(exitSpy).toHaveBeenCalledWith(1);
+        })
+
+        exitSpy.mockRestore();
+    });
+
+    it('should log error and continue on non-ApplyEntryFailed RaftError', async () => {
+        await node.start();
+
+        vi.spyOn(node as any, 'applyCommittedEntries').mockRejectedValueOnce(
+            new RaftError('error', 'ERROR')
+        );
+
+        await tickApplyLoop(2);
+
+        expect((node as any)['applyLoopRunning']).toBe(true);
+    });
+
+    it('should not throw when not the leader', async () => {
+        await node.start();
+
+        await expect(node.triggerReplication()).resolves.not.toThrow();
+    });
+
+    it('should call stateMachine.triggerReplication when leader', async () => {
+        await node.start();
+
+        forceLeader(node);
+        const stateMachineSpy = vi.spyOn((node as any)['stateMachine'], 'triggerReplication').mockResolvedValue(undefined);
+
+        await node.triggerReplication();
+        expect(stateMachineSpy).toHaveBeenCalled();
+    });
+
+    it('should resolve true immediately if already committed', async () => {
+        await node.start();
+        const volatileState = (node as any)['volatileState'];
+        volatileState.setCommitIndex(5);
+        const result = await (node as any)['waitForCommit'](5, 5000, 1);
+        expect(result).toBe(true);
+    });
+
+    it('should resolve true when notified via notifyCommitWaiters', async () => {
+        await node.start();
+        const waitPromise = (node as any)['waitForCommit'](1, 5000, 1);
+        (node as any)['notifyCommitWaiters'](1);
+        const result = await waitPromise;
+        expect(result).toBe(true);
+    });
+
+    it('should resolve false on timeout when not commited', async () => {
+        await node.start();
+        const waitPromise = (node as any)['waitForCommit'](99, 100, 1);
+        clock.advanceMs(100);
+        await clock.tick();
+        const result = await waitPromise;
+        expect(result).toBe(false);
+    });
+
+    it('should resolve true on timeout if commit happend before timeout fires', async () => {
+        await node.start();
+        const waitPromise = (node as any)['waitForCommit'](1, 100, 1);
+        const volatileState = (node as any)['volatileState'];
+        volatileState.setCommitIndex(1);
+        clock.advanceMs(100);
+        await clock.tick();
+        const result = await waitPromise;
+        expect(result).toBe(true);
+    });
+
+    it('should resolve false when leadership is lost during checkLeadership', async () => {
+        await node.start();
+        forceLeader(node, 1);
+        const waitPromise = (node as any)['waitForCommit'](1, 5000, 1);
+        (node as any)['stateMachine']['currentState'] = RaftState.Follower;
+        clock.advanceMs(100);
+        await clock.tick();
+        const result = await waitPromise;
+        expect(result).toBe(false);
+    });
+
+    it('should resolve false when term changes during checkLeadership', async () => {
+        await node.start();
+        forceLeader(node, 1);
+        const waitPromise = (node as any)['waitForCommit'](1, 5000, 1);
+        (node as any)['persistentState']['currentTerm'] = 2;
+        clock.advanceMs(100);
+        await clock.tick();
+        const result = await waitPromise;
+        expect(result).toBe(false);
+    });
+
+    it('should not re check leadership after timeout has passed', async () => {
+        await node.start();
+        forceLeader(node, 1);
+        const checkSpy = vi.spyOn(node as any, 'waitForCommit');
+        (node as any)['waitForCommit'](1, 50, 1);
+
+        clock.advanceMs(100);
+        await clock.tick();
+
+        clock.advanceMs(500);
+        await clock.tick();
+
+        expect(checkSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('should reschedule checkLeaderShip when still leader and within timeout', async () => {
+        await node.start();
+        forceLeader(node, 1);
+
+        const waitPromise = (node as any)['waitForCommit'](1, 5000, 1);
+
+        clock.advanceMs(110);
+        await clock.tick();
+
+        let resolved = false;
+        waitPromise.then(() => resolved = true);
+        await new Promise(r => setTimeout(r, 0));
+
+        expect(resolved).toBe(false);
+
+        (node as any)['notifyCommitWaiters'](1);
+        expect(await waitPromise).toBe(true);
+    });
+
+    it('should notify all waiters at or below newCommitIndex', async () => {
+        await node.start();
+
+        const result1 = (node as any)['waitForCommit'](1, 5000, 1);
+        const result2 = (node as any)['waitForCommit'](2, 5000, 1);
+        const result3 = (node as any)['waitForCommit'](3, 100, 1);
+
+        (node as any)['notifyCommitWaiters'](2);
+
+        expect(await result1).toBe(true);
+        expect(await result2).toBe(true);
+
+        clock.advanceMs(100);
+        await clock.tick();
+
+        expect(await result3).toBe(false);
+    });
+
+    it('should clean up waiters map after notifying', async () => {
+        await node.start();
+        const result1 = (node as any)['waitForCommit'](1, 5000, 1);
+        (node as any)['notifyCommitWaiters'](1);
+        await result1;
+        expect((node as any)['commitWaiters'].has(1)).toBe(false);
+    });
+
+    it('should handle RequestVote messages and return a response', async () => {
+        await node.start();
+
+        const handler = transport.onMessage.mock.calls[0][0];
+        const requestVoteMsg = {
+            type: 'RequestVote',
+            direction: 'request',
+            payload: {
+                term: 1,
+                candidateId: 'node2',
+                lastLogIndex: 0,
+                lastLogTerm: 0
+            }
+        };
+
+        const response = await handler('node2', requestVoteMsg);
+        expect(response.type).toBe('RequestVote');
+        expect(response.direction).toBe('response');
+        expect(response.payload).toHaveProperty('term');
+        expect(response.payload).toHaveProperty('voteGranted');
+    });
+
+    it('should handle AppendEntries messages and return a response', async () => {
+        await node.start();
+
+        const handler = transport.onMessage.mock.calls[0][0];
+        const appendEntriesMsg = {
+            type: 'AppendEntries',
+            direction: 'request',
+            payload: {
+                term: 1,
+                leaderId: 'node2',
+                prevLogIndex: 0,
+                prevLogTerm: 0,
+                entries: [],
+                leaderCommit: 0
+            }
+        };
+
+        const response = await handler('node2', appendEntriesMsg);
+        expect(response.type).toBe('AppendEntries');
+        expect(response.direction).toBe('response');
+        expect(response.payload).toHaveProperty('term');
+        expect(response.payload).toHaveProperty('success');
+    });
+
+    it('should call notifyCommitWaiters when StateMachine advances commitIndex', async () => {
+        await node.start();
+
+        const notifySpy = vi.spyOn(node as any, 'notifyCommitWaiters')
+
+        await (node as any)['stateMachine'].handleAppendEntries('node2', {
+            term: 1,
+            leaderId: 'node2',
+            prevLogIndex: 0,
+            prevLogTerm: 0,
+            entries: [{ index: 1, term: 1, command: { type: 'set', payload: { key: 'x', value: 10}}}],
+            leaderCommit: 1
+        });
+
+        expect(notifySpy).toHaveBeenCalledWith(1);
+    });
+
+    it('should not close storage if already closed during stop', async () => {
+        await node.start();
+        const closeSpy = vi.spyOn(storage, 'close')
+        vi.spyOn(storage, 'isOpen').mockReturnValueOnce(false);
+
+        await node.stop();
+        expect(closeSpy).not.toHaveBeenCalled();
+    });
+
+    it('should return undefined leaderId when no longer leader after appending and leader is unknown', async () => {
+        await node.start();
+        forceLeader(node, 1);
+
+        const logManager = (node as any)['logManager'];
+        const originalAppendCommand = logManager.appendCommand.bind(logManager);
+        vi.spyOn(logManager, 'appendCommand').mockImplementation(async (...args: any[]) => {
+            const result = await originalAppendCommand(...args);
+            (node as any)['stateMachine']['currentState'] = RaftState.Follower;
+            (node as any)['stateMachine']['currentLeader'] = null;
+            return result;
+        });
+
+        const result = await node.submitCommand(command);
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('Not the leader');
+        expect(result.leaderId).toBeUndefined();
+    });
+
+    it('should return undefined leaderId when no longer leader after triggering replication and leader is unknown', async () => {
+        await node.start();
+        forceLeader(node, 1);
+
+        vi.spyOn(node as any, 'triggerReplication').mockImplementation(async () => {
+            (node as any)['stateMachine']['currentState'] = RaftState.Follower;
+            (node as any)['stateMachine']['currentLeader'] = null;
+        });
+
+        const result = await node.submitCommand(command);
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('Not the leader');
+        expect(result.leaderId).toBeUndefined();
+    });
+
+    it('should reuse existing waiter array when same index registed twice', async () => {
+        await node.start();
+        const waitPromise1 = (node as any)['waitForCommit'](1, 5000, 1);
+        const waitPromise2 = (node as any)['waitForCommit'](1, 5000, 1);
+
+        (node as any)['notifyCommitWaiters'](1);
+        expect(await waitPromise1).toBe(true);
+        expect(await waitPromise2).toBe(true);
+    });
+
+    it('should handle timeout gracefully when waiters already cleaned up', async () => {
+        await node.start();
+        const waitPromise = (node as any)['waitForCommit'](1, 100, 1);
+
+        (node as any)['notifyCommitWaiters'](1);
+        expect(await waitPromise).toBe(true);
+
+        clock.advanceMs(100);
+        await clock.tick();
+    });
+
+    it('should handle timeout when callback already removed form waiters', async () => {
+        await node.start();
+
+        const waitPromise1 = (node as any)['waitForCommit'](1, 100, 1);
+        const waitPromise2 = (node as any)['waitForCommit'](1, 200, 1);
+
+        clock.advanceMs(150);
+        await clock.tick();
+        expect(await waitPromise1).toBe(false);
+
+        clock.advanceMs(150);
+        await clock.tick();
+        expect(await waitPromise2).toBe(false);
+    });
+
+    it('should not delete waiter entry when other callbacks still pending', async () => {
+        await node.start();
+
+        const waitPromise1 = (node as any)['waitForCommit'](1, 100, 1);
+        const waitPromise2 = (node as any)['waitForCommit'](1, 5000, 1);
+
+        clock.advanceMs(150);
+        await clock.tick();
+        expect(await waitPromise1).toBe(false);
+
+        expect((node as any)['commitWaiters'].has(1)).toBe(true);
+
+        (node as any)['notifyCommitWaiters'](1);
+        await waitPromise2;
+    });
+
+    it('should handle checkLeadership gracefully when callback already removed', async () => {
+        await node.start();
+        forceLeader(node, 1);
+
+        const waitPromise = (node as any)['waitForCommit'](1, 100, 1);
+
+        (node as any)['notifyCommitWaiters'](1);
+        expect(await waitPromise).toBe(true);
+
+        (node as any)['stateMachine']['currentState'] = RaftState.Follower;
+        clock.advanceMs(150);
+        clock.tick();
+    });
+
+    it('should handle timeout when callback already removed by checkLeadership', async () => {
+        await node.start();
+
+        const captured: Array<{ fn: () => void; ms: number }> = [];
+        vi.spyOn(clock, 'setTimeout').mockImplementation((fn: () => void, ms: number) => {
+            captured.push({ fn, ms });
+            return captured.length;
+        });
+
+        (node as any)['waitForCommit'](1, 200, 1);
+
+        const timeoutFn = captured.find(c => c.ms === 200)!.fn;
+
+        (node as any)['commitWaiters'].set(1, [(_: boolean) => {}]);
+
+        timeoutFn();
+    });
 });
+

@@ -14,6 +14,8 @@ import { Transport } from "../transport/Transport";
 import { Logger } from "../util/Logger";
 import { Clock, TimerHandle } from "../timing/Clock";
 import { RPCHandlerError, NetworkError } from "../util/Error";
+import { RaftEventBus } from "../events/RaftEvents";
+import { NoOpEventBus } from "../events/EventBus";
 
 export interface RPCSendOptions {
     timeoutMs?: number;
@@ -32,7 +34,8 @@ export class RPCHandler implements RPCHandlerInterface {
         private nodeId: NodeId,
         private transport: Transport,
         private logger: Logger,
-        private clock: Clock
+        private clock: Clock,
+        private eventBus: RaftEventBus = new NoOpEventBus()
     ) {}
 
     async sendRequestVote(peerId: NodeId, request: RequestVoteRequest, options?: RPCSendOptions): Promise<RequestVoteResponse> {
@@ -47,15 +50,67 @@ export class RPCHandler implements RPCHandlerInterface {
 
         this.logger.debug(`Node ${this.nodeId} sending RequestVote to ${peerId}: ${JSON.stringify(request)}`);
 
-        const response = await this.sendWithTimeout(peerId, message, options);
+        const messageId = crypto.randomUUID();
+        const sentAt = performance.now();
 
-        if (!isRequestVoteResponseMessage(response)) {
-            throw new RPCHandlerError(`Invalid response type for RequestVote: expected RequestVoteResponse, got ${response.type}`);
-        };
+        this.eventBus.emit({
+            eventId: crypto.randomUUID(),
+            timestamp: sentAt,
+            wallTime: Date.now(),
+            nodeId: this.nodeId,
+            type: "MessageSent",
+            messageType: "RequestVote",
+            messageId: messageId,
+            fromNodeId: this.nodeId,
+            toNodeId: peerId,
+            term: request.term,
+            payload: request
+        });
 
-        this.logger.debug(`Node ${this.nodeId} received RequestVoteResponse from ${peerId}: ${JSON.stringify(response.payload)}`);
+        try {
 
-        return response.payload;
+            const response = await this.sendWithTimeout(peerId, message, options);
+
+            if (!isRequestVoteResponseMessage(response)) {
+                throw new RPCHandlerError(`Invalid response type for RequestVote: expected RequestVoteResponse, got ${response.type}`);
+            };
+
+            this.logger.debug(`Node ${this.nodeId} received RequestVoteResponse from ${peerId}: ${JSON.stringify(response.payload)}`);
+
+            this.eventBus.emit({
+                eventId: crypto.randomUUID(),
+                timestamp: performance.now(),
+                wallTime: Date.now(),
+                nodeId: this.nodeId,
+                type: "MessageReceived",
+                messageType: "RequestVoteResponse",
+                messageId: messageId,
+                fromNodeId: peerId,
+                toNodeId: this.nodeId,
+                term: response.payload.term,
+                payload: response.payload,
+                latencyMs: performance.now() - sentAt
+            });
+
+            return response.payload;
+        } catch (error) {
+
+            this.eventBus.emit({
+                eventId: crypto.randomUUID(),
+                timestamp: performance.now(),
+                wallTime: Date.now(),
+                nodeId: this.nodeId,
+                type: "MessageDropped",
+                messageType: "RequestVote",
+                messageId: messageId,
+                fromNodeId: this.nodeId,
+                toNodeId: peerId,
+                term: request.term,
+                reason: error instanceof RPCHandlerError ? "timeout" : "peer down"
+            });
+
+            throw error;
+        }
     }
 
     async sendAppendEntries(peerId: NodeId, request: AppendEntriesRequest, options?: RPCSendOptions): Promise<AppendEntriesResponse> {
@@ -70,15 +125,66 @@ export class RPCHandler implements RPCHandlerInterface {
 
         this.logger.debug(`Node ${this.nodeId} sending AppendEntries to ${peerId}: ${JSON.stringify(request)}`);
 
-        const response = await this.sendWithTimeout(peerId, message, options);
+        const messageId = crypto.randomUUID();
+        const sentAt = performance.now();
 
-        if (!isAppendEntriesResponseMessage(response)) {
-            throw new RPCHandlerError(`Invalid response type for AppendEntries: expected AppendEntriesResponse, got ${response.type}`);
+        this.eventBus.emit({
+            eventId: crypto.randomUUID(),
+            timestamp: sentAt,
+            wallTime: Date.now(),
+            nodeId: this.nodeId,
+            type: "MessageSent",
+            messageType: "AppendEntries",
+            messageId: messageId,
+            fromNodeId: this.nodeId,
+            toNodeId: peerId,
+            term: request.term,
+            payload: request
+        });
+
+        try {
+            const response = await this.sendWithTimeout(peerId, message, options);
+
+            if (!isAppendEntriesResponseMessage(response)) {
+                throw new RPCHandlerError(`Invalid response type for AppendEntries: expected AppendEntriesResponse, got ${response.type}`);
+            }
+
+            this.logger.debug(`Node ${this.nodeId} received AppendEntriesResponse from ${peerId}: ${JSON.stringify(response.payload)}`);
+
+            this.eventBus.emit({
+                eventId: crypto.randomUUID(),
+                timestamp: performance.now(),
+                wallTime: Date.now(),
+                nodeId: this.nodeId,
+                type: "MessageReceived",
+                messageType: "AppendEntriesResponse",
+                messageId: messageId,
+                fromNodeId: peerId,
+                toNodeId: this.nodeId,
+                term: response.payload.term,
+                payload: response.payload,
+                latencyMs: performance.now() - sentAt
+            });
+
+            return response.payload;
+        } catch (error) {
+
+            this.eventBus.emit({
+                eventId: crypto.randomUUID(),
+                timestamp: performance.now(),
+                wallTime: Date.now(),
+                nodeId: this.nodeId,
+                type: "MessageDropped",
+                messageType: "AppendEntries",
+                messageId: messageId,
+                fromNodeId: this.nodeId,
+                toNodeId: peerId,
+                term: request.term,
+                reason: error instanceof RPCHandlerError ? "timeout" : "peer down"
+            });
+
+            throw error;
         }
-
-        this.logger.debug(`Node ${this.nodeId} received AppendEntriesResponse from ${peerId}: ${JSON.stringify(response.payload)}`);
-
-        return response.payload;
     }
 
     private async sendWithTimeout(peerId: NodeId, message: RPCMessage, options?: RPCSendOptions): Promise<RPCMessage> {

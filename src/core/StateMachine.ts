@@ -477,49 +477,12 @@ export class StateMachine implements StateMachineInterface {
 
     private async sendRequestVote(peer: NodeId, request: RequestVoteRequest): Promise<void> {
 
-        const messageId = crypto.randomUUID();
-
-        this.eventBus.emit({
-            ...baseEvent(this.nodeId),
-            type: "MessageSent",
-            messageType: "RequestVote",
-            messageId,
-            fromNodeId: this.nodeId,
-            toNodeId: peer,
-            term: request.term,
-            payload: request
-        });
-
         try {
 
-            const sentAt = performance.now();
             const response = await this.rpcHandler.sendRequestVote(peer, request);
-
-            this.eventBus.emit({
-                ...baseEvent(this.nodeId),
-                type: "MessageReceived",
-                messageType: "RequestVoteResponse",
-                messageId,
-                fromNodeId: peer,
-                toNodeId: this.nodeId,
-                term: response.term,
-                payload: response,
-                latencyMs: performance.now() - sentAt
-            });
 
             await this.handleRequestVoteResponse(peer, response);
         } catch (err) {
-
-            this.eventBus.emit({
-                ...baseEvent(this.nodeId),
-                type: "MessageDropped",
-                messageType: "RequestVote",
-                messageId,
-                fromNodeId: this.nodeId,
-                toNodeId: peer,
-                term: request.term,
-                reason: "peer down"
-            });
 
             if (err instanceof Error) {
                 this.logger.error(`Node ${this.nodeId} error sending RequestVote to ${peer}: ${err.message}`);
@@ -589,8 +552,6 @@ export class StateMachine implements StateMachineInterface {
 
         let request: AppendEntriesRequest | null = null;
         
-        const messageId = crypto.randomUUID();
-
         try {
             await this.stateLock.runExclusive(async () => {
                 if (!this.leaderState) {
@@ -615,53 +576,17 @@ export class StateMachine implements StateMachineInterface {
                     entries,
                     leaderCommit: this.volatileState.getCommitIndex()
                 };
-
-                this.eventBus.emit({
-                    ...baseEvent(this.nodeId),
-                    type: "MessageSent",
-                    messageType: "AppendEntries",
-                    messageId: messageId,
-                    fromNodeId: this.nodeId,
-                    toNodeId: peer,
-                    term: request.term,
-                    payload: request
-                });
             });
 
             if (!request) {
                 return;
             }
 
-            const sentAt = performance.now();
-
             const response: AppendEntriesResponse = await this.rpcHandler.sendAppendEntries(peer, request);
-
-            this.eventBus.emit({
-                ...baseEvent(this.nodeId),
-                type: "MessageReceived",
-                messageType: "AppendEntriesResponse",
-                messageId: messageId,
-                fromNodeId: peer,
-                toNodeId: this.nodeId,
-                term: response.term,
-                payload: response,
-                latencyMs: performance.now() - sentAt
-            });
             
             await this.handleAppendEntriesResponse(peer, response);
 
         } catch (err) {
-
-            this.eventBus.emit({
-                ...baseEvent(this.nodeId),
-                type: "MessageDropped",
-                messageType: "AppendEntries",
-                messageId: messageId,
-                fromNodeId: this.nodeId,
-                toNodeId: peer,
-                term: this.persistentState.getCurrentTerm(),
-                reason: "peer down"
-            });
 
             if (err instanceof Error) {
                 this.logger.error(`Node ${this.nodeId} error sending AppendEntries to ${peer}: ${err.message}`);

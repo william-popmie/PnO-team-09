@@ -195,7 +195,7 @@ describe('EventStore.ts, EventStore', () => {
         expect(() => {
             unsubscribe();
             unsubscribe();
-        })
+        }).not.toThrow();
     });
 
     it('should store different types of events', () => {

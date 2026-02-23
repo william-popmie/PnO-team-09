@@ -1,5 +1,5 @@
 import { NodeId } from "../core/Config";
-import { LogEntry } from "../log/LogEntry";
+import { Command, LogEntry } from "../log/LogEntry";
 import {
     RequestVoteRequest,
     RequestVoteResponse,
@@ -205,3 +205,42 @@ export interface LiveEventMessage {
 }
 
 export type ServerMessage = InitialStateMessage | LiveEventMessage;
+
+export interface SubmitCommandMessage {
+    type: "SubmitCommand";
+    command: Command;
+}
+
+export interface CrashNodeMessage {
+    type: "CrashNode";
+    nodeId: NodeId;
+}
+
+export interface RecoverNodeMessage {
+    type: "RecoverNode";
+    nodeId: NodeId;
+}
+
+export interface PartitionNodesMessage {
+    type: "PartitionNodes";
+    groupA: NodeId[];
+    groupB: NodeId[];
+}
+
+export interface HealPartitionMessage {
+    type: "HealPartition";
+}
+
+export interface SetDropRateMessage {
+    type: "SetDropRate";
+    nodeId: NodeId;
+    dropRate: number;
+}
+
+export type ClientMessage =
+    | SubmitCommandMessage
+    | CrashNodeMessage
+    | RecoverNodeMessage
+    | PartitionNodesMessage
+    | HealPartitionMessage
+    | SetDropRateMessage;

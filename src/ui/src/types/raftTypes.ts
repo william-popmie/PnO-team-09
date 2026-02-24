@@ -8,7 +8,7 @@ export interface LogEntry {
 
 interface BaseEvent {
     eventId: string;
-    timeStamp: number;
+    timestamp: number;
     wallTime: number;
     nodeId: string;
 }
@@ -114,7 +114,7 @@ export interface MessageSentEvent extends BaseEvent {
 
 export interface MessageReceivedEvent extends BaseEvent {
     type: "MessageReceived";
-    messagetype: "RequestVoteResponse" | "AppendEntriesResponse";
+    messageType: "RequestVoteResponse" | "AppendEntriesResponse";
     messageId: string;
     fromNodeId: string;
     toNodeId: string;
@@ -144,7 +144,7 @@ export interface PartitionCreatedEvent {
 
 export interface PartitionHealedEvent {
     eventId: string;
-    timeStamp: number;
+    timestamp: number;
     wallTime: number;
     type: "PartitionHealed";
 }
@@ -182,7 +182,7 @@ export interface LiveEventMessage {
 
 export type ServerMessage = InitialStateMessage | LiveEventMessage
 
-export type clientCommand = 
+export type ClientCommand = 
     | { type: "SubmitCommand"; command: unknown}
     | { type: "CrashNode"; nodeId: string}
     | { type: "RecoverNode"; nodeId: string }

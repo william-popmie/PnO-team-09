@@ -156,7 +156,7 @@ describe('Database Compaction', () => {
     });
 
     it('should persist data across close/open after compaction', async () => {
-      let db = await SimpleDBMS.create(dbFile, walFile);
+      const db = await SimpleDBMS.create(dbFile, walFile);
       const users = await db.getCollection('users');
       await users.insert({ id: 'u1', name: 'Alice' });
       await users.insert({ id: 'u2', name: 'Bob' });

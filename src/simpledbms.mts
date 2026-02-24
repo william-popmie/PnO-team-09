@@ -1047,9 +1047,9 @@ export class SimpleDBMS {
     storage: FBNodeStorage<K, V>,
   ): Promise<void> {
     if (node.isLeaf) {
-      await storage.persistLeaf(node as FBLeafNode<K, V>);
+      await storage.persistLeaf(node);
     } else {
-      const internal = node as FBInternalNode<K, V>;
+      const internal = node;
       for (let i = 0; i < internal.children.length; i++) {
         const child = internal.children[i];
         if (child.blockId === undefined || child.blockId === 0) {

@@ -6,15 +6,12 @@ import { NodeDetail } from "./components/NodeDetail";
 export default function App() {
     useRaftSocket();
     return (
-        <div style={{ display: 'flex', height: '100vh' }}>
-          <div style={{ position: 'relative', flex: 1 }}>
-            <ClusterView />
-            <NodeDetail />
-          </div>
-
-          <div style={{ width: '400px', overflowY: 'scroll' }}>
-            <EventFeed />
-          </div>
+        <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', background: '#0d1117' }}>
+            <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+                <ClusterView />
+                <NodeDetail />
+                <EventFeed />
+            </div>
         </div>
     )
 }

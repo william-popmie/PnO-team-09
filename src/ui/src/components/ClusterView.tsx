@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { useRaftStore } from "../store/raftStore";
 import { MessageLayer } from "./MessageLayer";
 
@@ -19,21 +20,37 @@ function computePositionsCircle(nodeIds: string[], radius: number, centerX: numb
     return positions;
 }
 
-const width = 2160;
-const height = 1200;
 const nodeRadius = 30;
 
 export function ClusterView() {
     const nodeIds = useRaftStore((state) => state.nodeIds);
     const nodes = useRaftStore((state) => state.nodes);
-    const positions = computePositionsCircle(nodeIds, 200, width / 2, height / 2);
 
     const selectNode = useRaftStore((state) => state.selectNode);
     const selectedNodeId = useRaftStore((state) => state.selectedNodeId);
 
+    const containerRef = useRef<HTMLDivElement>(null);
+    const [ size, setSize ] = useState({ width: 800, height: 600 });
+
+    useEffect(() => {
+        const element = containerRef.current;
+        if (!element) return;
+        const ro = new ResizeObserver(entries => {
+            const { width, height } = entries[0].contentRect;
+            setSize({ width, height });
+        });
+        ro.observe(element);
+        return () => ro.disconnect();
+    }, []);
+
+    const cx = size.width / 2;
+    const cy = size.height / 2;
+    const radius = Math.min(cx, cy) * 0.6;
+    const positions = computePositionsCircle(nodeIds, radius, cx, cy);
+
     return (
-        <div style={{ position: 'relative', width, height}}>
-            <svg width={width} height={height} style={{ background: '#0d1117', display: 'block' }}>
+        <div ref={containerRef} style={{ position: 'relative', width: '100%', height: '100%' }}>
+            <svg width={size.width} height={size.height} style={{ background: '#0d1117', display: 'block' }}>
                 {nodeIds.map(id => {
                     const { x, y } = positions[id];
                     const node = nodes[id];
@@ -55,8 +72,8 @@ export function ClusterView() {
                     );
                 })}
             </svg>
-            <MessageLayer positions={positions} nodeRadius={nodeRadius} width={width} height={height} />
-            <svg style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} width={width} height={height}>
+            <MessageLayer positions={positions} nodeRadius={nodeRadius} width={size.width} height={size.height} />
+            <svg style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} width={size.width} height={size.height}>
                 {nodeIds.flatMap((a, i) =>
                     nodeIds.slice(i + 1).map(b => {
                         const pa = positions[a];

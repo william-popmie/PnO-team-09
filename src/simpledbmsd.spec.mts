@@ -3,6 +3,7 @@
 
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { app, initDB } from './simpledbmsd.mjs';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -17,8 +18,6 @@ describe('SimpleDBMS Daemon API', () => {
     dbPath = path.join(tempDir, 'test.db');
     walPath = path.join(tempDir, 'test.wal');
     await initDB(dbPath, walPath);
-    // Load dummy account data for testing
-    await loadDummyAccount();
   });
 
   afterAll(async () => {
@@ -40,7 +39,7 @@ describe('SimpleDBMS Daemon API', () => {
       const res = await request(app).get('/db/users');
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body)).toBe(true);
-      expect((res.body as unknown[]).length).toBeGreaterThanOrEqual(2); // Alice + Bob
+      expect((res.body as unknown[]).length).toBeGreaterThanOrEqual(2);
     });
 
     it('get a document by ID', async () => {

@@ -1,11 +1,44 @@
+// @author Maarten Haine, Jari Daemen, William Ragnarsson, Wout Van Hemelrijck
+// @date 2025-11-22
+
 import 'dotenv/config';
 import express from 'express';
 import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
-import { SimpleDBMS} from './simpledbms.mjs';
+import { SimpleDBMS } from './simpledbms.mjs';
+import { RealFile } from './file/file.mjs';
 
 const app = express();
 const port = 3000;
+
+app.use(express.json());
+
+let db!: SimpleDBMS;
+
+async function initDB(customDbPath?: string, customWalPath?: string) {
+  try {
+    const dbPath = customDbPath || process.argv[2] || 'mydb.db';
+    const walPath = customWalPath || process.argv[3] || 'mydb.wal';
+    const dbFile = new RealFile(dbPath);
+    const walFile = new RealFile(walPath);
+
+    try {
+      db = await SimpleDBMS.open(dbFile, walFile);
+      console.log('Database opened successfully.');
+    } catch {
+      console.log('Could not open existing database, creating new one...');
+      await dbFile.create();
+      await dbFile.close();
+      await walFile.create();
+      await walFile.close();
+      db = await SimpleDBMS.create(dbFile, walFile);
+      console.log('Database created successfully.');
+    }
+  } catch (error) {
+    console.error('Failed to initialize database:', error);
+    throw error;
+  }
+}
 
 const swaggerOptions = {
   definition: {
@@ -33,12 +66,8 @@ const swaggerOptions = {
   apis: ['./src/simpledbmsd.mts'],
 };
 
-
 const swaggerSpec = swaggerJsdoc(swaggerOptions);
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
-
-let db: SimpleDBMS;
-
 
 /**
  * @swagger
@@ -72,6 +101,37 @@ app.post('/db/:collection', async (req, res) => {
     const collection = await db.getCollection(collectionName);
     const newDoc = await collection.insert(doc);
     res.status(201).json(newDoc);
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * @swagger
+ * /db/{collection}:
+ *   get:
+ *     summary: Find documents in a collection
+ *     parameters:
+ *       - in: path
+ *         name: collection
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: filter
+ *         schema:
+ *           type: string
+ *         description: JSON string for filter (not fully implemented in query parser yet)
+ *     responses:
+ *       200:
+ *         description: List of documents
+ */
+app.get('/db/:collection', async (req, res) => {
+  try {
+    const collectionName = req.params.collection;
+    const collection = await db.getCollection(collectionName);
+    const docs = await collection.find();
+    res.json(docs);
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
   }
@@ -266,7 +326,6 @@ app.post('/db/:collection/indexes/:field', async (req, res) => {
   }
 });
 
-
 /**
  * @swagger
  * /db/{collection}/indexes/{field}:
@@ -456,3 +515,20 @@ app.post('/db/:collection/join', async (req, res) => {
     res.status(500).json({ error: (error as Error).message });
   }
 });
+
+// Start server
+if (process.env['NODE_ENV'] !== 'test') {
+  initDB()
+    .then(() => {
+      app.listen(port, () => {
+        console.log(`SimpleDBMS Daemon listening at http://localhost:${port}`);
+        console.log(`Swagger UI available at http://localhost:${port}/api-docs`);
+      });
+    })
+    .catch((err) => {
+      console.error('Failed to start daemon:', err);
+      process.exit(1);
+    });
+}
+
+export { app, initDB };

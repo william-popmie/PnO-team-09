@@ -1,4 +1,5 @@
-// encryption-service.spec.mts
+// author @woutvanhemelrijck
+// date: 27/11/2025
 import { describe, it, expect } from 'vitest';
 import { EncryptionService } from './encryption-service.mjs';
 

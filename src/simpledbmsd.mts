@@ -1,11 +1,13 @@
-// @author Maarten Haine, Jari Daemen, William Ragnarsson
+// @author Maarten Haine, Jari Daemen, William Ragnarsson, Wout Van Hemelrijck
 // also used Claude to help with debugging
 // @date 2025-11-22
 
+import 'dotenv/config';
 import express from 'express';
 import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
 import cors from 'cors';
+import { EncryptionService } from './encryption-service.mjs';
 import { SimpleDBMS, type DocumentValue } from './simpledbms.mjs';
 import { RealFile } from './file/file.mjs';
 import { rename } from 'node:fs/promises';
@@ -19,12 +21,20 @@ import {
   validateAndRefreshToken,
   type AuthenticatedRequest,
 } from './authentication.mjs';
+import { PasswordHasher } from './password-hashing.mjs';
+import { readFile } from 'fs/promises';
+import { existsSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const port = 3000;
+const passwordHasher = new PasswordHasher();
+
+// Initialize encryption service
+const masterKey = process.env['ENCRYPTION_KEY'] || EncryptionService.generateMasterKey();
+let encryptionService: EncryptionService;
 
 app.use(cors());
 app.use(express.json());
@@ -32,6 +42,11 @@ app.use(express.json());
 app.use('/components', express.static(path.join(__dirname, '../src/frontend/components')));
 app.use('/styles', express.static(path.join(__dirname, '../src/frontend/styles')));
 app.use('/scripts', express.static(path.join(__dirname, 'frontend/scripts')));
+
+// Redirect root to the main webclient UI
+app.get('/', (_req, res) => {
+  res.redirect('/components/simpledbmswebclient.html');
+});
 
 const swaggerOptions = {
   definition: {
@@ -66,12 +81,101 @@ let db: SimpleDBMS;
 let currentDbPath: string;
 let currentWalPath: string;
 
+/**
+ * Load dummy demo account data from JSON file
+ * This creates a demo user with pre-populated collections and documents
+ */
+async function loadDummyAccount() {
+  try {
+    const dummyDataPath = path.join(__dirname, '../data/dummy-account.json');
+
+    if (!existsSync(dummyDataPath)) {
+      console.log('No dummy-account.json found, skipping demo data initialization.');
+      return;
+    }
+
+    const dummyDataContent = await readFile(dummyDataPath, 'utf-8');
+    const dummyData = JSON.parse(dummyDataContent) as {
+      username: string;
+      password: string;
+      collections: Array<{
+        name: string;
+        documents: Array<{
+          name: string;
+          content: Record<string, unknown>;
+        }>;
+      }>;
+    };
+
+    // Check if demo user already exists
+    const usersCollection = await db.getCollection('users');
+    const existingUsers = await usersCollection.find();
+    const demoUserExists = existingUsers.some((user) => {
+      const userData = user as unknown as { username: string };
+      return userData.username && userData.username.toLowerCase() === dummyData.username.toLowerCase();
+    });
+
+    if (demoUserExists) {
+      console.log('Demo user already exists, skipping initialization.');
+      return;
+    }
+
+    console.log('Creating demo account...');
+
+    // Hash the password
+    const hashedPassword = await passwordHasher.hashPassword(dummyData.password);
+
+    // Create collections list
+    const collectionNames = dummyData.collections.map((col) => col.name);
+
+    // Create the demo user
+    const demoUser = await usersCollection.insert({
+      username: dummyData.username,
+      password: hashedPassword,
+      collections: collectionNames,
+      createdAt: new Date().toISOString(),
+    });
+
+    console.log(`Demo user '${dummyData.username}' created with ID: ${demoUser.id}`);
+
+    // Create collections and insert documents
+    for (const collectionData of dummyData.collections) {
+      const collection = await db.getCollection(collectionData.name);
+      console.log(`  Creating collection: ${collectionData.name}`);
+
+      for (const docData of collectionData.documents) {
+        // Encrypt the document content
+        const encryptedBuffer = encryptionService.encrypt(Buffer.from(JSON.stringify(docData.content)));
+
+        await collection.insert({
+          name: docData.name,
+          userId: demoUser.id,
+          createdAt: new Date().toISOString(),
+          content: encryptedBuffer.toString('base64') as unknown as Record<string, DocumentValue>,
+        });
+      }
+
+      console.log(`    Added ${collectionData.documents.length} documents to ${collectionData.name}`);
+    }
+
+    console.log(
+      `Demo account setup complete! Login with username: '${dummyData.username}' password: '${dummyData.password}'`,
+    );
+  } catch (error) {
+    console.error('Failed to load dummy account:', error);
+    // Don't throw - this is optional initialization
+  }
+}
+
 async function initDB(customDbPath?: string, customWalPath?: string) {
   try {
+
     currentDbPath = customDbPath || process.argv[2] || 'mydb.db';
     currentWalPath = customWalPath || process.argv[3] || 'mydb.wal';
     const dbFile = new RealFile(currentDbPath);
     const walFile = new RealFile(currentWalPath);
+    let isNewDatabase = false;
+
     try {
       db = await SimpleDBMS.open(dbFile, walFile);
       console.log('Database opened successfully.');
@@ -83,6 +187,14 @@ async function initDB(customDbPath?: string, customWalPath?: string) {
       await walFile.close();
       db = await SimpleDBMS.create(dbFile, walFile);
       console.log('Database created successfully.');
+      isNewDatabase = true;
+    }
+
+    encryptionService = EncryptionService.fromHexKey(masterKey);
+
+    // Load dummy account data if this is a new database
+    if (isNewDatabase) {
+      await loadDummyAccount();
     }
   } catch (error) {
     console.error('Failed to initialize database:', error);
@@ -642,10 +754,13 @@ app.post('/api/signup', async (req, res) => {
       return;
     }
 
+    // Hash the password before storing
+    const hashedPassword = await passwordHasher.hashPassword(password);
+
     // Create new user (this internally calls collection.insert())
     const newUser = await usersCollection.insert({
       username,
-      password, // TODO: Hash this in production!
+      password: hashedPassword,
       collections: [],
       createdAt: new Date().toISOString(),
     });
@@ -720,8 +835,10 @@ app.post('/api/login', async (req, res) => {
       return;
     }
 
-    // Check password (plain text for now - TODO: use bcrypt.compare() in production)
-    if (user.password !== password) {
+    // Verify the password against the stored hash
+    const isPasswordValid = await passwordHasher.verifyPassword(password, user.password);
+
+    if (!isPasswordValid) {
       res.status(401).json({ success: false, message: 'Invalid username or password' });
       return;
     }
@@ -736,6 +853,122 @@ app.post('/api/login', async (req, res) => {
     });
   } catch (error) {
     console.error('Login error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * GET /api/getUserData
+ * Retrieve the authenticated user's personal data (GDPR compliance)
+ * @requires Authentication - Bearer token in Authorization header
+ * @returns {object} { success: boolean, message: string, userData: { userId: string, username: string, hashedPassword: string }, token?: string }
+ */
+app.get('/api/getUserData', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ success: false, message: 'User not authenticated' });
+      return;
+    }
+
+    const userId = req.user.userId;
+
+    // Get users collection
+    const usersCollection = await db.getCollection('users');
+
+    // Find user by ID
+    const user = await usersCollection.findById(userId);
+
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    // Extract user data
+    const userData = user as unknown as { id: string; username: string; password: string };
+
+    // Return user data (including hashed password for GDPR transparency)
+    const responseData = addTokenToResponse(req, {
+      success: true,
+      message: 'User data retrieved successfully',
+      userData: {
+        userId: userData.id,
+        username: userData.username,
+        hashedPassword: userData.password, // Show hashed password for transparency
+      },
+    });
+
+    res.json(responseData);
+  } catch (error) {
+    console.error('Get user data error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * GET /api/getAllUserData
+ * Retrieve all user data including collections and documents (GDPR data export)
+ * @requires Authentication - Bearer token in Authorization header
+ * @returns {object} Complete user data export including all collections and documents
+ */
+app.get('/api/getAllUserData', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ success: false, message: 'User not authenticated' });
+      return;
+    }
+
+    const userId = req.user.userId;
+
+    // Get users collection
+    const usersCollection = await db.getCollection('users');
+    const user = await usersCollection.findById(userId);
+
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    const userData = user as unknown as {
+      id: string;
+      username: string;
+      password: string;
+      collections?: string[];
+    };
+
+    // Build collections data structure
+    const collectionsData: Record<string, Array<Record<string, unknown>>> = {};
+
+    if (userData.collections && Array.isArray(userData.collections)) {
+      for (const collectionName of userData.collections) {
+        try {
+          const collection = await db.getCollection(collectionName);
+          const allDocs = await collection.find();
+
+          // Filter documents belonging to this user
+          const userDocs = allDocs.filter((doc) => {
+            const docData = doc as unknown as { userId?: string };
+            return docData.userId === userId;
+          });
+
+          collectionsData[collectionName] = userDocs as Array<Record<string, unknown>>;
+        } catch (error) {
+          console.error(`Error fetching collection ${collectionName}:`, error);
+          collectionsData[collectionName] = [];
+        }
+      }
+    }
+
+    // Build complete data export
+    const completeData = {
+      userId: userData.id,
+      username: userData.username,
+      password: userData.password,
+      collections: collectionsData,
+    };
+
+    res.json(completeData);
+  } catch (error) {
+    console.error('Get all user data error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
@@ -949,13 +1182,15 @@ app.post('/api/createDocument', authenticateToken, async (req: AuthenticatedRequ
       return;
     }
 
-    // Create the document in the collection
-    // Store documentContent in nested 'content' field to separate system fields from user data
+    // Encrypt the document content before storing
+    const encryptedBuffer = encryptionService.encrypt(Buffer.from(JSON.stringify(documentContent || {})));
+
+    // Create the document in the collection with encrypted content
     await collection.insert({
       name: documentName,
       userId: req.user!.userId,
       createdAt: new Date().toISOString(),
-      content: (documentContent || {}) as Record<string, DocumentValue>, // User content stored separately
+      content: encryptedBuffer.toString('base64') as unknown as Record<string, DocumentValue>,
     });
 
     const response = addTokenToResponse(req, {
@@ -1149,9 +1384,13 @@ app.get('/api/fetchDocumentContent', authenticateToken, async (req: Authenticate
       return;
     }
 
-    // Extract the nested content field
-    const docData = document as unknown as { content?: Record<string, DocumentValue> };
-    const documentContent = docData.content || {};
+    // Extract and decrypt the content
+    const docData = document as unknown as { content?: string };
+    const encryptedContent = docData.content || '';
+
+    // Decrypt the content
+    const decryptedBuffer = encryptionService.decrypt(Buffer.from(encryptedContent, 'base64'));
+    const documentContent = JSON.parse(decryptedBuffer.toString()) as Record<string, unknown>;
 
     const response = addTokenToResponse(req, {
       success: true,
@@ -1223,13 +1462,16 @@ app.put('/api/updateDocument', authenticateToken, async (req: AuthenticatedReque
       return;
     }
 
+    // Encrypt the new content before storing
+    const encryptedBuffer = encryptionService.encrypt(Buffer.from(JSON.stringify(newDocumentContent)));
+
     // Update the document content while preserving all system fields
     const docData = document as unknown as { createdAt?: string };
     await collection.update(document.id, {
-      name: documentName, // Keep the original name
-      userId: req.user!.userId, // Keep the original userId
-      createdAt: docData.createdAt || new Date().toISOString(), // Preserve original timestamp
-      content: newDocumentContent as Record<string, DocumentValue>, // Update only the user content
+      name: documentName,
+      userId: req.user!.userId,
+      createdAt: docData.createdAt || new Date().toISOString(),
+      content: encryptedBuffer.toString('base64') as unknown as Record<string, DocumentValue>,
     });
 
     const response = addTokenToResponse(req, {
@@ -1259,4 +1501,4 @@ if (process.env['NODE_ENV'] !== 'test') {
     });
 }
 
-export { app, initDB };
+export { app, loadDummyAccount, initDB };

@@ -269,7 +269,7 @@ describe('Database Compaction', () => {
       expect(result.sizeAfter).toBeLessThan(result.sizeBefore);
 
       const newUsers = await db.getCollection('users');
-      expect((await newUsers.find())).toHaveLength(5);
+      expect(await newUsers.find()).toHaveLength(5);
 
       await db.close();
     });

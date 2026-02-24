@@ -8,6 +8,7 @@ import swaggerJsdoc from 'swagger-jsdoc';
 import cors from 'cors';
 import { SimpleDBMS, type DocumentValue } from './simpledbms.mjs';
 import { RealFile } from './file/file.mjs';
+import { rename } from 'node:fs/promises';
 import { compactDatabase } from './compaction.mjs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -569,11 +570,27 @@ app.post('/db/:collection/join', async (req, res) => {
  */
 app.post('/db/compact', async (_req, res) => {
   try {
+    const tempDbPath = currentDbPath + '.compact.tmp';
+    const tempWalPath = currentWalPath + '.compact.tmp';
     const dbFile = new RealFile(currentDbPath);
     const walFile = new RealFile(currentWalPath);
+    const tempDbFile = new RealFile(tempDbPath);
+    const tempWalFile = new RealFile(tempWalPath);
 
-    const { db: newDb, result } = await compactDatabase(db, dbFile, walFile);
-    db = newDb;
+    // Streaming compaction: old DB → temp files, then swap
+    const { db: newDb, result } = await compactDatabase(db, dbFile, walFile, tempDbFile, tempWalFile);
+
+    // Close the new DB so we can swap files
+    await newDb.close();
+
+    // Atomically swap temp files into original paths
+    await rename(tempDbPath, currentDbPath);
+    await rename(tempWalPath, currentWalPath);
+
+    // Reopen the compacted database from the original paths
+    const reopenedDbFile = new RealFile(currentDbPath);
+    const reopenedWalFile = new RealFile(currentWalPath);
+    db = await SimpleDBMS.open(reopenedDbFile, reopenedWalFile);
 
     console.log(
       `Database compacted: ${result.sizeBefore} -> ${result.sizeAfter} bytes ` +

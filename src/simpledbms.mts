@@ -274,6 +274,16 @@ export class Collection {
   }
 
   /**
+   * Yields all documents in the collection one at a time.
+   * Uses the B+ tree's lazy async generator, so memory usage is O(1)
+   * regardless of collection size. Suitable for TB-scale databases.
+   * @yields {{ key: string, value: Document }} Each document with its ID as key.
+   */
+  async *entries(): AsyncGenerator<{ key: string; value: Document }> {
+    yield* this.primaryTree.entries();
+  }
+
+  /**
    * Inserts a document into the collection.
    * If the document does not have an id, one will be generated.
    * @param {Omit<Document, 'id'> & { id?: string }} doc The document to insert.

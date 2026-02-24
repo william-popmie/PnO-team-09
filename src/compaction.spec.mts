@@ -4,7 +4,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { SimpleDBMS } from './simpledbms.mjs';
 import { MockFile } from './file/mockfile.mjs';
-import { extractDatabaseSnapshot, rebuildFromSnapshot, compactDatabase } from './compaction.mjs';
+import { compactDatabase } from './compaction.mjs';
 
 describe('Database Compaction', () => {
   let dbFile: MockFile;
@@ -15,70 +15,7 @@ describe('Database Compaction', () => {
     walFile = new MockFile(512);
   });
 
-  describe('extractDatabaseSnapshot', () => {
-    it('should extract an empty database snapshot', async () => {
-      const db = await SimpleDBMS.create(dbFile, walFile);
-      const snapshot = await extractDatabaseSnapshot(db);
-
-      expect(snapshot.collections).toHaveLength(0);
-      await db.close();
-    });
-
-    it('should extract all collections and documents', async () => {
-      const db = await SimpleDBMS.create(dbFile, walFile);
-
-      const users = await db.getCollection('users');
-      await users.insert({ id: 'u1', name: 'Alice', age: 30 });
-      await users.insert({ id: 'u2', name: 'Bob', age: 25 });
-
-      const posts = await db.getCollection('posts');
-      await posts.insert({ id: 'p1', title: 'Hello', userId: 'u1' });
-
-      const snapshot = await extractDatabaseSnapshot(db);
-
-      expect(snapshot.collections).toHaveLength(2);
-
-      const usersSnapshot = snapshot.collections.find((c) => c.name === 'users');
-      expect(usersSnapshot).toBeDefined();
-      expect(usersSnapshot!.documents).toHaveLength(2);
-
-      const postsSnapshot = snapshot.collections.find((c) => c.name === 'posts');
-      expect(postsSnapshot).toBeDefined();
-      expect(postsSnapshot!.documents).toHaveLength(1);
-
-      await db.close();
-    });
-  });
-
-  describe('rebuildFromSnapshot', () => {
-    it('should rebuild a database from a snapshot', async () => {
-      const db = await SimpleDBMS.create(dbFile, walFile);
-      const users = await db.getCollection('users');
-      await users.insert({ id: 'u1', name: 'Alice' });
-      await users.insert({ id: 'u2', name: 'Bob' });
-
-      const snapshot = await extractDatabaseSnapshot(db);
-      await db.close();
-
-      // Rebuild on fresh files
-      const newDbFile = new MockFile(512);
-      const newWalFile = new MockFile(512);
-      const newDb = await rebuildFromSnapshot(snapshot, newDbFile, newWalFile);
-
-      const newUsers = await newDb.getCollection('users');
-      const alice = await newUsers.findById('u1');
-      expect(alice).toBeDefined();
-      expect(alice!['name']).toBe('Alice');
-
-      const bob = await newUsers.findById('u2');
-      expect(bob).toBeDefined();
-      expect(bob!['name']).toBe('Bob');
-
-      await newDb.close();
-    });
-  });
-
-  describe('compactDatabase', () => {
+  describe('compactDatabase (same-file mode)', () => {
     it('should compact an empty database', async () => {
       const db = await SimpleDBMS.create(dbFile, walFile);
 
@@ -236,6 +173,129 @@ describe('Database Compaction', () => {
       expect((await reopenedUsers.findById('u1'))!['name']).toBe('Alice');
 
       await reopened.close();
+    });
+  });
+
+  describe('compactDatabase (streaming with temp files)', () => {
+    it('should stream documents to temp files without loading all into memory', async () => {
+      let db = await SimpleDBMS.create(dbFile, walFile);
+      const users = await db.getCollection('users');
+
+      // Insert documents
+      for (let i = 0; i < 20; i++) {
+        await users.insert({ id: `user-${i}`, name: `User ${i}`, data: 'x'.repeat(50) });
+      }
+
+      // Delete half to create fragmentation
+      for (let i = 10; i < 20; i++) {
+        await users.delete(`user-${i}`);
+      }
+
+      const sizeBefore = (await dbFile.stat()).size;
+
+      // Use separate temp files (streaming mode)
+      const tempDbFile = new MockFile(512);
+      const tempWalFile = new MockFile(512);
+
+      const { db: newDb, result } = await compactDatabase(db, dbFile, walFile, tempDbFile, tempWalFile);
+      db = newDb;
+
+      expect(result.success).toBe(true);
+      expect(result.sizeBefore).toBe(sizeBefore);
+      expect(result.totalDocuments).toBe(10);
+      expect(result.collectionsCompacted).toBe(1);
+
+      // Verify data is in the new (temp) database
+      const newUsers = await db.getCollection('users');
+      const remaining = await newUsers.find();
+      expect(remaining).toHaveLength(10);
+
+      for (let i = 0; i < 10; i++) {
+        const user = await newUsers.findById(`user-${i}`);
+        expect(user).toBeDefined();
+        expect(user!['name']).toBe(`User ${i}`);
+      }
+
+      await db.close();
+    });
+
+    it('should stream multiple collections with temp files', async () => {
+      let db = await SimpleDBMS.create(dbFile, walFile);
+
+      const users = await db.getCollection('users');
+      await users.insert({ id: 'u1', name: 'Alice' });
+      await users.insert({ id: 'u2', name: 'Bob' });
+
+      const posts = await db.getCollection('posts');
+      await posts.insert({ id: 'p1', title: 'Hello' });
+
+      const tempDbFile = new MockFile(512);
+      const tempWalFile = new MockFile(512);
+
+      const { db: newDb, result } = await compactDatabase(db, dbFile, walFile, tempDbFile, tempWalFile);
+      db = newDb;
+
+      expect(result.collectionsCompacted).toBe(2);
+      expect(result.totalDocuments).toBe(3);
+
+      const newUsers = await db.getCollection('users');
+      const newPosts = await db.getCollection('posts');
+
+      expect(await newUsers.findById('u1')).toBeDefined();
+      expect(await newUsers.findById('u2')).toBeDefined();
+      expect(await newPosts.findById('p1')).toBeDefined();
+
+      await db.close();
+    });
+
+    it('should reduce file size with streaming compaction', async () => {
+      let db = await SimpleDBMS.create(dbFile, walFile);
+      const users = await db.getCollection('users');
+
+      // Insert many documents then delete most
+      for (let i = 0; i < 50; i++) {
+        await users.insert({ id: `user-${i}`, name: `User ${i}`, data: 'x'.repeat(100) });
+      }
+      for (let i = 5; i < 50; i++) {
+        await users.delete(`user-${i}`);
+      }
+
+      const tempDbFile = new MockFile(512);
+      const tempWalFile = new MockFile(512);
+
+      const { db: newDb, result } = await compactDatabase(db, dbFile, walFile, tempDbFile, tempWalFile);
+      db = newDb;
+
+      expect(result.sizeAfter).toBeLessThan(result.sizeBefore);
+
+      const newUsers = await db.getCollection('users');
+      expect((await newUsers.find())).toHaveLength(5);
+
+      await db.close();
+    });
+  });
+
+  describe('Collection.entries()', () => {
+    it('should stream documents lazily', async () => {
+      const db = await SimpleDBMS.create(dbFile, walFile);
+      const users = await db.getCollection('users');
+      await users.insert({ id: 'u1', name: 'Alice' });
+      await users.insert({ id: 'u2', name: 'Bob' });
+      await users.insert({ id: 'u3', name: 'Charlie' });
+
+      const docs: string[] = [];
+      for await (const { key, value } of users.entries()) {
+        docs.push(key);
+        expect(value).toBeDefined();
+        expect(value.id).toBe(key);
+      }
+
+      expect(docs).toHaveLength(3);
+      expect(docs).toContain('u1');
+      expect(docs).toContain('u2');
+      expect(docs).toContain('u3');
+
+      await db.close();
     });
   });
 

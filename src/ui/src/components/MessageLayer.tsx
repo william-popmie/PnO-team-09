@@ -45,13 +45,16 @@ export function MessageLayer({ positions, nodeRadius, width, height }: Props) {
                               : 0.6;
 
                 const isRV = arrow.messageType === "RequestVote" || arrow.messageType === "RequestVoteResponse";
-                const strokeColor = isRV ? "#d73a49" : "#0366d6";
+                const strokeColor = isRV ? "#d73a49" 
+                        : arrow.isHeartbeat ? "#42e4e7"
+                        : "#0366d6";
 
                 return (
                     <line key={arrow.id}
                         x1={x1} y1={y1} x2={x2} y2={y2}
                         stroke={strokeColor}
-                        strokeWidth={2}
+                        strokeWidth={arrow.isHeartbeat ? 1 : 2.5}
+                        strokeDasharray={arrow.isHeartbeat ? "3 3" : undefined}
                         opacity={opacity}
                         markerEnd={`url(#arrow-${isRV ? "rv" : "ae"})`}
                         style={{ transition: 'opacity 0.3s' }}

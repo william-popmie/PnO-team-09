@@ -209,6 +209,7 @@ export interface MessageArrow {
     messageType: "RequestVote" | "AppendEntries" | "RequestVoteResponse" | "AppendEntriesResponse";
     status: ArrowStatus;
     createdAt: number;
+    isHeartbeat: boolean;
 }
 
 export interface Partition {

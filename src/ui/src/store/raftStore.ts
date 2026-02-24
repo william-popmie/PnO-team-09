@@ -54,6 +54,9 @@ export const useRaftStore = create<RaftStore>((set) => ({
                 break;
             }
             case "MessageSent": {
+
+                const isHeartbeat: boolean = event.messageType === "AppendEntries" && (event.payload as { entries: unknown[] })?.entries?.length === 0;
+
                 const arrow: MessageArrow = {
                     id: event.messageId,
                     fromNodeId: event.fromNodeId,
@@ -61,6 +64,7 @@ export const useRaftStore = create<RaftStore>((set) => ({
                     messageType: event.messageType,
                     status: "inFlight",
                     createdAt: Date.now(),
+                    isHeartbeat: isHeartbeat,
                 };
                 set(state => ({ arrows: [...state.arrows, arrow] }));
                 break;
@@ -69,6 +73,9 @@ export const useRaftStore = create<RaftStore>((set) => ({
             case "MessageReceived": {
                 if (event.messageType === "AppendEntriesResponse") {
                     const returnId = event.messageId + "-response";
+
+                    const originalArrow = useRaftStore.getState().arrows.find(a => a.id === event.messageId);
+                    
                     set(s => ({ arrows: s.arrows.filter(a => a.id !== event.messageId) }));
                     set(s => ({ arrows: [...s.arrows, {
                         id: returnId,
@@ -77,6 +84,7 @@ export const useRaftStore = create<RaftStore>((set) => ({
                         messageType: event.messageType,
                         status: "inFlight" as const,
                         createdAt: Date.now(),
+                        isHeartbeat: originalArrow?.isHeartbeat ?? true,
                     }]}));
                     setTimeout(() => {
                         set(s => ({ arrows: s.arrows.filter(a => a.id !== returnId) }));
@@ -95,6 +103,7 @@ export const useRaftStore = create<RaftStore>((set) => ({
                             messageType: event.messageType,
                             status: "inFlight" as const,
                             createdAt: Date.now(),
+                            isHeartbeat: false,
                         }]}));
                     }, 1500);
                     setTimeout(() => {

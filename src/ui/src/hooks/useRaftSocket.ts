@@ -8,6 +8,8 @@ const reconnnect_ms = 1000;
 export function useRaftSocket() {
     const setNodeIds = useRaftStore((state) => state.setNodeIds);
     const pushEvent = useRaftStore((state) => state.pushEvent);
+    const processEvent = useRaftStore((state) => state.processEvent);
+    const reset = useRaftStore((state) => state.reset);
 
     useEffect(() => {
         let ws: WebSocket;
@@ -21,12 +23,19 @@ export function useRaftSocket() {
                 const data = JSON.parse(event.data) as ServerMessage;
 
                 if (data.type === "InitialState") {
+                    reset();
                     setNodeIds(data.nodeIds);
+
+                    for (const event of data.events) {
+                        processEvent(event);
+                    }
+
                     for (const event of [...data.events].reverse()) {
                         pushEvent(event);
                     }
                 } else if (data.type === "LiveEvent") {
                     pushEvent(data.event);
+                    processEvent(data.event);
                 }
             };
 
@@ -46,5 +55,5 @@ export function useRaftSocket() {
             clearTimeout(reconnectTimer);
             ws?.close();
         };
-    }, [setNodeIds, pushEvent]);
+    }, []);
 }

@@ -322,17 +322,19 @@ describe('FBNodeStorage', () => {
     const internal = await storage.allocateInternalNodeStorage([a, b], [3]);
     await storage.commitAndReclaim();
 
-    const rep = await storage.createLeaf();
-    await rep.getCursorBeforeFirst().insert(2, 'rep');
+    const repLeft = await storage.createLeaf();
+    await repLeft.getCursorBeforeFirst().insert(1, 'rep-left');
+    const repRight = await storage.createLeaf();
+    await repRight.getCursorBeforeFirst().insert(2, 'rep-right');
 
     const childCursor = (await internal.getChildCursorAtFirstChild()) as FBChildCursor<number, string>;
     childCursor.setPosition(0);
 
-    const res = await childCursor.replaceKeysAndChildrenAfterBy(1, [2], [rep]);
+    const res = await childCursor.replaceKeysAndChildrenAfterBy(1, [2], [repLeft, repRight]);
 
     expect(res.keys).toContain(2);
     expect(res.nodes.length).toBeGreaterThan(0);
-    expect(internal.childBlockIds.length).toBe(1);
+    expect(internal.childBlockIds.length).toBe(2);
     expect(internal.keys.length).toBe(1);
   });
 
@@ -341,12 +343,14 @@ describe('FBNodeStorage', () => {
     await l1.getCursorBeforeFirst().insert(5, 'x');
     const l2 = await storage.createLeaf();
     await l2.getCursorBeforeFirst().insert(15, 'y');
+    const l0 = await storage.createLeaf();
+    await l0.getCursorBeforeFirst().insert(1, 'z');
     await storage.commitAndReclaim();
 
     const parent = await storage.allocateInternalNodeStorage([l1, l2], [15]);
     await storage.commitAndReclaim();
 
-    const nextNode = await storage.createInternalNode([], []);
+    const nextNode = await storage.allocateInternalNodeStorage([l0], []);
     const returnedKey = await parent.moveLastChildTo(999, nextNode);
     expect(returnedKey).toBe(15);
     expect(nextNode.keys[0]).toBe(999);

@@ -50,6 +50,13 @@ export class TrivialNodeStorage<KeysType, ValuesType>
   ): Promise<TrivialInternalNode<KeysType, ValuesType>> {
     return Promise.resolve(this.createInternalNode(children, keys));
   }
+
+  async persistNode(
+    _node: TrivialLeafNode<KeysType, ValuesType> | TrivialInternalNode<KeysType, ValuesType>,
+  ): Promise<void> {
+    // No-op for in-memory storage
+    return Promise.resolve();
+  }
 }
 
 /**

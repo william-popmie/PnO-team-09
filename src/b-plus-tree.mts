@@ -435,6 +435,63 @@ export class BPlusTree<
     this.root = await this.storage.createTree();
   }
 
+  private lowerBoundKey(keys: KeysType[], key: KeysType): number {
+    let lo = 0;
+    let hi = keys.length;
+    while (lo < hi) {
+      const mid = lo + Math.floor((hi - lo) / 2);
+      if (this.storage.compareKeys(keys[mid], key) < 0) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    return lo;
+  }
+
+  private async getChildAt(
+    internal: InternalNodeStorageType,
+    index: number,
+  ): Promise<LeafNodeStorageType | InternalNodeStorageType> {
+    const childCount = internal.keys.length + 1;
+    if (index < 0 || index >= childCount) {
+      throw new Error('Child index out of bounds');
+    }
+
+    const inMemory = internal.children[index];
+    if (inMemory) return inMemory;
+
+    const cursor = await internal.getChildCursorAtFirstChild();
+    const child = await cursor.getChild(index);
+    internal.children[index] = child;
+    return child;
+  }
+
+  private async materializeChildren(internal: InternalNodeStorageType): Promise<void> {
+    const childCount = internal.keys.length + 1;
+    const loaded: (LeafNodeStorageType | InternalNodeStorageType)[] = [];
+    const cursor = await internal.getChildCursorAtFirstChild();
+    for (let i = 0; i < childCount; i++) {
+      loaded.push(await cursor.getChild());
+      if (i < childCount - 1) cursor.moveNext();
+    }
+    internal.children = loaded;
+  }
+
+  private async findChildIndexInParent(
+    parent: InternalNodeStorageType,
+    node: LeafNodeStorageType | InternalNodeStorageType,
+  ): Promise<number> {
+    const childCount = parent.keys.length + 1;
+    const cursor = await parent.getChildCursorAtFirstChild();
+    for (let i = 0; i < childCount; i++) {
+      const current = await cursor.getChild();
+      if (current === node) return i;
+      if (i < childCount - 1) cursor.moveNext();
+    }
+    return -1;
+  }
+
   /**
    * Retrieves the leftmost leaf node of the B+ tree.
    *
@@ -446,7 +503,7 @@ export class BPlusTree<
     let node: LeafNodeStorageType | InternalNodeStorageType = this.root;
     while (!node.isLeaf) {
       const internal = node;
-      node = internal.children[0];
+      node = await this.getChildAt(internal, 0);
     }
     return Promise.resolve(node);
   }
@@ -462,7 +519,7 @@ export class BPlusTree<
     let node: LeafNodeStorageType | InternalNodeStorageType = this.root;
     while (!node.isLeaf) {
       const internal = node;
-      node = internal.children[internal.children.length - 1];
+      node = await this.getChildAt(internal, internal.keys.length);
     }
     return Promise.resolve(node);
   }
@@ -497,18 +554,21 @@ export class BPlusTree<
     let index: number;
     if (parentIndices && parentIndices.length > 0) {
       const stackIdx = parentIndices[parentIndices.length - 1];
-      if (stackIdx >= 0 && parent.children[stackIdx] === node) {
+      if (stackIdx >= 0 && (await this.getChildAt(parent, stackIdx)) === node) {
         index = stackIdx;
       } else {
-        index = parent.children.indexOf(node);
+        index = await this.findChildIndexInParent(parent, node);
       }
     } else {
-      index = parent.children.indexOf(node);
+      index = await this.findChildIndexInParent(parent, node);
     }
     if (index === -1) throw new Error('Parent does not contain node in children');
 
+    await this.materializeChildren(parent);
+
+    const childCount = parent.keys.length + 1;
     const leftSibling = index > 0 ? parent.children[index - 1] : null;
-    const rightSibling = index < parent.children.length - 1 ? parent.children[index + 1] : null;
+    const rightSibling = index < childCount - 1 ? parent.children[index + 1] : null;
 
     const minKeys = Math.ceil(this.order / 2);
 
@@ -520,14 +580,14 @@ export class BPlusTree<
         node.keys.unshift(borrowedKey);
         node.values.unshift(borrowedValue);
         parent.keys[index - 1] = node.keys[0];
+        await this.storage.persistNode(ls);
+        await this.storage.persistNode(node);
+        await this.storage.persistNode(parent);
       } else {
         const ls = leftSibling as InternalNodeStorageType;
-        const borrowedKey = ls.keys.pop() as KeysType;
-        const borrowedChild = ls.children.pop() as LeafNodeStorageType | InternalNodeStorageType;
-        const sep = parent.keys[index - 1];
-        node.keys.unshift(sep);
-        node.children.unshift(borrowedChild);
-        parent.keys[index - 1] = borrowedKey;
+        const newSeparator = await ls.moveLastChildTo(parent.keys[index - 1], node);
+        parent.keys[index - 1] = newSeparator;
+        await this.storage.persistNode(parent);
       }
       return;
     }
@@ -540,14 +600,14 @@ export class BPlusTree<
         node.keys.push(borrowedKey);
         node.values.push(borrowedValue);
         parent.keys[index] = rs.keys[0];
+        await this.storage.persistNode(rs);
+        await this.storage.persistNode(node);
+        await this.storage.persistNode(parent);
       } else {
         const rs = rightSibling as InternalNodeStorageType;
-        const borrowedKey = rs.keys.shift() as KeysType;
-        const borrowedChild = rs.children.shift() as LeafNodeStorageType | InternalNodeStorageType;
-        const sep = parent.keys[index];
-        node.keys.push(sep);
-        node.children.push(borrowedChild);
-        parent.keys[index] = borrowedKey;
+        const newSeparator = await rs.moveFirstChildTo(node, parent.keys[index]);
+        parent.keys[index] = newSeparator;
+        await this.storage.persistNode(parent);
       }
       return;
     }
@@ -557,16 +617,18 @@ export class BPlusTree<
       await leftSibling.mergeWithNext(separatorKey, node);
       parent.keys.splice(index - 1, 1);
       parent.children.splice(index, 1);
+      await this.storage.persistNode(parent);
     } else if (rightSibling) {
       const separatorKey = parent.keys[index];
       await node.mergeWithNext(separatorKey, rightSibling);
       parent.keys.splice(index, 1);
       parent.children.splice(index + 1, 1);
+      await this.storage.persistNode(parent);
     }
 
     if (parent === this.root) {
       if (!parent.isLeaf && parent.keys.length === 0) {
-        this.root = parent.children[0];
+        this.root = await this.getChildAt(parent, 0);
       }
       return;
     }
@@ -619,7 +681,7 @@ export class BPlusTree<
       const child = await cursor.getChild();
       if (!child) throw new Error('Child not found while descending');
 
-      const idx = internal.children.indexOf(child);
+      const idx = this.lowerBoundKey(internal.keys, key);
       parents.push(internal);
       parentIndices.push(idx);
 
@@ -657,9 +719,9 @@ export class BPlusTree<
     child: LeafNodeStorageType | InternalNodeStorageType,
   ): Promise<InternalNodeStorageType | undefined> {
     const cursor = await node.getChildCursorAtFirstChild();
+    const childCount = node.keys.length + 1;
 
-    // eslint-disable-next-line @typescript-eslint/prefer-for-of
-    for (let i = 0; i < node.children.length; i++) {
+    for (let i = 0; i < childCount; i++) {
       const currentChild = await cursor.getChild();
       if (currentChild === child) {
         return node;
@@ -668,7 +730,7 @@ export class BPlusTree<
         const parent = await this.findParentRecursive(currentChild, child);
         if (parent) return parent;
       }
-      cursor.moveNext();
+      if (i < childCount - 1) cursor.moveNext();
     }
     return undefined;
   }
@@ -706,20 +768,21 @@ export class BPlusTree<
     if (!parent) {
       parent = await this.findParent(leaf);
       if (!parent) return false;
-      idx = parent.children.indexOf(leaf);
+      idx = await this.findChildIndexInParent(parent, leaf);
       if (idx === -1) throw new Error('Parent does not contain leaf in children');
     } else {
       if (idx === undefined) {
-        idx = parent.children.indexOf(leaf);
+        idx = await this.findChildIndexInParent(parent, leaf);
         if (idx === -1) throw new Error('Parent does not contain leaf in children');
       }
     }
 
     const childIndex = idx;
 
-    const left = childIndex > 0 ? (parent.children[childIndex - 1] as LeafNodeStorageType) : null;
+    const childCount = parent.keys.length + 1;
+    const left = childIndex > 0 ? ((await this.getChildAt(parent, childIndex - 1)) as LeafNodeStorageType) : null;
     const right =
-      childIndex < parent.children.length - 1 ? (parent.children[childIndex + 1] as LeafNodeStorageType) : null;
+      childIndex < childCount - 1 ? ((await this.getChildAt(parent, childIndex + 1)) as LeafNodeStorageType) : null;
 
     if (left && left.keys.length < this.order) {
       const movedKey = leaf.keys.shift() as KeysType;
@@ -727,6 +790,10 @@ export class BPlusTree<
       left.keys.push(movedKey);
       left.values.push(movedVal);
       parent.keys[childIndex - 1] = leaf.keys[0];
+
+      await this.storage.persistNode(left);
+      await this.storage.persistNode(leaf);
+      await this.storage.persistNode(parent);
       return true;
     }
 
@@ -736,6 +803,10 @@ export class BPlusTree<
       right.keys.unshift(movedKey);
       right.values.unshift(movedVal);
       parent.keys[childIndex] = right.keys[0];
+
+      await this.storage.persistNode(right);
+      await this.storage.persistNode(leaf);
+      await this.storage.persistNode(parent);
       return true;
     }
 
@@ -776,7 +847,7 @@ export class BPlusTree<
     const parent = parents && parents.length > 0 ? parents[parents.length - 1] : undefined;
     const idx = parentIndices && parentIndices.length > 0 ? parentIndices[parentIndices.length - 1] : undefined;
 
-    await this.insertInParent(leaf, promotedKey, newLeaf, parent, idx);
+    await this.insertInParent(leaf, promotedKey, newLeaf, parent, idx, parents, parentIndices);
   }
 
   /**
@@ -798,17 +869,23 @@ export class BPlusTree<
     if (!parent) {
       parent = await this.findParent(internal);
       if (!parent) return false;
-      idx = parent.children.indexOf(internal);
+      idx = await this.findChildIndexInParent(parent, internal);
       if (idx === -1) throw new Error('Parent does not contain internal node in children');
     } else {
       if (idx === undefined) {
-        idx = parent.children.indexOf(internal);
+        idx = await this.findChildIndexInParent(parent, internal);
         if (idx === -1) throw new Error('Parent does not contain internal node in children');
       }
     }
 
-    const left = idx > 0 ? (parent.children[idx - 1] as InternalNodeStorageType) : null;
-    const right = idx < parent.children.length - 1 ? (parent.children[idx + 1] as InternalNodeStorageType) : null;
+    await this.materializeChildren(internal);
+
+    const childCount = parent.keys.length + 1;
+    const left = idx > 0 ? ((await this.getChildAt(parent, idx - 1)) as InternalNodeStorageType) : null;
+    const right = idx < childCount - 1 ? ((await this.getChildAt(parent, idx + 1)) as InternalNodeStorageType) : null;
+
+    if (left) await this.materializeChildren(left);
+    if (right) await this.materializeChildren(right);
 
     if (left && left.keys.length < this.order) {
       const sepFromParent = parent.keys[idx - 1];
@@ -817,6 +894,10 @@ export class BPlusTree<
       left.keys.push(sepFromParent);
       left.children.push(movedChild);
       parent.keys[idx - 1] = newParentSep;
+
+      await this.storage.persistNode(internal);
+      await this.storage.persistNode(left);
+      await this.storage.persistNode(parent);
       return true;
     }
 
@@ -827,6 +908,10 @@ export class BPlusTree<
       right.keys.unshift(sepFromParent);
       right.children.unshift(movedChild);
       parent.keys[idx] = newParentSep;
+
+      await this.storage.persistNode(internal);
+      await this.storage.persistNode(right);
+      await this.storage.persistNode(parent);
       return true;
     }
 
@@ -837,11 +922,22 @@ export class BPlusTree<
    * Splits an internal node that has exceeded the maximum number of keys.
    *
    * @param {InternalNodeStorageType} internal - The internal node to split.
+   * @param {InternalNodeStorageType[] | undefined} parents - Optional parent stack (root..parent).
+   * @param {number[] | undefined} parentIndices - Optional indices for each parent.
    * @returns {Promise<void>} A promise that resolves when the split is complete.
    */
-  private async splitInternalNode(internal: InternalNodeStorageType): Promise<void> {
-    const redistributed = await this.tryRedistributeInternalBeforeSplit(internal);
+  private async splitInternalNode(
+    internal: InternalNodeStorageType,
+    parents?: InternalNodeStorageType[],
+    parentIndices?: number[],
+  ): Promise<void> {
+    const parent = parents && parents.length > 0 ? parents[parents.length - 1] : undefined;
+    const idx = parentIndices && parentIndices.length > 0 ? parentIndices[parentIndices.length - 1] : undefined;
+
+    const redistributed = await this.tryRedistributeInternalBeforeSplit(internal, parent, idx);
     if (redistributed) return;
+
+    await this.materializeChildren(internal);
 
     const mid = Math.floor(internal.keys.length / 2);
     const promotedKey = internal.keys[mid];
@@ -854,10 +950,11 @@ export class BPlusTree<
 
     internal.keys = leftKeys;
     internal.children = leftChildren;
+    await this.storage.persistNode(internal);
 
-    const newInternal = await this.storage.createInternalNode(rightChildren, rightKeys);
+    const newInternal = await this.storage.allocateInternalNodeStorage(rightChildren, rightKeys);
 
-    await this.insertInParent(internal, promotedKey, newInternal);
+    await this.insertInParent(internal, promotedKey, newInternal, parent, idx, parents, parentIndices);
   }
 
   /**
@@ -880,9 +977,11 @@ export class BPlusTree<
     newNode: LeafNodeStorageType | InternalNodeStorageType,
     parent?: InternalNodeStorageType,
     idx?: number,
+    parentsPath?: InternalNodeStorageType[],
+    parentIndicesPath?: number[],
   ): Promise<void> {
     if (node === this.root) {
-      const newRoot = await this.storage.createInternalNode([node, newNode], [promotedKey]);
+      const newRoot = await this.storage.allocateInternalNodeStorage([node, newNode], [promotedKey]);
       this.root = newRoot;
       return;
     }
@@ -890,22 +989,29 @@ export class BPlusTree<
     if (!parent) {
       parent = await this.findParent(node);
       if (!parent) throw new Error('Parent not found while inserting in parent');
-      idx = parent.children.indexOf(node);
+      idx = await this.findChildIndexInParent(parent, node);
       if (idx === -1) throw new Error('Parent does not contain node as child');
     } else {
       if (idx === undefined) {
-        idx = parent.children.indexOf(node);
+        idx = await this.findChildIndexInParent(parent, node);
         if (idx === -1) throw new Error('Parent does not contain node as child');
       }
     }
 
     const childIndex = idx;
 
+    await this.materializeChildren(parent);
+
     parent.keys.splice(childIndex, 0, promotedKey);
     parent.children.splice(childIndex + 1, 0, newNode);
 
     if (parent.keys.length > this.order) {
-      await this.splitInternalNode(parent);
+      const parentsUp = parentsPath && parentsPath.length > 0 ? parentsPath.slice(0, -1) : undefined;
+      const parentIndicesUp =
+        parentIndicesPath && parentIndicesPath.length > 0 ? parentIndicesPath.slice(0, -1) : undefined;
+      await this.splitInternalNode(parent, parentsUp, parentIndicesUp);
+    } else {
+      await this.storage.persistNode(parent);
     }
   }
 }

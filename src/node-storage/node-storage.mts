@@ -36,6 +36,8 @@ export interface NodeStorage<
     children: (LeafNodeStorageType | InternalNodeStorageType)[],
     keys: KeysType[],
   ): Promise<InternalNodeStorageType>;
+
+  persistNode(node: LeafNodeStorageType | InternalNodeStorageType): Promise<void>;
 }
 
 /**

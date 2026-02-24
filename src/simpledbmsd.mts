@@ -169,7 +169,6 @@ async function loadDummyAccount() {
 
 async function initDB(customDbPath?: string, customWalPath?: string) {
   try {
-
     currentDbPath = customDbPath || process.argv[2] || 'mydb.db';
     currentWalPath = customWalPath || process.argv[3] || 'mydb.wal';
     const dbFile = new RealFile(currentDbPath);

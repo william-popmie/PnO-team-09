@@ -1,0 +1,222 @@
+export type RaftRole = 'Leader' | 'Follower' | 'Candidate';
+
+export interface LogEntry {
+    index: number;
+    term: number;
+    command: unknown;
+}
+
+interface BaseEvent {
+    eventId: string;
+    timeStamp: number;
+    wallTime: number;
+    nodeId: string;
+}
+
+export interface NodeStateChangedEvent extends BaseEvent {
+    type: "NodeStateChanged";
+    oldState: RaftRole;
+    newState: RaftRole;
+    term: number
+}
+
+export interface TermChangedEvent extends BaseEvent {
+    type: "TermChanged";
+    oldTerm: number;
+    newTerm: number;
+    reason: string;
+}
+
+export interface CommitIndexAdvanceEvent extends BaseEvent {
+    type: "CommitIndexAdvanced";
+    oldCommitIndex: number;
+    newCommitIndex: number;
+    term: number;
+}
+
+export interface NodeCrashedEvent extends BaseEvent {
+    type: "NodeCrashed";
+    reason?: string;
+}
+
+export interface NodeRecoveredEvent extends BaseEvent {
+    type: "NodeRecovered";
+    term: number;
+    logLength: number;
+}
+
+export interface LogAppendedEvent extends BaseEvent {
+    type: "LogAppended";
+    entries: LogEntry[];
+    term: number;
+}
+
+export interface LogConflictResolvedEvent extends BaseEvent {
+    type: "LogConflictResolved";
+    truncatedFromIndex: number;
+    newEntries: LogEntry[];
+    term: number;
+}
+
+export interface ElectionStartedEvent extends BaseEvent {
+    type: "ElectionStarted";
+    term: number;
+}
+
+export interface VoteGrantedEvent extends BaseEvent {
+    type: "VoteGranted";
+    term: number;
+    voterId: string;
+    candidateId: string;
+}
+
+export interface VoteDeniedEvent extends BaseEvent {
+    type: "VoteDenied";
+    term: number;
+    voterId: string;
+    candidateId: string;
+    reason: string;
+}
+
+export interface LeaderElectedEvent extends BaseEvent {
+    type: "LeaderElected";
+    term: number;
+    leaderId: string;
+    voteCount: number;
+    clusterSize: number;
+}
+
+export interface MatchIndexUpdatedEvent extends BaseEvent {
+    type: "MatchIndexUpdated";
+    followerId: string;
+    prevMatchIndex: number;
+    newMatchIndex: number;
+    term: number;
+}
+
+export interface NextIndexDecrementedEvent extends BaseEvent {
+    type: "NextIndexDecremented";
+    followerId: string;
+    prevNextIndex: number;
+    newNextIndex: number;
+    term: number;
+}
+
+export interface MessageSentEvent extends BaseEvent {
+    type: "MessageSent";
+    messageType: "RequestVote" | "AppendEntries";
+    messageId: string;
+    fromNodeId: string;
+    toNodeId: string;
+    term: number;
+    payload: unknown;
+}
+
+export interface MessageReceivedEvent extends BaseEvent {
+    type: "MessageReceived";
+    messagetype: "RequestVoteResponse" | "AppendEntriesResponse";
+    messageId: string;
+    fromNodeId: string;
+    toNodeId: string;
+    term: number;
+    payload: unknown;
+    latencyMs:number;
+}
+
+export interface MessageDroppedEvent extends BaseEvent {
+    type: "MessageDropped";
+    messageType: string;
+    messageId: string;
+    fromNodeId: string;
+    toNodeId: string;
+    term: number;
+    reason:string;
+}
+
+export interface PartitionCreatedEvent {
+    eventId: string;
+    timestamp: number;
+    wallTime: number,
+    type: "PartitionCreated"
+    groupA: string[];
+    groupB: string[];
+}
+
+export interface PartitionHealedEvent {
+    eventId: string;
+    timeStamp: number;
+    wallTime: number;
+    type: "PartitionHealed";
+}
+
+export type RaftEvent = 
+    | NodeStateChangedEvent
+    | TermChangedEvent
+    | CommitIndexAdvanceEvent
+    | NodeCrashedEvent
+    | NodeRecoveredEvent
+    | LogAppendedEvent
+    | LogConflictResolvedEvent
+    | ElectionStartedEvent
+    | VoteGrantedEvent
+    | VoteDeniedEvent
+    | LeaderElectedEvent
+    | MatchIndexUpdatedEvent
+    | NextIndexDecrementedEvent
+    | MessageSentEvent
+    | MessageReceivedEvent
+    | MessageDroppedEvent
+    | PartitionCreatedEvent
+    | PartitionHealedEvent
+
+export interface InitialStateMessage {
+    type: "InitialState";
+    events: RaftEvent[];
+    nodeIds: string[];
+}
+
+export interface LiveEventMessage {
+    type: "LiveEvent";
+    event: RaftEvent;
+}
+
+export type ServerMessage = InitialStateMessage | LiveEventMessage
+
+export type clientCommand = 
+    | { type: "SubmitCommand"; command: unknown}
+    | { type: "CrashNode"; nodeId: string}
+    | { type: "RecoverNode"; nodeId: string }
+    | { type: "PartitionNodes"; groupA: string[]; groupB: string[] }
+    | { type: "HealPartition"}
+    | { type: "SetDropRate"; nodeId: string; rate: number };
+
+export interface NodeUIState {
+    nodeId: string;
+    role: RaftRole;
+    term: number;
+    commitIndex: number;
+    votedFor: string | null;
+    crashed: boolean;
+    logEntries: LogEntry[];
+}
+
+export type ArrowStatus = "inFlight" | "received" | "dropped";
+
+export interface MessageArrow {
+    id: string;
+    fromNodeId: string;
+    toNodeId: string;
+    messageType: "RequestVote" | "AppendEntries";
+    status: ArrowStatus;
+    createdAt: number;
+}
+
+export interface Partition {
+    groupA: string[];
+    groupB: string[];
+}
+
+export interface NodePosition {
+    x: number;
+    y: number;
+}

@@ -23,6 +23,7 @@ export class MockTransport implements Transport {
 
     private static transports: Map<NodeId, MockTransport> = new Map();
     private static partitions: Set<NodeId>[] = [];
+    private static blockedPairs: Set<string> = new Set();
 
     constructor(private readonly nodeId: NodeId, private readonly random: Random) {}
 
@@ -63,6 +64,10 @@ export class MockTransport implements Transport {
 
         if(MockTransport.isPartitioned(this.nodeId, peerId)) {
             throw new NetworkError(`Message from ${this.nodeId} to ${peerId} was dropped due to network partition.`);
+        }
+
+        if (MockTransport.isLinkBlocked(this.nodeId, peerId)) {
+            throw new NetworkError(`Message from ${this.nodeId} to ${peerId} was dropped due to cut link.`);
         }
 
         if (!peerTransport || !peerTransport.isStarted()) {
@@ -146,9 +151,28 @@ export class MockTransport implements Transport {
     static reset(): void {
         MockTransport.transports.clear();
         MockTransport.partitions = [];
+        MockTransport.blockedPairs.clear();
     }
 
     static getRegisteredNodes(): NodeId[] {
         return Array.from(MockTransport.transports.keys());
+    }
+
+    static cutLink(nodeA: NodeId, nodeB: NodeId): void {
+        MockTransport.blockedPairs.add(`${nodeA}-${nodeB}`);
+        MockTransport.blockedPairs.add(`${nodeB}-${nodeA}`);
+    }
+
+    static healLink(nodeA: NodeId, nodeB: NodeId): void {
+        MockTransport.blockedPairs.delete(`${nodeA}-${nodeB}`);
+        MockTransport.blockedPairs.delete(`${nodeB}-${nodeA}`);
+    }
+
+    static healAllLinks(): void {
+        MockTransport.blockedPairs.clear();
+    }
+
+    static isLinkBlocked(nodeA: NodeId, nodeB: NodeId): boolean {
+        return MockTransport.blockedPairs.has(`${nodeA}-${nodeB}`);
     }
 }

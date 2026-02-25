@@ -136,10 +136,9 @@ export interface MessageDroppedEvent extends BaseEvent {
 export interface PartitionCreatedEvent {
     eventId: string;
     timestamp: number;
-    wallTime: number,
-    type: "PartitionCreated"
-    groupA: string[];
-    groupB: string[];
+    wallTime: number;
+    type: "PartitionCreated";
+    groups: string[][];
 }
 
 export interface PartitionHealedEvent {
@@ -147,6 +146,31 @@ export interface PartitionHealedEvent {
     timestamp: number;
     wallTime: number;
     type: "PartitionHealed";
+}
+
+export interface LinkCutEvent {
+    eventId: string;
+    timestamp: number;
+    wallTime: number;
+    type: "LinkCut";
+    nodeA: string;
+    nodeB: string;
+}
+
+export interface LinkHealedEvent {
+    eventId: string;
+    timestamp: number;
+    wallTime: number;
+    type: "LinkHealed";
+    nodeA: string;
+    nodeB: string;
+}
+
+export interface AllLinksHealedEvent {
+    eventId: string;
+    timestamp: number;
+    wallTime: number;
+    type: "AllLinksHealed";
 }
 
 export type RaftEvent = 
@@ -168,6 +192,9 @@ export type RaftEvent =
     | MessageDroppedEvent
     | PartitionCreatedEvent
     | PartitionHealedEvent
+    | LinkCutEvent
+    | LinkHealedEvent
+    | AllLinksHealedEvent;
 
 export interface InitialStateMessage {
     type: "InitialState";
@@ -186,9 +213,12 @@ export type ClientCommand =
     | { type: "SubmitCommand"; command: unknown}
     | { type: "CrashNode"; nodeId: string}
     | { type: "RecoverNode"; nodeId: string }
-    | { type: "PartitionNodes"; groupA: string[]; groupB: string[] }
+    | { type: "PartitionNodes"; groups: string[][] }
     | { type: "HealPartition"}
-    | { type: "SetDropRate"; nodeId: string; dropRate: number };
+    | { type: "SetDropRate"; nodeId: string; dropRate: number }
+    | { type: "CutLink"; nodeA: string; nodeB: string }
+    | { type: "HealLink"; nodeA: string; nodeB: string }
+    | { type: "HealAllLinks" };
 
 export interface NodeUIState {
     nodeId: string;
@@ -213,8 +243,7 @@ export interface MessageArrow {
 }
 
 export interface Partition {
-    groupA: string[];
-    groupB: string[];
+    groups: string[][];
 }
 
 export interface NodePosition {

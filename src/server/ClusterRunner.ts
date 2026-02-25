@@ -93,8 +93,8 @@ export class ClusterRunner {
         }
     }
 
-    partitionNodes(groupA: NodeId[], groupB: NodeId[]): void {
-        MockTransport.partition(groupA, groupB);
+    partitionNodes(groups: NodeId[][]): void {
+        MockTransport.partition(...groups);
     }
 
     healPartition(): void {
@@ -118,6 +118,40 @@ export class ClusterRunner {
         if (!result.success) {
             throw new Error(`Command submission failed: ${result.error}`);
         }
+    }
+
+    cutLink(nodeA: NodeId, nodeB: NodeId): void {
+        MockTransport.cutLink(nodeA, nodeB);
+        this.bus.emit({
+            eventId: crypto.randomUUID(),
+            timestamp: performance.now(),
+            wallTime: Date.now(),
+            type: "LinkCut",
+            nodeA,
+            nodeB,
+        });
+    }
+
+    healLink(nodeA: NodeId, nodeB: NodeId): void {
+        MockTransport.healLink(nodeA, nodeB);
+        this.bus.emit({
+            eventId: crypto.randomUUID(),
+            timestamp: performance.now(),
+            wallTime: Date.now(),
+            type: "LinkHealed",
+            nodeA,
+            nodeB,
+        });
+    }
+
+    healAllLinks(): void {
+        MockTransport.healAllLinks();
+        this.bus.emit({
+            eventId: crypto.randomUUID(),
+            timestamp: performance.now(),
+            wallTime: Date.now(),
+            type: "AllLinksHealed",
+        });
     }
 }
 

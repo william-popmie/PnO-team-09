@@ -8,12 +8,14 @@ interface RaftStore {
     arrows: MessageArrow[];
     selectedNodeId?: string | null;
     dropRateByNode: Record<string, number>;
+    cutLinks: Set<string>;
     setNodeIds: (ids: string[]) => void;
     pushEvent: (event: RaftEvent) => void;
     processEvent: (event: RaftEvent) => void;
     selectNode: (nodeId: string | null) => void;
     sendCommand: (cmd: ClientCommand) => void;
     setDropRate: (nodeId: string, dropRate: number) => void;
+    isLinkCut: (nodeA: string, nodeB: string) => boolean;
     reset: () => void;
 }
 
@@ -30,13 +32,14 @@ const makeNode = (nodeId: string): NodeUIState => ({
     logEntries: [],
 })
 
-export const useRaftStore = create<RaftStore>((set) => ({
+export const useRaftStore = create<RaftStore>((set, get) => ({
     nodeIds: [],
     events: [],
     nodes: {},
     arrows: [],
     selectedNodeId: null,
     dropRateByNode: {},
+    cutLinks: new Set(),
     setNodeIds: (ids) => { 
         const nodes: Record<string, NodeUIState> = {};
         for (const id of ids) {
@@ -200,6 +203,27 @@ export const useRaftStore = create<RaftStore>((set) => ({
                 }));
                 break;
             }
+
+            case "LinkCut": {
+                set(state => ({ cutLinks: new Set([...state.cutLinks, `${event.nodeA}-${event.nodeB}`, `${event.nodeB}-${event.nodeA}`]) }));
+                break;
+            }
+
+            case "LinkHealed": {
+                set(state => {
+                    const newCutLinks = new Set(state.cutLinks);
+                    newCutLinks.delete(`${event.nodeA}-${event.nodeB}`);
+                    newCutLinks.delete(`${event.nodeB}-${event.nodeA}`);
+                    return { cutLinks: newCutLinks };
+                });
+                break;
+            }
+
+            case "AllLinksHealed": {
+                set({ cutLinks: new Set() });
+                break;
+            }
+
         }
     },
     selectNode: (nodeId) => set({ selectedNodeId: nodeId }),
@@ -214,9 +238,12 @@ export const useRaftStore = create<RaftStore>((set) => ({
             [nodeId]: dropRate,
         },
     }));
-    useRaftStore.getState().sendCommand({ type: "SetDropRate", nodeId, dropRate: dropRate });
+    get().sendCommand({ type: "SetDropRate", nodeId, dropRate: dropRate });
     },
-    reset: () => set({ nodeIds: [], events: [], nodes: {}, arrows: [], selectedNodeId: null, dropRateByNode: {} }),
+    isLinkCut: (nodeA, nodeB) => {
+        return get().cutLinks.has(`${nodeA}-${nodeB}`);
+    },
+    reset: () => set({ nodeIds: [], events: [], nodes: {}, arrows: [], selectedNodeId: null, dropRateByNode: {}, cutLinks: new Set() }),
     })
 )
 

@@ -157,8 +157,7 @@ export interface PartitionCreatedEvent {
     timestamp: number;
     wallTime: number;
     type: "PartitionCreated";
-    groupA: NodeId[];
-    groupB: NodeId[];
+    groups: NodeId[][];
 }
 
 export interface PartitionHealedEvent {
@@ -166,6 +165,31 @@ export interface PartitionHealedEvent {
     timestamp: number;
     wallTime: number;
     type: "PartitionHealed";
+}
+
+export interface LinkCutEvent {
+    eventId: string;
+    timestamp: number;
+    wallTime: number;
+    type: "LinkCut";
+    nodeA: NodeId;
+    nodeB: NodeId;
+}
+
+export interface LinkHealedEvent {
+    eventId: string;
+    timestamp: number;
+    wallTime: number;
+    type: "LinkHealed";
+    nodeA: NodeId;
+    nodeB: NodeId;
+}
+
+export interface AllLinksHealedEvent {
+    eventId: string;
+    timestamp: number;
+    wallTime: number;
+    type: "AllLinksHealed";
 }
 
 export type RaftEvent =
@@ -186,7 +210,10 @@ export type RaftEvent =
     | MessageReceivedEvent
     | MessageDroppedEvent
     | PartitionCreatedEvent
-    | PartitionHealedEvent;
+    | PartitionHealedEvent
+    | LinkCutEvent
+    | LinkHealedEvent
+    | AllLinksHealedEvent;
 
 export interface RaftEventBus {
     emit(event: RaftEvent): void;
@@ -223,8 +250,7 @@ export interface RecoverNodeMessage {
 
 export interface PartitionNodesMessage {
     type: "PartitionNodes";
-    groupA: NodeId[];
-    groupB: NodeId[];
+    groups: NodeId[][];
 }
 
 export interface HealPartitionMessage {
@@ -237,10 +263,29 @@ export interface SetDropRateMessage {
     dropRate: number;
 }
 
+export interface CutLinkMessage {
+    type: "CutLink";
+    nodeA: NodeId;
+    nodeB: NodeId;
+}
+
+export interface HealLinkMessage {
+    type: "HealLink";
+    nodeA: NodeId;
+    nodeB: NodeId;
+}
+
+export interface HealAllLinksMessage {
+    type: "HealAllLinks";
+}
+
 export type ClientMessage =
     | SubmitCommandMessage
     | CrashNodeMessage
     | RecoverNodeMessage
     | PartitionNodesMessage
     | HealPartitionMessage
-    | SetDropRateMessage;
+    | SetDropRateMessage
+    | CutLinkMessage
+    | HealLinkMessage
+    | HealAllLinksMessage;

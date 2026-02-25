@@ -90,13 +90,22 @@ export class WsServer {
                 this.cluster.recoverNode(message.nodeId);
                 break;
             case "PartitionNodes":
-                this.cluster.partitionNodes(message.groupA, message.groupB);
+                this.cluster.partitionNodes(message.groups);
                 break;
             case "HealPartition":
                 this.cluster.healPartition();
                 break;
             case "SetDropRate":
                 this.cluster.setDropRate(message.nodeId, message.dropRate);
+                break;
+            case "CutLink":
+                this.cluster.cutLink(message.nodeA, message.nodeB);
+                break;
+            case "HealLink":
+                this.cluster.healLink(message.nodeA, message.nodeB);
+                break;
+            case "HealAllLinks":
+                this.cluster.healAllLinks();
                 break;
             default:
                 console.warn("Unknown message type from client:", message);

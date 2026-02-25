@@ -92,7 +92,10 @@ async function timeInsert(tree: BenchTree, fbFile: FreeBlockFile, keys: number[]
 async function timeSearch(tree: BenchTree, keys: number[]) {
   const t0 = performance.now();
   for (const key of keys) {
-    await tree.search(key);
+    const found = await tree.search(key);
+    if (found === null) {
+      throw new Error(`Searched key not found during benchmark: ${key}`);
+    }
   }
   const t1 = performance.now();
   return t1 - t0;

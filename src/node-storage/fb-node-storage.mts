@@ -644,10 +644,13 @@ export class FBInternalNode<Keystype, ValuesType>
     cursor: ChildCursor<Keystype, ValuesType, FBLeafNode<Keystype, ValuesType>, FBInternalNode<Keystype, ValuesType>>;
     isAtKey: boolean;
   }> {
-    const index = lowerBound(this.keys, key, this.storage.compareKeys);
+    let index = lowerBound(this.keys, key, this.storage.compareKeys);
+    while (index < this.keys.length && this.storage.compareKeys(key, this.keys[index]) >= 0) {
+      index++;
+    }
     const cursor = new FBChildCursor<Keystype, ValuesType>(this);
     cursor.setPosition(index);
-    const isAtKey = index < this.keys.length && this.storage.compareKeys(key, this.keys[index]) === 0;
+    const isAtKey = index > 0 && this.storage.compareKeys(key, this.keys[index - 1]) === 0;
     return Promise.resolve({ cursor, isAtKey });
   }
 
@@ -660,16 +663,31 @@ export class FBInternalNode<Keystype, ValuesType>
     return Promise.resolve(this);
   }
 
+  private hasFullyMaterializedChildren(): boolean {
+    return this.children.length === this.childBlockIds.length;
+  }
+
+  private clearChildrenCache(): void {
+    this.children = [];
+  }
+
   async moveLastChildTo(separatorKey: Keystype, nextNode: FBInternalNode<Keystype, ValuesType>): Promise<Keystype> {
     const lastChildBlockId = this.childBlockIds.pop()!;
     const lastKey = this.keys.pop()!;
     nextNode.childBlockIds.unshift(lastChildBlockId);
     nextNode.keys.unshift(separatorKey);
 
-    let movedChild: FBLeafNode<Keystype, ValuesType> | FBInternalNode<Keystype, ValuesType>;
-    if (this.children.length > 0) {
-      movedChild = this.children.pop()!;
-      nextNode.children.unshift(movedChild);
+    if (this.hasFullyMaterializedChildren() && nextNode.hasFullyMaterializedChildren()) {
+      const movedChild = this.children.pop();
+      if (movedChild) {
+        nextNode.children.unshift(movedChild);
+      } else {
+        this.clearChildrenCache();
+        nextNode.clearChildrenCache();
+      }
+    } else {
+      this.clearChildrenCache();
+      nextNode.clearChildrenCache();
     }
 
     const oldThis = await this.storage.persistInternal(this);
@@ -689,10 +707,17 @@ export class FBInternalNode<Keystype, ValuesType>
     previousNode.childBlockIds.push(firstChildBlockId);
     previousNode.keys.push(separatorKey);
 
-    let movedChild: FBLeafNode<Keystype, ValuesType> | FBInternalNode<Keystype, ValuesType>;
-    if (this.children.length > 0) {
-      movedChild = this.children.shift()!;
-      previousNode.children.push(movedChild);
+    if (this.hasFullyMaterializedChildren() && previousNode.hasFullyMaterializedChildren()) {
+      const movedChild = this.children.shift();
+      if (movedChild) {
+        previousNode.children.push(movedChild);
+      } else {
+        this.clearChildrenCache();
+        previousNode.clearChildrenCache();
+      }
+    } else {
+      this.clearChildrenCache();
+      previousNode.clearChildrenCache();
     }
 
     const oldThis = await this.storage.persistInternal(this);
@@ -723,8 +748,10 @@ export class FBInternalNode<Keystype, ValuesType>
     this.keys.push(_key, ...nextInternal.keys);
     this.childBlockIds.push(...nextInternal.childBlockIds);
 
-    if (nextInternal.children.length > 0) {
+    if (this.hasFullyMaterializedChildren() && nextInternal.hasFullyMaterializedChildren()) {
       this.children.push(...nextInternal.children);
+    } else {
+      this.clearChildrenCache();
     }
 
     const oldThis = await this.getStorage().persistInternal(this);

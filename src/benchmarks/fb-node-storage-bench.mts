@@ -1,15 +1,34 @@
-// @author Tijn Gommers
-// @date 13-02-2026
-
-import { performance } from 'perf_hooks';
+import * as fsp from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { randomUUID } from 'crypto';
+import { setTimeout as sleep } from 'timers/promises';
 import { BPlusTree } from '../b-plus-tree.mjs';
 import { FBNodeStorage, FBLeafNode, FBInternalNode } from '../node-storage/fb-node-storage.mjs';
 import { FreeBlockFile } from '../freeblockfile.mjs';
 import { MockFile } from '../file/mockfile.mjs';
+import { RealFile, type File as DbFile } from '../file/file.mjs';
+import { AtomicFileImpl } from '../atomic-operations/atomic-file.mjs';
+import { WALManagerImpl } from '../atomic-operations/wal-manager.mjs';
 
-/**
- * Simple test wrapper for AtomicFile interface
- */
+function xorshift32(seed: number) {
+  let s = seed >>> 0;
+  return () => {
+    s ^= s << 13;
+    s ^= s >>> 17;
+    s ^= s << 5;
+    return s >>> 0;
+  };
+}
+
+function shuffle<T>(arr: T[], seed = 42) {
+  const rnd = xorshift32(seed);
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = rnd() % (i + 1);
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
+
 class TestAtomicFile {
   constructor(private file: MockFile) {}
 
@@ -32,238 +51,375 @@ class TestAtomicFile {
   }
 }
 
-/**
- * Setup storage with proper initialization
- */
-async function setupStorage() {
-  const mf = new MockFile(512); // sectorSize = 512 bytes
-  await mf.open();
-  const atomic = new TestAtomicFile(mf);
-  const fb = new FreeBlockFile(mf, atomic, 4096); // blockSize = 4096 bytes
+type FileBackend = 'real' | 'mock';
+
+function nowNs(): bigint {
+  return process.hrtime.bigint();
+}
+
+function nsToMs(ns: bigint): number {
+  return Number(ns) / 1_000_000;
+}
+
+async function makeTree(order = 32, backend: FileBackend = 'real') {
+  let dbFile: DbFile;
+  let walFile: DbFile;
+  let tmpDbPath: string | null = null;
+  let tmpWalPath: string | null = null;
+
+  if (backend === 'mock') {
+    dbFile = new MockFile(512);
+    walFile = new MockFile(512);
+    await dbFile.open();
+    await walFile.open();
+  } else {
+    tmpDbPath = join(tmpdir(), `fb-bench-${process.pid}-${randomUUID()}.db`);
+    tmpWalPath = `${tmpDbPath}.wal`;
+    dbFile = new RealFile(tmpDbPath);
+    walFile = new RealFile(tmpWalPath);
+    await dbFile.create();
+    await dbFile.close();
+    await walFile.create();
+    await walFile.close();
+  }
+
+  const atomic =
+    backend === 'mock'
+      ? new TestAtomicFile(dbFile as MockFile)
+      : new AtomicFileImpl(dbFile, new WALManagerImpl(walFile, dbFile));
+  const fb = new FreeBlockFile(dbFile, atomic, 4096);
   await fb.open();
 
   const compareKeys = (a: number, b: number) => (a < b ? -1 : a > b ? 1 : 0);
   const keySize = (_k: number) => 8;
-  const storage = new FBNodeStorage<number, number>(compareKeys, keySize, fb, 32); // maxKeySize = 32
-
-  return { storage, fb, mf };
-}
-
-/**
- * Cleanup storage
- */
-async function cleanupStorage(fb: FreeBlockFile, mf: MockFile) {
-  await fb.close();
-  await mf.close();
-}
-
-/**
- * Time inserts with periodic commits
- */
-async function timeInserts(
-  tree: BPlusTree<number, number, FBLeafNode<number, number>, FBInternalNode<number, number>>,
-  storage: FBNodeStorage<number, number>,
-  keys: number[],
-  commitEvery = 100,
-) {
-  const t0 = performance.now();
-  let commitCount = 0;
-
-  for (let i = 0; i < keys.length; i++) {
-    await tree.insert(keys[i], keys[i]);
-
-    if ((i + 1) % commitEvery === 0) {
-      await storage.commitAndReclaim();
-      commitCount++;
-    }
-  }
-
-  // Final commit
-  await storage.commitAndReclaim();
-  commitCount++;
-
-  const t1 = performance.now();
-  return { totalMs: t1 - t0, commitCount };
-}
-
-/**
- * Time searches
- */
-async function timeSearches(
-  tree: BPlusTree<number, number, FBLeafNode<number, number>, FBInternalNode<number, number>>,
-  keys: number[],
-) {
-  const t0 = performance.now();
-  for (const key of keys) {
-    const result = await tree.search(key);
-    if (result === null) {
-      throw new Error(`Key ${key} not found!`);
-    }
-  }
-  const t1 = performance.now();
-  return t1 - t0;
-}
-
-/**
- * Time deletes
- */
-async function timeDeletes(
-  tree: BPlusTree<number, number, FBLeafNode<number, number>, FBInternalNode<number, number>>,
-  storage: FBNodeStorage<number, number>,
-  keys: number[],
-  commitEvery = 100,
-) {
-  const t0 = performance.now();
-  let commitCount = 0;
-
-  for (let i = 0; i < keys.length; i++) {
-    await tree.delete(keys[i]);
-
-    if ((i + 1) % commitEvery === 0) {
-      await storage.commitAndReclaim();
-      commitCount++;
-    }
-  }
-
-  // Final commit
-  await storage.commitAndReclaim();
-  commitCount++;
-
-  const t1 = performance.now();
-  return { totalMs: t1 - t0, commitCount };
-}
-
-/**
- * Run a single benchmark iteration
- */
-async function runBenchmark(n: number, commitEvery = 50) {
-  console.log(`\nTesting with ${n} operations (commit every ${commitEvery})...`);
-
-  const { storage, fb, mf } = await setupStorage();
+  const storage = new FBNodeStorage<number, number>(compareKeys, keySize, fb, 32);
   const tree = new BPlusTree<number, number, FBLeafNode<number, number>, FBInternalNode<number, number>>(
     storage,
-    32, // order
-  );
-  await tree.init();
-
-  // Generate sequential keys
-  const keys = Array.from({ length: n }, (_, i) => i);
-
-  // 1. Time inserts with commits
-  console.log('  Phase 1: Inserting...');
-  const insertResult = await timeInserts(tree, storage, keys, commitEvery);
-  const insertMs = insertResult.totalMs;
-  const insertPerOp = (insertMs / n) * 1000; // microseconds per op
-  console.log(
-    `     Done: ${insertMs.toFixed(2)}ms total, ${insertPerOp.toFixed(3)}us/op, ${insertResult.commitCount} commits`,
+    order,
   );
 
-  // 2. Time searches
-  console.log('  Phase 2: Searching...');
-  const searchMs = await timeSearches(tree, keys);
-  const searchPerOp = (searchMs / n) * 1000;
-  console.log(`     Done: ${searchMs.toFixed(2)}ms total, ${searchPerOp.toFixed(3)}us/op`);
+  const dispose = async () => {
+    await fb.close();
+    if (tmpDbPath) await fsp.unlink(tmpDbPath).catch(() => {});
+    if (tmpWalPath) await fsp.unlink(tmpWalPath).catch(() => {});
+  };
 
-  // 3. Update test: re-insert same keys (should trigger overwriteBlock!)
-  console.log('  Phase 3: Updating (re-insert same keys)...');
-  const updateResult = await timeInserts(tree, storage, keys, commitEvery);
-  const updateMs = updateResult.totalMs;
-  const updatePerOp = (updateMs / n) * 1000;
-  console.log(
-    `     Done: ${updateMs.toFixed(2)}ms total, ${updatePerOp.toFixed(3)}us/op, ${updateResult.commitCount} commits`,
-  );
+  return { tree, storage, dispose };
+}
 
-  // 4. Time deletes
-  console.log('  Phase 4: Deleting...');
-  const deleteResult = await timeDeletes(tree, storage, keys, commitEvery);
-  const deleteMs = deleteResult.totalMs;
-  const deletePerOp = (deleteMs / n) * 1000;
-  console.log(
-    `     Done: ${deleteMs.toFixed(2)}ms total, ${deletePerOp.toFixed(3)}us/op, ${deleteResult.commitCount} commits`,
-  );
+async function timePrefill(
+  tree: BPlusTree<number, number, FBLeafNode<number, number>, FBInternalNode<number, number>>,
+  storage: FBNodeStorage<number, number>,
+  keys: number[],
+  commitEvery: number,
+) {
+  const t0 = nowNs();
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    await tree.insert(key, key);
+    if (commitEvery > 0 && (i + 1) % commitEvery === 0) {
+      await storage.commitAndReclaim();
+    }
+  }
+  if (commitEvery > 0) {
+    await storage.commitAndReclaim();
+  }
+  const t1 = nowNs();
+  return nsToMs(t1 - t0);
+}
 
-  // Get stats
-  const freeListHead = await fb.debug_getFreeListHead();
-  console.log(`  Stats: free list head = ${freeListHead}`);
+async function timeInsertSearchDelete(
+  tree: BPlusTree<number, number, FBLeafNode<number, number>, FBInternalNode<number, number>>,
+  storage: FBNodeStorage<number, number>,
+  initialKeys: number[],
+  opCount: number,
+  commitEvery: number,
+) {
+  const activeKeys = initialKeys.slice();
+  const rand = xorshift32(987654321);
+  let maxKey = Number.NEGATIVE_INFINITY;
+  for (const key of initialKeys) {
+    if (key > maxKey) maxKey = key;
+  }
+  let nextKey = Number.isFinite(maxKey) ? maxKey + 1 : 0;
 
-  await cleanupStorage(fb, mf);
+  let insertMs = 0;
+  let searchMs = 0;
+  let deleteMs = 0;
+
+  for (let i = 0; i < opCount; i++) {
+    const insertedKey = nextKey++;
+    const insertT0 = nowNs();
+    await tree.insert(insertedKey, insertedKey);
+    const insertT1 = nowNs();
+    insertMs += nsToMs(insertT1 - insertT0);
+    activeKeys.push(insertedKey);
+
+    const searchIndex = rand() % activeKeys.length;
+    const searchKey = activeKeys[searchIndex];
+    const searchT0 = nowNs();
+    const found = await tree.search(searchKey);
+    const searchT1 = nowNs();
+    searchMs += nsToMs(searchT1 - searchT0);
+    if (found === null) {
+      throw new Error(`Searched key not found during benchmark: ${searchKey}`);
+    }
+
+    if (activeKeys.length === 0) {
+      throw new Error('No key available to delete during insert/delete benchmark pair');
+    }
+    const deleteIndex = rand() % activeKeys.length;
+    const keyToDelete = activeKeys[deleteIndex];
+
+    const deleteT0 = nowNs();
+    await tree.delete(keyToDelete);
+    const deleteT1 = nowNs();
+    deleteMs += nsToMs(deleteT1 - deleteT0);
+
+    const lastIndex = activeKeys.length - 1;
+    const lastKey = activeKeys[lastIndex];
+    if (deleteIndex !== lastIndex) {
+      activeKeys[deleteIndex] = lastKey;
+    }
+    activeKeys.pop();
+
+    if (commitEvery > 0 && (i + 1) % commitEvery === 0) {
+      await storage.commitAndReclaim();
+    }
+  }
+
+  if (commitEvery > 0) {
+    await storage.commitAndReclaim();
+  }
 
   return {
-    n,
     insertMs,
     searchMs,
-    updateMs,
     deleteMs,
-    insertPerOp,
-    searchPerOp,
-    updatePerOp,
-    deletePerOp,
-    insertCommits: insertResult.commitCount,
-    updateCommits: updateResult.commitCount,
-    deleteCommits: deleteResult.commitCount,
   };
 }
 
-/**
- * Main benchmark runner
- */
-async function compareScalability() {
-  console.log('FBNodeStorage Scalability Benchmark');
-  console.log('Testing with in-place updates (overwriteBlock implementation)');
-  console.log('='.repeat(70));
+function printRowFromUs(n: number, insertUs: number, searchUs: number, deleteUs: number) {
+  const log2n = Math.log2(n);
+  console.log(
+    `${n}\tlog2(n)=${log2n.toFixed(2)}\tinsert_us/op=${insertUs.toFixed(3)}\tsearch_us/op=${searchUs.toFixed(
+      3,
+    )}\tdelete_us/op=${deleteUs.toFixed(3)}`,
+  );
+}
 
-  const sizes = [100, 500, 1000, 2000, 5000, 10000, 20000, 50000];
-  const results = [];
+async function runOnce(
+  n: number,
+  opts: { mode: 'random' | 'sequential'; order?: number; commitEvery?: number; backend?: FileBackend },
+) {
+  const { tree, storage, dispose } = await makeTree(opts.order ?? 32, opts.backend ?? 'real');
+  const commitEvery = opts.commitEvery ?? 1000;
 
-  for (const size of sizes) {
+  try {
+    await tree.init();
+
+    const keys = Array.from({ length: n }, (_, i) => i);
+    if (opts.mode !== 'sequential') {
+      shuffle(keys, 12345);
+    }
+
+    await timePrefill(tree, storage, keys, commitEvery);
+    const opCount = n;
+    const { insertMs, searchMs, deleteMs } = await timeInsertSearchDelete(tree, storage, keys, opCount, commitEvery);
+
+    await storage.commitAndReclaim();
+    return { n, insertMs, searchMs, deleteMs, opCount };
+  } finally {
+    await dispose();
+  }
+}
+
+function mean(values: number[]): number {
+  if (values.length === 0) return NaN;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function median(values: number[]): number {
+  if (values.length === 0) return NaN;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
+function stdDev(values: number[]): number {
+  if (values.length <= 1) return 0;
+  const avg = mean(values);
+  const variance = values.reduce((sum, value) => sum + (value - avg) ** 2, 0) / (values.length - 1);
+  return Math.sqrt(variance);
+}
+
+function percentile(sortedValues: number[], p: number): number {
+  if (sortedValues.length === 0) return NaN;
+  const idx = (sortedValues.length - 1) * p;
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  if (lo === hi) return sortedValues[lo];
+  const w = idx - lo;
+  return sortedValues[lo] * (1 - w) + sortedValues[hi] * w;
+}
+
+function iqrUpperFilter(values: number[]): { kept: number[]; removed: number } {
+  if (values.length < 4) return { kept: values.slice(), removed: 0 };
+  const sorted = [...values].sort((a, b) => a - b);
+  const q1 = percentile(sorted, 0.25);
+  const q3 = percentile(sorted, 0.75);
+  const iqr = q3 - q1;
+  const upperFence = q3 + 1.5 * iqr;
+  const kept = values.filter((value) => value <= upperFence);
+  return { kept, removed: values.length - kept.length };
+}
+
+async function runSizes(
+  sizes: number[],
+  mode: 'random' | 'sequential',
+  opts?: {
+    totalRuns?: number;
+    discardRuns?: number;
+    summary?: 'median' | 'average';
+    commitEvery?: number;
+    coolDownMs?: number;
+    backend?: FileBackend;
+  },
+) {
+  const totalRuns = opts?.totalRuns ?? 9;
+  const discardRuns = opts?.discardRuns ?? 2;
+  const summary = opts?.summary ?? 'median';
+  const coolDownMs = opts?.coolDownMs ?? 200;
+
+  if (discardRuns >= totalRuns) {
+    throw new Error(`discardRuns (${discardRuns}) must be smaller than totalRuns (${totalRuns})`);
+  }
+
+  const summarize = summary === 'median' ? median : mean;
+
+  console.log(
+    `Using ${summary} of ${totalRuns - discardRuns} runs per size (discarding first ${discardRuns} warmup run(s))`,
+  );
+  console.log('n\tlog2(n)\tinsert_us/op\tsearch_us/op\tdelete_us/op');
+
+  for (const n of sizes) {
     try {
-      const result = await runBenchmark(size, 50);
-      results.push(result);
-    } catch (err) {
-      console.error(`\nError testing size ${size}:`, err);
-      if (err instanceof Error) {
-        console.error('Stack:', err.stack);
+      const insertArr: number[] = [];
+      const searchArr: number[] = [];
+      const deleteArr: number[] = [];
+      const insertUsAll: number[] = [];
+      const searchUsAll: number[] = [];
+      const deleteUsAll: number[] = [];
+
+      for (let r = 0; r < totalRuns; r++) {
+        if (typeof global.gc === 'function') {
+          global.gc();
+        }
+
+        const res = await runOnce(n, {
+          mode,
+          order: 32,
+          commitEvery: opts?.commitEvery ?? 1000,
+          backend: opts?.backend ?? 'real',
+        });
+
+        const insertUs = (res.insertMs / res.opCount) * 1000;
+        const searchUs = (res.searchMs / res.opCount) * 1000;
+        const deleteUs = (res.deleteMs / res.opCount) * 1000;
+        insertUsAll.push(insertUs);
+        searchUsAll.push(searchUs);
+        deleteUsAll.push(deleteUs);
+
+        if (r < discardRuns) continue;
+
+        insertArr.push(insertUs);
+        searchArr.push(searchUs);
+        deleteArr.push(deleteUs);
+
+        if (typeof global.gc === 'function') {
+          global.gc();
+        }
+        await sleep(coolDownMs);
       }
+
+      const fmtRuns = (values: number[]) =>
+        values.map((value, idx) => `${idx + 1}${idx < discardRuns ? '*' : ''}:${value.toFixed(3)}`).join(' | ');
+
+      console.log(`  runs insert_us/op: ${fmtRuns(insertUsAll)}`);
+      console.log(`  runs search_us/op: ${fmtRuns(searchUsAll)}`);
+      console.log(`  runs delete_us/op: ${fmtRuns(deleteUsAll)}`);
+
+      const keptInsertUs = insertUsAll.slice(discardRuns);
+      const keptSearchUs = searchUsAll.slice(discardRuns);
+      const keptDeleteUs = deleteUsAll.slice(discardRuns);
+      const filteredInsert = iqrUpperFilter(keptInsertUs);
+      const filteredSearch = iqrUpperFilter(keptSearchUs);
+      const filteredDelete = iqrUpperFilter(keptDeleteUs);
+      const cv = (values: number[]) => {
+        const avg = mean(values);
+        return avg === 0 ? 0 : (stdDev(values) / avg) * 100;
+      };
+
+      console.log(
+        `  spread kept-runs: insert[min=${Math.min(...keptInsertUs).toFixed(3)}, max=${Math.max(
+          ...keptInsertUs,
+        ).toFixed(3)}, std=${stdDev(keptInsertUs).toFixed(3)}, cv=${cv(keptInsertUs).toFixed(2)}%] ` +
+          `search[min=${Math.min(...keptSearchUs).toFixed(3)}, max=${Math.max(...keptSearchUs).toFixed(3)}, std=${stdDev(
+            keptSearchUs,
+          ).toFixed(3)}, cv=${cv(keptSearchUs).toFixed(2)}%] ` +
+          `delete[min=${Math.min(...keptDeleteUs).toFixed(3)}, max=${Math.max(...keptDeleteUs).toFixed(3)}, std=${stdDev(
+            keptDeleteUs,
+          ).toFixed(3)}, cv=${cv(keptDeleteUs).toFixed(2)}%]`,
+      );
+
+      console.log(
+        `  iqr-filter removed: insert=${filteredInsert.removed}, search=${filteredSearch.removed}, delete=${filteredDelete.removed}`,
+      );
+
+      printRowFromUs(
+        n,
+        summarize(filteredInsert.kept.length > 0 ? filteredInsert.kept : keptInsertUs),
+        summarize(filteredSearch.kept.length > 0 ? filteredSearch.kept : keptSearchUs),
+        summarize(filteredDelete.kept.length > 0 ? filteredDelete.kept : keptDeleteUs),
+      );
+    } catch (err) {
+      console.error('error running size', n, err);
       break;
     }
   }
-
-  console.log('\n' + '='.repeat(70));
-  console.log('Summary Results:');
-  console.log('='.repeat(70));
-  console.log('n\tinsert(us)\tupdate(us)\tsearch(us)\tdelete(us)\tcommits');
-  console.log('-'.repeat(70));
-  for (const r of results) {
-    console.log(
-      `${r.n}\t${r.insertPerOp.toFixed(3)}\t\t${r.updatePerOp.toFixed(3)}\t\t${r.searchPerOp.toFixed(3)}\t\t${r.deletePerOp.toFixed(
-        3,
-      )}\t\t${r.insertCommits}`,
-    );
-  }
-
-  console.log('\nAnalysis:');
-  if (results.length >= 2) {
-    const first = results[0];
-    const last = results[results.length - 1];
-    const scaleFactor = last.n / first.n;
-    const insertScale = last.insertPerOp / first.insertPerOp;
-    const updateScale = last.updatePerOp / first.updatePerOp;
-
-    console.log(`   Data size increased ${scaleFactor}x (from ${first.n} to ${last.n})`);
-    console.log(`   Insert time/op increased ${insertScale.toFixed(2)}x`);
-    console.log(`   Update time/op increased ${updateScale.toFixed(2)}x`);
-
-    if (updateScale < scaleFactor * 0.5) {
-      console.log('   GOOD: Updates scale sub-linearly (in-place working!)');
-    } else if (updateScale < scaleFactor * 1.5) {
-      console.log('   OK: Updates scale roughly linearly');
-    } else {
-      console.log('   BAD: Updates scale super-linearly (possible problem)');
-    }
-  }
-
-  console.log('\nBenchmark complete!');
 }
 
-// Run the benchmark
-await compareScalability();
+async function main() {
+  const sizes = [1000, 2500, 5000, 7500, 10000, 25000, 50000, 75000, 100000];
+  const totalRuns = 11;
+  const discardRuns = 3;
+  const summary: 'median' | 'average' = 'median';
+  const commitEvery = 1000;
+  const coolDownMs = 200;
+  const backend: FileBackend = process.argv.includes('--mock') ? 'mock' : 'real';
+
+  console.log('Steady-state benchmark using FBNodeStorage (disk-based) + BPlusTree');
+  console.log(`Each size tested ${totalRuns} times`);
+  console.log(`Backend: ${backend} (real backend uses fresh temp files per run)`);
+  console.log(`Commit checkpoint every ${commitEvery} operations`);
+  console.log(`Cool-down between kept runs: ${coolDownMs}ms`);
+  console.log('Recommended V8 flags: --expose-gc --max-old-space-size=4096 --initial-old-space-size=4096');
+  const hasMaxOld = process.execArgv.some((arg) => arg.startsWith('--max-old-space-size='));
+  const hasInitialOld = process.execArgv.some((arg) => arg.startsWith('--initial-old-space-size='));
+  if (typeof global.gc !== 'function' || !hasMaxOld || !hasInitialOld) {
+    console.warn('warning: recommended flags not fully enabled; variance may remain higher than desired.');
+  }
+  console.log(
+    'Per run: prefill tree to n, then perform n times: 1 insert + 1 search(existing random) + 1 delete(existing random)',
+  );
+
+  console.log('Mode: random prefill order');
+  await runSizes(sizes, 'random', { totalRuns, discardRuns, summary, commitEvery, coolDownMs, backend });
+
+  console.log('\nMode: sequential prefill order');
+  await runSizes(sizes, 'sequential', { totalRuns, discardRuns, summary, commitEvery, coolDownMs, backend });
+
+  console.log('\nDone.');
+}
+
+await main();

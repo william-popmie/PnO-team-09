@@ -67,9 +67,10 @@ describe('LogManager.ts, LogManager', () => {
         expect(logManager.getLastTerm()).toBe(0);
     });
 
-    it('should throw when re-initializing', async () => {
+    it('should return when re-initializing', async () => {
         await logManager.initialize();
-        await expect(logManager.initialize()).rejects.toThrow('LogManager is already initialized');
+        const result = await logManager.initialize();
+        expect(result).toBeUndefined();
     });
 
     it('should throw when initzializing but lastindex buff is null', async () => {

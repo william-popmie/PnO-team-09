@@ -28,7 +28,11 @@ export class PersistentState implements PersistentStateInterface {
 
     async initialize(): Promise<PersistentStateSnapshot> {
         if (this.initialized) {
-            throw new PersistentStateError('PersistentState is already initialized');
+            // throw new PersistentStateError('PersistentState is already initialized');
+            return { 
+                currentTerm: this.currentTerm,
+                votedFor: this.votedFor,
+            };
         }
 
         if(!this.storage.isOpen()) {

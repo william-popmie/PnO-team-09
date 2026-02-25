@@ -32,12 +32,14 @@ describe('PersistentState.ts, PersistentState', () => {
         expect(snapshot.votedFor).toBeNull();
     });
 
-    it('should throw when already initialized', async () => {
+    it('should return early when already initialized', async () => {
         const storage = new InMemoryStorage();
         await storage.open();
         const persistentState = new PersistentState(storage);
         await persistentState.initialize();
-        await expect(persistentState.initialize()).rejects.toThrow(PersistentStateError);
+        const snapshot = await persistentState.initialize();
+        expect(snapshot.currentTerm).toBe(0);
+        expect(snapshot.votedFor).toBeNull();
     });
 
     it('should throw when storage is not open', async () => {

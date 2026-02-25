@@ -44,7 +44,8 @@ export class LogManager implements LogManagerInterface {
 
     async initialize(): Promise<void> {
         if (this.initialized) {
-            throw new LogInconsistencyError('LogManager is already initialized');
+            // throw new LogInconsistencyError('LogManager is already initialized');
+            return;
         }
 
         await this.safeStorage(async () => {

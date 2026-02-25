@@ -114,6 +114,52 @@ export const useRaftStore = create<RaftStore>((set) => ({
                 }
                 break;
             }
+
+            case "MessageDropped": {
+                set(state => ({
+                    arrows: state.arrows.map(a => a.id === event.messageId ? { ...a, status: "dropped" } : a)
+                }));
+                break;
+            }
+
+            case "TermChanged": {
+                set(state => ({
+                    nodes: {
+                        ...state.nodes,
+                        [event.nodeId]: {
+                            ...state.nodes[event.nodeId],
+                            term: event.newTerm,
+                        },
+                    },
+                }));
+                break;
+            }
+
+            case "CommitIndexAdvanced": {
+                set(state => ({
+                    nodes: {
+                        ...state.nodes,
+                        [event.nodeId]: {
+                            ...state.nodes[event.nodeId],
+                            commitIndex: event.newCommitIndex,
+                        },
+                    },
+                }));
+                break;
+            }
+
+            case "VoteGranted": {
+                set(state => ({
+                    nodes: {
+                        ...state.nodes,
+                        [event.nodeId]: {
+                            ...state.nodes[event.nodeId],
+                            votedFor: event.candidateId,
+                        },
+                    },
+                }));
+                break;
+            }
         }
     },
     selectNode: (nodeId) => set({ selectedNodeId: nodeId }),

@@ -26,6 +26,21 @@ async function main() {
         } catch (err) {}
     }, 5000);
 
+    setInterval(async () => {
+        const nodeIds = cluster.getNodeIds();
+        const leader = nodeIds.find(id => {
+            const node = cluster['nodes'].get(id);
+            return node && node.isStarted() && node.isLeader();
+        });
+        if (!leader) return;
+
+        await cluster.crashNode(leader);
+
+        setTimeout(async () => {
+            await cluster.recoverNode(leader);
+        }, 5000);
+    }, 10000);
+
     process.on("SIGINT", async () => {
         console.log("Shutting down...");
         wsServer.stop();

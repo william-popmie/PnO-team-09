@@ -7,11 +7,13 @@ interface RaftStore {
     nodes: Record<string, NodeUIState>;
     arrows: MessageArrow[];
     selectedNodeId?: string | null;
+    dropRateByNode: Record<string, number>;
     setNodeIds: (ids: string[]) => void;
     pushEvent: (event: RaftEvent) => void;
     processEvent: (event: RaftEvent) => void;
     selectNode: (nodeId: string | null) => void;
     sendCommand: (cmd: ClientCommand) => void;
+    setDropRate: (nodeId: string, dropRate: number) => void;
     reset: () => void;
 }
 
@@ -34,6 +36,7 @@ export const useRaftStore = create<RaftStore>((set) => ({
     nodes: {},
     arrows: [],
     selectedNodeId: null,
+    dropRateByNode: {},
     setNodeIds: (ids) => { 
         const nodes: Record<string, NodeUIState> = {};
         for (const id of ids) {
@@ -123,6 +126,9 @@ export const useRaftStore = create<RaftStore>((set) => ({
                 set(state => ({
                     arrows: state.arrows.map(a => a.id === event.messageId ? { ...a, status: "dropped" } : a)
                 }));
+                setTimeout(() => {
+                    set(s => ({ arrows: s.arrows.filter(a => a.id !== event.messageId) }));
+                }, 900);
                 break;
             }
 
@@ -202,13 +208,21 @@ export const useRaftStore = create<RaftStore>((set) => ({
             wsRef.current.send(JSON.stringify(cmd));
         }
     },
-    reset: () => set({ nodeIds: [], events: [], nodes: {}, arrows: [], selectedNodeId: null }),
+    setDropRate: (nodeId, dropRate) => {set(state => ({
+        dropRateByNode: {
+            ...state.dropRateByNode,
+            [nodeId]: dropRate,
+        },
+    }));
+    useRaftStore.getState().sendCommand({ type: "SetDropRate", nodeId, dropRate: dropRate });
+    },
+    reset: () => set({ nodeIds: [], events: [], nodes: {}, arrows: [], selectedNodeId: null, dropRateByNode: {} }),
     })
 )
 
 setInterval(() => {
     const now = Date.now();
     useRaftStore.setState(s => ({
-        arrows: s.arrows.filter(a => now - a.createdAt < 3000),
+        arrows: s.arrows.filter(a => now - a.createdAt < 3000 || a.status === "dropped"),
     }));
 }, 1000);

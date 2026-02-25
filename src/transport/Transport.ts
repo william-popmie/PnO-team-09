@@ -53,15 +53,17 @@ export class MockTransport implements Transport {
             throw new NetworkError(`Transport for node ${this.nodeId} is not started.`);
         }
 
-        if (this.random.nextFloat() < this.dropRate) {
+        // changed drop rate from only effect on sending to also experience dropped incoming messages
+        const peerTransport = MockTransport.transports.get(peerId);
+        const effectiveDropRate = Math.max(this.dropRate, peerTransport?.getDropRate() ?? 0);
+
+        if (this.random.nextFloat() < effectiveDropRate) {
             throw new NetworkError(`Message from ${this.nodeId} to ${peerId} was dropped due to simulated network conditions.`);
         }
 
         if(MockTransport.isPartitioned(this.nodeId, peerId)) {
             throw new NetworkError(`Message from ${this.nodeId} to ${peerId} was dropped due to network partition.`);
         }
-
-        const peerTransport = MockTransport.transports.get(peerId);
 
         if (!peerTransport || !peerTransport.isStarted()) {
             throw new NetworkError(`Peer ${peerId} is not available.`);
@@ -84,7 +86,7 @@ export class MockTransport implements Transport {
 
     setDropRate(dropRate: number): void {
 
-        if (!Number(dropRate) || dropRate < 0 || dropRate > 1) {
+        if (typeof dropRate !== "number" || dropRate < 0 || dropRate > 1) {
             throw new NetworkError(`Invalid drop rate: ${dropRate}. Drop rate must be a number between 0 and 1.`);
         }
         this.dropRate = dropRate;

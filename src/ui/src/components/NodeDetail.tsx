@@ -6,7 +6,11 @@ export function NodeDetail() {
     const nodes = useRaftStore((state) => state.nodes);
     const sendCommand = useRaftStore((state) => state.sendCommand);
 
+    const dropRate = useRaftStore((state) => state.dropRateByNode[selectedNodeId ?? ""] ?? 0);
+    const setDropRate = useRaftStore((state) => state.setDropRate);
+
     const node = selectedNodeId ? nodes[selectedNodeId] : null;
+
     if (!node) return null;
 
     return (
@@ -74,6 +78,64 @@ export function NodeDetail() {
                         crash
                     </button>
                 )}
+            </div>
+
+            <div style={{ borderTop: '1px solid #30363d', paddingTop: 12, marginTop: 4, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'monospace', fontSize: 13 }}>
+                    <span style={{ color: '#8b949e' }}>Drop Rate</span>
+                    <span style={{ color: dropRate > 0 ? `hsl(${(1 - dropRate) * 120}, 70%, 50%)` : '#e6edf3' }}>
+                        {Math.round(dropRate * 100)}%
+                    </span>
+                </div>
+                <div style={{ position: 'relative', height: 20, display: 'flex', alignItems: 'center' }}>
+                    <div style={{
+                        position: 'absolute',
+                        height: 4,
+                        width: '100%',
+                        borderRadius: 2,
+                        background: `linear-gradient(to right,
+                            hsl(${(1 - dropRate) * 120}, 70%, 40%) 0%,
+                            hsl(${(1 - dropRate) * 120}, 70%, 40%) ${dropRate * 100}%,
+                            #30363d ${dropRate * 100}%,
+                            #30363d 100%)`,
+                    }} />
+                    <input
+                        type="range"
+                        min={0} max={1} step={0.05}
+                        value={dropRate}
+                        onChange={e => setDropRate(node.nodeId, parseFloat(e.target.value))}
+                        style={{
+                            position: 'absolute',
+                            width: '100%',
+                            appearance: 'none',
+                            WebkitAppearance: 'none',
+                            background: 'transparent',
+                            cursor: 'pointer',
+                            margin: 0,
+                            padding: 0,
+                        }}
+                    />
+                </div>
+                <style>{`
+                    input[type=range]::-webkit-slider-thumb {
+                        -webkit-appearance: none;
+                        width: 14px;
+                        height: 14px;
+                        border-radius: 50%;
+                        background: #e6edf3;
+                        border: 2px solid #30363d;
+                        box-shadow: 0 0 0 1px #8b949e;
+                    }
+                    input[type=range]::-moz-range-thumb {
+                        width: 14px;
+                        height: 14px;
+                        border-radius: 50%;
+                        background: #e6edf3;
+                        border: 2px solid #30363d;
+                        box-shadow: 0 0 0 1px #8b949e;
+                    }
+                    input[type=range]:focus { outline: none; }
+                `}</style>
             </div>
         </div>
     );

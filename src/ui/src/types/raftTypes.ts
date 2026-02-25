@@ -188,7 +188,7 @@ export type ClientCommand =
     | { type: "RecoverNode"; nodeId: string }
     | { type: "PartitionNodes"; groupA: string[]; groupB: string[] }
     | { type: "HealPartition"}
-    | { type: "SetDropRate"; nodeId: string; rate: number };
+    | { type: "SetDropRate"; nodeId: string; dropRate: number };
 
 export interface NodeUIState {
     nodeId: string;

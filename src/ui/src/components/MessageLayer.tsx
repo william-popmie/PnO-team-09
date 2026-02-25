@@ -23,6 +23,10 @@ export function MessageLayer({ positions, nodeRadius, width, height }: Props) {
                     refX={6} refY={3.5} orient="auto">
                     <polygon points="0 0, 7 3.5, 0 7" fill="context-stroke" />
                 </marker>
+                    <marker id="arrow-dropped" markerWidth={7} markerHeight={7}
+                        refX={6} refY={3.5} orient="auto">
+                        <polygon points="0 0, 7 3.5, 0 7" fill="#ef4444" />
+                    </marker>
             </defs>
             {arrows.map(arrow => {
                 const from = positions[arrow.fromNodeId];
@@ -40,25 +44,48 @@ export function MessageLayer({ positions, nodeRadius, width, height }: Props) {
                 const x2 = to.x   - ux * (nodeRadius + 12);
                 const y2 = to.y   - uy * (nodeRadius + 12);
 
-                const opacity = arrow.status === 'inFlight' ? 1
-                              : arrow.status === 'received' ? 0.3
-                              : 0.6;
-
                 const isRV = arrow.messageType === "RequestVote" || arrow.messageType === "RequestVoteResponse";
                 const strokeColor = isRV ? "#d73a49" 
                         : arrow.isHeartbeat ? "#42e4e7"
                         : "#0366d6";
 
+                const kx = x1 + (x2 - x1) * 0.65;
+                const ky = y1 + (y2 - y1) * 0.65;
+                let px = uy, py = -ux;
+                if (py < 0) { px = -px; py = -py; }
+                const ex = kx + px * 30;
+                const ey = ky + py * 30;
+
+                const opacity = arrow.status === 'dropped' ? 0.8
+                            : arrow.status === 'inFlight' ? 1
+                            : 0.3;
+
                 return (
-                    <line key={arrow.id}
-                        x1={x1} y1={y1} x2={x2} y2={y2}
-                        stroke={strokeColor}
-                        strokeWidth={arrow.isHeartbeat ? 1 : 2.5}
-                        strokeDasharray={arrow.isHeartbeat ? "3 3" : undefined}
-                        opacity={opacity}
-                        markerEnd={`url(#arrow-${isRV ? "rv" : "ae"})`}
-                        style={{ transition: 'opacity 0.3s' }}
-                    />
+                    <g key={arrow.id} opacity={opacity} style={{ transition: 'opacity 0.3s' }}>
+                        {arrow.status === 'dropped' ? (
+                            <>
+                                <path
+                                    d={`M ${x1} ${y1} L ${kx} ${ky} L ${ex} ${ey}`}
+                                    stroke="#ef4444"
+                                    strokeWidth={1.5}
+                                    strokeDasharray="4 3"
+                                    fill="none"
+                                    markerEnd="url(#arrow-dropped)"
+                                />
+                                <text x={kx} y={ky - 6} textAnchor="middle"
+                                    fontSize={11} fill="#ef4444"
+                                    style={{ userSelect: 'none' }}>✕</text>
+                            </>
+                        ) : (
+                            <line
+                                x1={x1} y1={y1} x2={x2} y2={y2}
+                                stroke={strokeColor}
+                                strokeWidth={arrow.isHeartbeat ? 1 : 2.5}
+                                strokeDasharray={arrow.isHeartbeat ? "3 3" : undefined}
+                                markerEnd={`url(#arrow-${isRV ? "rv" : "ae"})`}
+                            />
+                        )}
+                    </g>
                 );
             })}
         </svg>

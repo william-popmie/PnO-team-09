@@ -54,15 +54,17 @@ export function ClusterView() {
                 {nodeIds.map(id => {
                     const { x, y } = positions[id];
                     const node = nodes[id];
-                    const color = node ? roleColors[node.role] : "#161b22";
+                    const isCrashed = node?.crashed ?? false;
+                    const color = isCrashed ? "#8b0000" : (node ? roleColors[node.role] : "#161b22");
+
                     return (
                         <g key={id} onClick={() => selectNode(selectedNodeId === id ? null : id)} style={{ cursor: 'pointer' }}>
-                            <circle cx={x} cy={y} r={nodeRadius} fill="#161b22" stroke={color} strokeWidth={2} />
-                            <text x={x} y={y - 10} textAnchor="middle" dominantBaseline="middle" fill="#e6edf3" fontSize={12} fontFamily="monospace">
+                            <circle cx={x} cy={y} r={nodeRadius} fill="#161b22" stroke={color} strokeWidth={2} opacity={isCrashed ? 0.4 : 1} />
+                            <text x={x} y={y - 10} textAnchor="middle" dominantBaseline="middle" fill={isCrashed ? "#8b0000" : "#e6edf3"} fontSize={12} fontFamily="monospace">
                                 {id}
                             </text>
                             <text x={x} y={y + 5} textAnchor="middle" dominantBaseline="middle" fill={color} fontSize={9} fontFamily="monospace">
-                                {node?.role ?? '—'}
+                                {isCrashed ? 'Crashed' : (node?.role ?? '—')}
                             </text>
 
                             {selectedNodeId === id && (

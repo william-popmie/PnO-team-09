@@ -4,6 +4,7 @@ export function NodeDetail() {
     const selectedNodeId = useRaftStore((state) => state.selectedNodeId);
     const selectNode = useRaftStore((state) => state.selectNode);
     const nodes = useRaftStore((state) => state.nodes);
+    const sendCommand = useRaftStore((state) => state.sendCommand);
 
     const node = selectedNodeId ? nodes[selectedNodeId] : null;
     if (!node) return null;
@@ -36,6 +37,44 @@ export function NodeDetail() {
             <Row label="Commit index" value={String(node.commitIndex)} />
             <Row label="Voted for"    value={node.votedFor ?? '—'} />
             <Row label="Crashed"      value={node.crashed ? 'yes' : 'no'} />
+
+            <div style={{ borderTop: '1px solid #30363d', paddingTop: 12, marginTop: 4 }}>
+                {node.crashed ? (
+                    <button
+                        onClick={() => sendCommand({ type: 'RecoverNode', nodeId: node.nodeId })}
+                        style={{
+                            width: '100%',
+                            padding: '8px',
+                            background: 'transparent',
+                            border: '1px solid #2ea043',
+                            color: '#2ea043',
+                            borderRadius: 6,
+                            fontFamily: 'monospace',
+                            fontSize: 12,
+                            cursor: 'pointer',
+                        }}
+                    >
+                        recover
+                    </button>
+                ) : (
+                    <button
+                        onClick={() => sendCommand({ type: 'CrashNode', nodeId: node.nodeId })}
+                        style={{
+                            width: '100%',
+                            padding: '8px',
+                            background: 'transparent',
+                            border: '1px solid #d73a49',
+                            color: '#d73a49',
+                            borderRadius: 6,
+                            fontFamily: 'monospace',
+                            fontSize: 12,
+                            cursor: 'pointer',
+                        }}
+                    >
+                        crash
+                    </button>
+                )}
+            </div>
         </div>
     );
 }

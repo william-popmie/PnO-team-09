@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useRaftStore } from "../store/raftStore";
+import { setStoreWebSocket, useRaftStore } from "../store/raftStore";
 import type { ServerMessage } from "../types/raftTypes";
 
 const ws_url = 'ws://localhost:4001';
@@ -18,6 +18,8 @@ export function useRaftSocket() {
 
         function connect() {
             ws = new WebSocket(ws_url);
+
+            setStoreWebSocket(ws);
 
             ws.onmessage = (event) => {
                 const data = JSON.parse(event.data) as ServerMessage;
@@ -40,6 +42,7 @@ export function useRaftSocket() {
             };
 
             ws.onclose = () => {
+                setStoreWebSocket(null);
                 if (!canceled) {
                     reconnectTimer = setTimeout(connect, reconnnect_ms);
                 }

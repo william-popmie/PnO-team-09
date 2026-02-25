@@ -1,4 +1,4 @@
-import type { MessageArrow, NodeUIState, RaftEvent } from "../types/raftTypes";
+import type { ClientCommand, MessageArrow, NodeUIState, RaftEvent } from "../types/raftTypes";
 import { create } from 'zustand'
 
 interface RaftStore {
@@ -11,8 +11,12 @@ interface RaftStore {
     pushEvent: (event: RaftEvent) => void;
     processEvent: (event: RaftEvent) => void;
     selectNode: (nodeId: string | null) => void;
+    sendCommand: (cmd: ClientCommand) => void;
     reset: () => void;
 }
+
+const wsRef = { current: null as WebSocket | null };
+export const setStoreWebSocket = (ws: WebSocket | null ) => { wsRef.current = ws; };
 
 const makeNode = (nodeId: string): NodeUIState => ({
     nodeId,
@@ -160,9 +164,51 @@ export const useRaftStore = create<RaftStore>((set) => ({
                 }));
                 break;
             }
+
+            case "NodeCrashed": {
+                set(state => ({
+                    nodes: {
+                        ...state.nodes,
+                        [event.nodeId]: {
+                            ...state.nodes[event.nodeId],
+                            crashed: true,
+                        },
+                    },
+                    arrows: state.arrows.filter(a =>
+                        a.fromNodeId !== event.nodeId && a.toNodeId !== event.nodeId
+                    ),
+                }));
+                break;
+            }
+
+            case "NodeRecovered": {
+                set(state => ({
+                    nodes: {
+                        ...state.nodes,
+                        [event.nodeId]: {
+                            ...state.nodes[event.nodeId],
+                            crashed: false,
+                            term: event.term,
+                        },
+                    },
+                }));
+                break;
+            }
         }
     },
     selectNode: (nodeId) => set({ selectedNodeId: nodeId }),
+    sendCommand: (cmd) => {
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify(cmd));
+        }
+    },
     reset: () => set({ nodeIds: [], events: [], nodes: {}, arrows: [], selectedNodeId: null }),
     })
 )
+
+setInterval(() => {
+    const now = Date.now();
+    useRaftStore.setState(s => ({
+        arrows: s.arrows.filter(a => now - a.createdAt < 3000),
+    }));
+}, 1000);

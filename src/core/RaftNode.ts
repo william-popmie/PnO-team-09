@@ -16,6 +16,7 @@ import { RaftError } from "../util/Error";
 import { AsyncLock } from "../lock/AsyncLock";
 import { RaftEventBus } from "../events/RaftEvents";
 import { NoOpEventBus } from "../events/EventBus";
+import { timeStamp } from "node:console";
 
 export interface CommandResult {
     success: boolean;
@@ -170,6 +171,16 @@ export class RaftNode implements RaftNodeInterface {
             this.started = true;
             this.logger.info(`Node ${this.config.nodeId} started successfully`);
 
+            this.bus.emit({
+                eventId: crypto.randomUUID(),
+                timestamp: performance.now(),
+                wallTime: Date.now(),
+                nodeId: this.config.nodeId,
+                type: "NodeRecovered",
+                term: restoredTerm,
+                logLength: lastLogIndex
+            });
+
         } catch (error) {
             this.logger.error(`Failed to start node ${this.config.nodeId}`, error as Error);
             throw new RaftError(`Failed to start node: ${(error as Error).message}`, 'NodeStartFailed');
@@ -198,6 +209,15 @@ export class RaftNode implements RaftNodeInterface {
 
             this.started = false;
             this.logger.info(`Node ${this.config.nodeId} stopped successfully`);
+
+            this.bus.emit({
+                eventId: crypto.randomUUID(),
+                timestamp: performance.now(),
+                wallTime: Date.now(),
+                nodeId: this.config.nodeId,
+                type: "NodeCrashed",
+                reason: "stopped"
+            });
 
         } catch (error) {
             this.logger.error(`Failed to stop node ${this.config.nodeId}`, error as Error);

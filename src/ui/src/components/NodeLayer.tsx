@@ -1,11 +1,6 @@
 import { useRaftStore } from '../store/raftStore';
 import type { NodePosition } from '../types/raftTypes';
-
-const roleColors: Record<string, string> = {
-    "Leader": "#2ea043",
-    "Follower": "#0366d6",
-    "Candidate": "#d73a49",
-};
+import { roleColors } from '../constants/colors';
 
 interface Props {
     positions: Record<string, NodePosition>;
@@ -26,14 +21,14 @@ export function NodeLayer({ positions, nodeRadius, width, height }: Props) {
                 const { x, y } = positions[id];
                 const node = nodes[id];
                 const isCrashed = node?.crashed ?? false;
-                const color = isCrashed ? "#8b0000" : (node ? roleColors[node.role] : "#161b22");
+                const color = isCrashed ? roleColors.Crashed : (node ? roleColors[node.role] : "#161b22");
 
                 return (
                     <g key={id} onClick={() => selectNode(selectedNodeId === id ? null : id)}
                         style={{ cursor: 'pointer', pointerEvents: 'all' }}>
                         <circle cx={x} cy={y} r={nodeRadius} fill="#161b22" stroke={color} strokeWidth={2} opacity={isCrashed ? 0.4 : 1} />
                         <text x={x} y={y - 10} textAnchor="middle" dominantBaseline="middle"
-                            fill={isCrashed ? "#8b0000" : "#e6edf3"} fontSize={12} fontFamily="monospace">
+                            fill={isCrashed ? roleColors.Crashed : "#e6edf3"} fontSize={12} fontFamily="monospace">
                             {id}
                         </text>
                         <text x={x} y={y + 5} textAnchor="middle" dominantBaseline="middle"

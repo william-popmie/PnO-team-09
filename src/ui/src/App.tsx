@@ -3,6 +3,7 @@ import { EventFeed } from "./components/EventFeed";
 import { ClusterView } from "./components/ClusterView";
 import { NodeDetail } from "./components/NodeDetail";
 import { ConnectionOverlay } from "./components/ConnectionOverlay";
+import { ClusterPanel } from "./components/ClusterPanel";
 
 export default function App() {
     useRaftSocket();
@@ -12,6 +13,7 @@ export default function App() {
                 <ClusterView />
                 <NodeDetail />
                 <EventFeed />
+                <ClusterPanel />
             </div>
             <ConnectionOverlay />
         </div>

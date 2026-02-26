@@ -1,5 +1,6 @@
 import { useRaftStore } from '../store/raftStore';
 import type { NodePosition } from '../types/raftTypes';
+import { messageColors } from '../constants/colors';
 
 interface Props {
     positions: Record<string, NodePosition>;
@@ -25,7 +26,7 @@ export function MessageLayer({ positions, nodeRadius, width, height }: Props) {
                 </marker>
                     <marker id="arrow-dropped" markerWidth={7} markerHeight={7}
                         refX={6} refY={3.5} orient="auto">
-                        <polygon points="0 0, 7 3.5, 0 7" fill="#ef4444" />
+                        <polygon points="0 0, 7 3.5, 0 7" fill={messageColors.Dropped} />
                     </marker>
             </defs>
             {arrows.map(arrow => {
@@ -45,9 +46,9 @@ export function MessageLayer({ positions, nodeRadius, width, height }: Props) {
                 const y2 = to.y   - uy * (nodeRadius + 12);
 
                 const isRV = arrow.messageType === "RequestVote" || arrow.messageType === "RequestVoteResponse";
-                const strokeColor = isRV ? "#d73a49" 
-                        : arrow.isHeartbeat ? "#42e4e7"
-                        : "#0366d6";
+                const strokeColor = isRV ? messageColors.RequestVote 
+                        : arrow.isHeartbeat ? messageColors.Heartbeat
+                        : messageColors.AppendEntries;
 
                 const kx = x1 + (x2 - x1) * 0.65;
                 const ky = y1 + (y2 - y1) * 0.65;
@@ -66,14 +67,14 @@ export function MessageLayer({ positions, nodeRadius, width, height }: Props) {
                             <>
                                 <path
                                     d={`M ${x1} ${y1} L ${kx} ${ky} L ${ex} ${ey}`}
-                                    stroke="#ef4444"
+                                    stroke={messageColors.Dropped}
                                     strokeWidth={1.5}
                                     strokeDasharray="4 3"
                                     fill="none"
                                     markerEnd="url(#arrow-dropped)"
                                 />
                                 <text x={kx} y={ky - 6} textAnchor="middle"
-                                    fontSize={11} fill="#ef4444"
+                                    fontSize={11} fill={messageColors.Dropped}
                                     style={{ userSelect: 'none' }}>✕</text>
                             </>
                         ) : (

@@ -1,4 +1,5 @@
 import { useRaftStore } from "../store/raftStore";
+import { LogStrip } from "./LogStrip";
 
 export function NodeDetail() {
     const selectedNodeId = useRaftStore((state) => state.selectedNodeId);
@@ -136,6 +137,14 @@ export function NodeDetail() {
                     }
                     input[type=range]:focus { outline: none; }
                 `}</style>
+            </div>
+
+            <div style={{ borderTop: '1px solid #30363d', paddingTop: 12, marginTop: 4, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'monospace', fontSize: 11, color: '#8b949e' }}>
+                    <span>LOG</span>
+                    <span>{node.logEntries.length} entries</span>
+                </div>
+                <LogStrip entries={node.logEntries} commitIndex={node.commitIndex} />
             </div>
         </div>
     );

@@ -241,6 +241,37 @@ export const useRaftStore = create<RaftStore>((set, get) => ({
                 break;
             }
 
+            case "LogAppended": {
+                set(state => {
+                    const node = state.nodes[event.nodeId];
+                    if (!node) return state
+                    const newEntries = [...node.logEntries, ...event.entries].slice(-24);
+                    return {
+                        nodes: {
+                            ...state.nodes,
+                            [event.nodeId]: { ...node, logEntries: newEntries },
+                        },
+                    };
+                });
+                break;
+            }
+
+            case "LogConflictResolved": {
+                set(state => {
+                    const node = state.nodes[event.nodeId];
+                    if (!node) return state
+                    const kept = node.logEntries.filter(e => e.index < event.truncatedFromIndex);
+                    const merged = [...kept, ...event.newEntries].slice(-24);
+                    return {
+                        nodes: {
+                            ...state.nodes,
+                            [event.nodeId]: { ...node, logEntries: merged },
+                        },
+                    };
+                });
+                break;
+            }
+
         }
     },
     selectNode: (nodeId) => set({ selectedNodeId: nodeId }),

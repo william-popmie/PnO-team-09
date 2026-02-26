@@ -12,3 +12,15 @@ export const messageColors = {
     Heartbeat: "#42e4e7",
     Dropped: "#ef4444",
 };
+
+const termColors = [
+    "#6f42c1",
+    "#0366d6", 
+    "#2ea043",
+    "#d73a49",
+    "#e3b341",
+    "#a371f7",
+    "#42e4e7"
+];
+
+export const termColor = (term: number) => termColors[(term - 1) % termColors.length];

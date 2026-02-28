@@ -2,11 +2,13 @@ import { createConfig, NodeId } from "../core/Config";
 import { RaftNode } from "../core/RaftNode";
 import { RaftEventBus } from "../events/RaftEvents";
 import { Command } from "../log/LogEntry";
-import { InMemoryStorage } from "../storage/InMemoryStorage";
+// import { InMemoryStorage } from "../storage/InMemoryStorage";
 import { SystemClock } from "../timing/Clock";
 import { TimerConfig } from "../timing/TimerManager";
 import { GrpcTransport } from "../transport/GRPCTransport";
 import { SystemRandom } from "../util/Random";
+import { DiskStorage } from "../storage/DiskStorage";
+import path from "node:path";
 
 
 export interface ClusterRunnerOptions {
@@ -42,8 +44,8 @@ export class ClusterRunnerGRPC {
             const peerIds = this.nodeIds.filter(id => id !== nodeId);
             const config = createConfig(nodeId, peerIds, timerConfig.electionTimeoutMin, timerConfig.electionTimeoutMax, timerConfig.heartbeatInterval);
 
-            const storage = new InMemoryStorage();
-            storage.open();
+            const storage = new DiskStorage(path.join(__dirname, "../../data", nodeId));
+            await storage.open();
 
             const port = 52000 + this.nodeIds.indexOf(nodeId);
 

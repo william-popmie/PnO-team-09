@@ -122,7 +122,7 @@ export class DiskStorage implements Storage {
         try {
             await fs.writeFile(this.tmpFile, jsonString, "utf-8");
 
-            const handle = await fs.open(this.tmpFile, "r");
+            const handle = await fs.open(this.tmpFile, "r+");
             try {
                 await handle.sync();
             } finally {
@@ -137,11 +137,15 @@ export class DiskStorage implements Storage {
     }
 
     private async fsyncDirectory(): Promise<void> {
-        const handle = await fs.open(this.dirPath, "r");
         try {
-            await handle.sync();
-        } finally {
-            await handle.close();
+            const handle = await fs.open(this.dirPath, "r+");
+            try {
+                await handle.sync();
+            } finally {
+                await handle.close();
+            }
+        } catch {
+            // skip on windows
         }
     }
 

@@ -1,4 +1,3 @@
-import { LogEntry } from "../log/LogEntry";
 import { StorageError } from "../util/Error";
 import { Storage, StorageOperation } from "./Storage";
 

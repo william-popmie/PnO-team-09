@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { LogManager } from "./LogManager";
 import { LogEntry, Command } from "./LogEntry";
-import { InMemoryStorage } from "../storage/Storage";
+import { InMemoryStorage } from "../storage/InMemoryStorage";
 import { LogInconsistencyError, StorageError } from "../util/Error";
 
 describe('LogManager.ts, LogManager', () => {

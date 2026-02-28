@@ -4,7 +4,7 @@ import { NetworkError } from "../util/Error";
 import { SeededRandom } from "../util/Random";
 import { RPCMessage } from "../rpc/RPCTypes";
 
-describe("Transport.ts, MockTransport", () => {
+describe("MockTransport.ts, MockTransport", () => {
     let transportA: MockTransport;
     let transportB: MockTransport;
     let random: SeededRandom;

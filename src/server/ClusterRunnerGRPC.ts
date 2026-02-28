@@ -2,7 +2,7 @@ import { createConfig, NodeId } from "../core/Config";
 import { RaftNode } from "../core/RaftNode";
 import { RaftEventBus } from "../events/RaftEvents";
 import { Command } from "../log/LogEntry";
-import { InMemoryStorage } from "../storage/Storage";
+import { InMemoryStorage } from "../storage/InMemoryStorage";
 import { SystemClock } from "../timing/Clock";
 import { TimerConfig } from "../timing/TimerManager";
 import { GrpcTransport } from "../transport/GRPCTransport";

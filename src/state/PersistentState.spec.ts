@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { PersistentState } from "./PersistentState";
-import { InMemoryStorage, StorageCodec, StorageOperation } from "../storage/Storage";
+import { InMemoryStorage} from "../storage/InMemoryStorage";
+import { StorageCodec, StorageOperation } from "../storage/Storage";
 import { PersistentStateError, StorageError } from "../util/Error";
 
 describe('PersistentState.ts, PersistentState', () => {

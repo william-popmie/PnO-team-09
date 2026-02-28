@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { RaftNode } from './RaftNode';
 import { RaftState } from './StateMachine';
 import { RaftError } from '../util/Error';
-import { InMemoryStorage } from '../storage/Storage';
+import { InMemoryStorage } from '../storage/InMemoryStorage';
 import { createConfig } from './Config';
 import { MockClock } from '../timing/Clock';
 import { SeededRandom } from '../util/Random';

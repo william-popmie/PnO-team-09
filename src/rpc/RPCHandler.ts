@@ -8,9 +8,13 @@ import { RequestVoteRequest,
          isAppendEntriesRequestMessage,
          isAppendEntriesResponseMessage,
          validateRPCMessage,
-         RPCMessage
+         RPCMessage,
+         InstallSnapshotRequest,
+         InstallSnapshotResponse,
+         isInstallSnapshotResponseMessage,
+         isInstallSnapshotRequestMessage
         } from "./RPCTypes";
-import { Transport } from "../transport/MockTransport";
+import { Transport } from "../transport/Transport";
 import { Logger } from "../util/Logger";
 import { Clock, TimerHandle } from "../timing/Clock";
 import { RPCHandlerError, NetworkError } from "../util/Error";
@@ -24,6 +28,7 @@ export interface RPCSendOptions {
 export interface RPCHandlerInterface {
     sendRequestVote(peerId: NodeId, request: RequestVoteRequest, options?: RPCSendOptions): Promise<RequestVoteResponse>;
     sendAppendEntries(peerId: NodeId, request: AppendEntriesRequest, options?: RPCSendOptions): Promise<AppendEntriesResponse>;
+    sendInstallSnapshot(peerId: NodeId, request: InstallSnapshotRequest, options?: RPCSendOptions): Promise<InstallSnapshotResponse>;
 }
 
 export class RPCHandler implements RPCHandlerInterface {
@@ -187,6 +192,33 @@ export class RPCHandler implements RPCHandlerInterface {
         }
     }
 
+    async sendInstallSnapshot(peerId: NodeId, request: InstallSnapshotRequest, options?: RPCSendOptions): Promise<InstallSnapshotResponse> {
+        const message: RPCMessage = {
+            type: "InstallSnapshot",
+            direction: 'request',
+            payload: request
+        };
+
+        validateRPCMessage(message);
+
+        this.logger.debug(`Node ${this.nodeId} sending InstallSnapshot to ${peerId}: ${JSON.stringify(request)}`);
+
+        try {
+            const response = await this.sendWithTimeout(peerId, message, options);
+
+            if (!isInstallSnapshotResponseMessage(response)) {
+                throw new RPCHandlerError(`Invalid response type for InstallSnapshot: expected InstallSnapshotResponse, got ${response.type}`);
+            }
+
+            this.logger.debug(`Node ${this.nodeId} received InstallSnapshotResponse from ${peerId}: ${JSON.stringify(response.payload)}`);
+
+            return response.payload;
+        } catch (error) {
+            this.logger.warn(`Failed to send InstallSnapshot to ${peerId}`, { error });
+            throw error;
+        }
+    }
+
     private async sendWithTimeout(peerId: NodeId, message: RPCMessage, options?: RPCSendOptions): Promise<RPCMessage> {
 
         const timeoutMs = options?.timeoutMs ?? RPCHandler.default_timeout_ms;
@@ -224,7 +256,15 @@ export class RPCHandler implements RPCHandlerInterface {
         }
     }
 
-    async handleIncomingMessage(from: NodeId, message: RPCMessage, handler: { onRequestVote: (from: NodeId, request: RequestVoteRequest) => Promise<RequestVoteResponse>, onAppendEntries: (from: NodeId, request: AppendEntriesRequest) => Promise<AppendEntriesResponse> }): Promise<RPCMessage> {
+    async handleIncomingMessage(
+        from: NodeId, 
+        message: RPCMessage, 
+        handler: { 
+            onRequestVote: (from: NodeId, request: RequestVoteRequest) => Promise<RequestVoteResponse>, 
+            onAppendEntries: (from: NodeId, request: AppendEntriesRequest) => Promise<AppendEntriesResponse>,
+            onInstallSnapshot: (from: NodeId, request: InstallSnapshotRequest) => Promise<InstallSnapshotResponse>
+        }
+        ): Promise<RPCMessage> {
 
         this.logger.debug(`Node ${this.nodeId} received message from ${from}: ${JSON.stringify(message)}`);
 
@@ -242,8 +282,15 @@ export class RPCHandler implements RPCHandlerInterface {
                 direction: 'response',
                 payload: responsePayload
             };
+        } else if (isInstallSnapshotRequestMessage(message)) {
+            const responsePayload = await handler.onInstallSnapshot(from, message.payload);
+            return {
+                type: "InstallSnapshot",
+                direction: 'response',
+                payload: responsePayload
+            };
         } else {
-            throw new RPCHandlerError(`Invalid RPC message type: ${message.type}`);
+            throw new RPCHandlerError(`Unknown message type: ${message.type}`);
         }
     }
 }

@@ -19,6 +19,7 @@ export interface LogManagerInterface {
     getLastTerm(): number;
     deleteEntriesFrom(index: number): Promise<void>;
     clear(): Promise<void>;
+    discardEntriesUpTo(index: number, term: number): Promise<void>;
 }
 
 const LOG_ENTRY_PREFIX = "raft:log:";
@@ -300,13 +301,15 @@ export class LogManager implements LogManagerInterface {
 
             if (newLastIndex <= this.snapshotIndex) {
                 operation.push({
-                    type: 'delete',
-                    key: LAST_INDEX_KEY
+                    type: 'set',
+                    key: LAST_INDEX_KEY,
+                    value: StorageCodec.encodeNumber(this.snapshotIndex)
                 });
 
                 operation.push({
-                    type: 'delete',
-                    key: LAST_TERM_KEY
+                    type: 'set',
+                    key: LAST_TERM_KEY,
+                    value: StorageCodec.encodeNumber(this.snapshotTerm)
                 });
 
                 this.lastTerm = this.snapshotTerm;
@@ -339,7 +342,7 @@ export class LogManager implements LogManagerInterface {
     async clear(): Promise<void> {
         this.ensureInitialized();
 
-        if (this.lastIndex === 0) {
+        if (this.lastIndex <= this.snapshotIndex) {
             return;
         }
 
@@ -496,6 +499,105 @@ export class LogManager implements LogManagerInterface {
         await this.appendEntry(entry);
 
         return idx;
+    }
+
+    async discardEntriesUpTo(index: number, term: number): Promise<void> {
+        this.ensureInitialized();
+
+        if (index <= this.snapshotIndex) {
+            // throw new LogInconsistencyError(`Cannot discard up to index ${index} as it is less than or equal to snapshot index ${this.snapshotIndex}`);
+            return;
+        }
+
+        if (index > this.lastIndex) {
+            throw new LogInconsistencyError(`Cannot discard up to index ${index} as it is beyond last index ${this.lastIndex}`);
+        }
+
+        await this.safeStorage(async () => {
+            const operations: StorageOperation[] = [];
+
+            for (let i = this.snapshotIndex + 1; i <= index; i++) {
+                operations.push({
+                    type: 'delete',
+                    key: this.makeLogKey(i)
+                });
+            }
+
+            operations.push({
+                type: 'set',
+                key: SNAPSHOT_INDEX_KEY,
+                value: StorageCodec.encodeNumber(index)
+            });
+            operations.push({
+                type: 'set',
+                key: SNAPSHOT_TERM_KEY,
+                value: StorageCodec.encodeNumber(term)
+            });
+
+            if (index >= this.lastIndex) {
+                operations.push({
+                    type: 'set',
+                    key: LAST_INDEX_KEY,
+                    value: StorageCodec.encodeNumber(index)
+                });
+                operations.push({
+                    type: 'set',
+                    key: LAST_TERM_KEY,
+                    value: StorageCodec.encodeNumber(term)
+                });
+            }
+
+            await this.storage.batch(operations);
+
+            this.snapshotIndex = index;
+            this.snapshotTerm = term;
+
+            if (index >= this.lastIndex) {
+                this.lastIndex = index;
+                this.lastTerm = term;
+            }
+        }, `discardEntriesUpTo (${index})`);
+    }
+
+    async resetToSnapshot(snapshotIndex: number, snapshotTerm: number): Promise<void> {
+        this.ensureInitialized();
+        
+        const operations: StorageOperation[] = [];
+
+        for (let i = this.snapshotIndex + 1; i <= this.lastIndex; i++) {
+            operations.push({
+                type: 'delete',
+                key: this.makeLogKey(i)
+            });
+        }
+
+        operations.push({
+            type: 'set',
+            key: LAST_INDEX_KEY,
+            value: StorageCodec.encodeNumber(snapshotIndex)
+        });
+        operations.push({
+            type: 'set',
+            key: LAST_TERM_KEY,
+            value: StorageCodec.encodeNumber(snapshotTerm)
+        });
+        operations.push({
+            type: 'set',
+            key: SNAPSHOT_INDEX_KEY,
+            value: StorageCodec.encodeNumber(snapshotIndex)
+        });
+        operations.push({
+            type: 'set',
+            key: SNAPSHOT_TERM_KEY,
+            value: StorageCodec.encodeNumber(snapshotTerm)
+        });
+
+        await this.storage.batch(operations);
+
+        this.snapshotIndex = snapshotIndex;
+        this.snapshotTerm = snapshotTerm;
+        this.lastIndex = snapshotIndex;
+        this.lastTerm = snapshotTerm;
     }
 
     private async safeStorage<T>(fn : () => Promise<T>, context: string): Promise<T> {

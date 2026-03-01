@@ -1,5 +1,5 @@
 import { NodeId, RaftConfig } from "./Config";
-import { RequestVoteRequest, RequestVoteResponse, AppendEntriesRequest, AppendEntriesResponse } from "../rpc/RPCTypes";
+import { RequestVoteRequest, RequestVoteResponse, AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse } from "../rpc/RPCTypes";
 import { LeaderState } from "../state/LeaderState";
 import { PersistentState } from "../state/PersistentState";
 import { VolatileState } from "../state/VolatileState";
@@ -11,6 +11,8 @@ import { RaftError } from "../util/Error";
 import { AsyncLock } from "../lock/AsyncLock";
 import { RaftEventBus, BaseEvent } from "../events/RaftEvents";
 import { NoOpEventBus } from "../events/EventBus";
+import { SnapshotManager } from "../snapshot/SnapshotManager";
+import { ApplicationStateMachine } from "./RaftNode";
 
 function baseEvent(nodeId: NodeId): BaseEvent {
     return {
@@ -59,6 +61,8 @@ export class StateMachine implements StateMachineInterface {
         private persistentState: PersistentState,
         private volatileState: VolatileState,
         private logManager: LogManager,
+        private snapshotManager: SnapshotManager,
+        private applicationStateMachine: ApplicationStateMachine,
         private rpcHandler: RPCHandler,
         private timerManager: TimerManager,
         private logger: Logger,
@@ -289,6 +293,43 @@ export class StateMachine implements StateMachineInterface {
                 success: true,
                 matchIndex
             };
+        });
+    }
+
+    async handleInstallSnapshot(from: NodeId, request: InstallSnapshotRequest): Promise<InstallSnapshotResponse> {
+        return await this.stateLock.runExclusive(async () => {
+            const currentTerm = this.persistentState.getCurrentTerm();
+
+            if (request.term < currentTerm) {
+                return { term: currentTerm, success: false };
+            }
+
+            if (request.term > currentTerm) {
+                await this.persistentState.updateTermAndVote(request.term, null);
+            }
+
+            await this.snapshotManager.saveSnapshot({
+                lastIncludedIndex: request.lastIncludedIndex,
+                lastIncludedTerm: request.lastIncludedTerm,
+                data: request.data
+            });
+
+            if (request.lastIncludedIndex <= this.logManager.getLastIndex()) {
+                await this.logManager.discardEntriesUpTo(request.lastIncludedIndex, request.lastIncludedTerm);
+            } else {
+                await this.logManager.resetToSnapshot(request.lastIncludedIndex, request.lastIncludedTerm);
+            }
+
+            await this.applicationStateMachine.installSnapshot(request.data);
+
+            this.volatileState.setLastApplied(request.lastIncludedIndex);
+            this.volatileState.setCommitIndex(request.lastIncludedIndex);
+
+            await this.becomeFollowerUnlocked(request.term, request.leaderId);
+
+            this.logger.info(`Installed snapshot from leader ${from} with last included index ${request.lastIncludedIndex} and term ${request.lastIncludedTerm}`);
+
+            return { term: this.persistentState.getCurrentTerm(), success: true };
         });
     }
 
@@ -531,6 +572,7 @@ export class StateMachine implements StateMachineInterface {
     private async sendAppendEntries(peer: NodeId): Promise<void> {
 
         let request: AppendEntriesRequest | null = null;
+        let shouldSendSnapshot = false;
         
         try {
             await this.stateLock.runExclusive(async () => {
@@ -539,9 +581,17 @@ export class StateMachine implements StateMachineInterface {
                     this.logger.debug(`Node ${this.nodeId} is not a leader but trying to send AppendEntries to ${peer}`);
                     return;
                 }
+                
+                const nextIndex = this.leaderState!.getNextIndex(peer);
+                const snapshotIndex = this.snapshotManager.getSnapshotMetadata()?.lastIncludedIndex ?? 0;
+
+                if (nextIndex <= snapshotIndex) {
+                    shouldSendSnapshot = true;
+                    this.logger.debug(`Node ${this.nodeId} needs to send snapshot to ${peer} because nextIndex ${nextIndex} is <= snapshotIndex ${snapshotIndex}`);
+                    return;
+                }
 
                 const currentTerm = this.persistentState.getCurrentTerm();
-                const nextIndex = this.leaderState!.getNextIndex(peer);
                 const prevLogIndex = nextIndex - 1;
                 const prevLogTerm = await this.logManager.getTermAtIndex(prevLogIndex) ?? 0;
 
@@ -558,6 +608,11 @@ export class StateMachine implements StateMachineInterface {
                 };
             });
 
+            if (shouldSendSnapshot) {
+                await this.sendSnapshot(peer);
+                return;
+            }
+
             if (!request) {
                 return;
             }
@@ -572,6 +627,59 @@ export class StateMachine implements StateMachineInterface {
                 this.logger.error(`Node ${this.nodeId} error sending AppendEntries to ${peer}: ${err.message}`);
             } else {
                 this.logger.error(`Node ${this.nodeId} error sending AppendEntries to ${peer}: ${String(err)}`);
+            }
+        }
+    }
+    
+    private async sendSnapshot(peer: NodeId): Promise<void> {
+        let request : InstallSnapshotRequest | null = null;
+
+        await this.stateLock.runExclusive(async () => {
+            const snapshot = await this.snapshotManager.loadSnapshot();
+
+            if (!snapshot) {
+                this.logger.error(`Node ${this.nodeId} has no snapshot to send to ${peer}`);
+                return;
+            }
+
+            request = {
+                term: this.persistentState.getCurrentTerm(),
+                leaderId: this.nodeId,
+                lastIncludedIndex: snapshot.lastIncludedIndex,
+                lastIncludedTerm: snapshot.lastIncludedTerm,
+                data: snapshot.data
+            };
+        });
+
+        if (!request) {
+            return;
+        }
+
+        try {
+            const response = await this.rpcHandler.sendInstallSnapshot(peer, request);
+
+            await this.stateLock.runExclusive(async () => {
+                if (!this.leaderState) {
+                    this.logger.debug(`Node ${this.nodeId} received InstallSnapshotResponse from ${peer} but has no LeaderState`);
+                    return;
+                }
+
+                if (response.term > this.persistentState.getCurrentTerm()) {
+                    this.logger.info(`Node ${this.nodeId} received higher term ${response.term} from ${peer} in InstallSnapshotResponse, becoming Follower`);
+                    await this.becomeFollowerUnlocked(response.term, null);
+                    return;
+                }
+
+                if (response.success) {
+                    this.leaderState.updateMatchIndex(peer, request!.lastIncludedIndex);
+                    this.logger.info(`Node ${this.nodeId} successfully sent snapshot to ${peer}, updated matchIndex to ${request!.lastIncludedIndex}`);
+                }
+            });
+        } catch (err) {
+            if (err instanceof Error) {
+                this.logger.error(`Node ${this.nodeId} error sending snapshot to ${peer}: ${err.message}`);
+            } else {
+                this.logger.error(`Node ${this.nodeId} error sending snapshot to ${peer}: ${String(err)}`);
             }
         }
     }

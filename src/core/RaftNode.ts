@@ -16,6 +16,8 @@ import { RaftError } from "../util/Error";
 import { AsyncLock } from "../lock/AsyncLock";
 import { RaftEventBus } from "../events/RaftEvents";
 import { NoOpEventBus } from "../events/EventBus";
+import { SnapshotManager } from "../snapshot/SnapshotManager";
+import { InstallSnapshotRequest, InstallSnapshotResponse } from "../rpc/RPCTypes";
 
 export interface CommandResult {
     success: boolean;
@@ -27,6 +29,8 @@ export interface CommandResult {
 export interface ApplicationStateMachine {
     apply(command: Command): Promise<any>;
     getState(): any;
+    takeSnapshot(): Promise<Buffer>;
+    installSnapshot(data: Buffer): Promise<void>;
 }
 
 export interface RaftNodeInterface {
@@ -62,6 +66,9 @@ export class RaftNode implements RaftNodeInterface {
     private commandLock: AsyncLock = new AsyncLock();
 
     private commitWaiters: Map<number, Array<(Commited: boolean) => void>> = new Map();
+
+    private snapshotTreshold: number = 100;
+    private snapshotManager: SnapshotManager;
 
     constructor(
         private config: RaftConfig,
@@ -105,6 +112,8 @@ export class RaftNode implements RaftNodeInterface {
 
         this.logManager = new LogManager(storage, this.bus, config.nodeId);
 
+        this.snapshotManager = new SnapshotManager(storage);
+
         this.stateMachine = new StateMachine(
             config.nodeId,
             config.peerIds,
@@ -112,6 +121,8 @@ export class RaftNode implements RaftNodeInterface {
             this.persistentState,
             this.volatileState,
             this.logManager,
+            this.snapshotManager,
+            this.applicationStateMachine,
             this.rpcHandler,
             this.timerManager,
             this.logger,
@@ -147,6 +158,17 @@ export class RaftNode implements RaftNodeInterface {
 
             this.logger.info(`Node ${this.config.nodeId} log initialized with last index ${lastLogIndex} and last term ${lastLogTerm}`);
 
+            await this.snapshotManager.initialize();
+
+            const snapshot = await this.snapshotManager.loadSnapshot();
+
+            if (snapshot) {
+                await this.applicationStateMachine.installSnapshot(snapshot.data);
+                this.volatileState.setLastApplied(snapshot.lastIncludedIndex);
+                this.volatileState.setCommitIndex(snapshot.lastIncludedIndex);
+                this.logger.info(`Node ${this.config.nodeId} loaded snapshot with last included index ${snapshot.lastIncludedIndex} and term ${snapshot.lastIncludedTerm}`);
+            }
+
             if(!this.transport.isStarted()) {
                 await this.transport.start();
             }
@@ -159,6 +181,10 @@ export class RaftNode implements RaftNodeInterface {
 
                     onAppendEntries: async (request, from) => {
                         return await this.stateMachine.handleAppendEntries(request, from);
+                    },
+
+                    onInstallSnapshot: async (request, from) => {
+                        return await this.stateMachine.handleInstallSnapshot(request, from);
                     }
                 });
             });
@@ -386,6 +412,14 @@ export class RaftNode implements RaftNodeInterface {
                 const result = await this.applicationStateMachine.apply(entry.command);
                 this.logger.info(`Applied log entry at index ${nextIndex} with command ${JSON.stringify(entry.command)}, result: ${JSON.stringify(result)}`);
                 this.volatileState.setLastApplied(nextIndex);
+
+                const currentLastApplied = this.volatileState.getLastApplied();
+                const lastSnapshotIndex = this.snapshotManager.getSnapshotMetadata()?.lastIncludedIndex ?? 0;
+
+                if (currentLastApplied - lastSnapshotIndex >= this.snapshotTreshold) {
+                    await this.takeSnapshot();
+                }
+
             } catch (error) {
                 this.logger.error(`Error applying log entry at index ${nextIndex} with command ${JSON.stringify(entry.command)}`, error as Error);
                 
@@ -470,6 +504,28 @@ export class RaftNode implements RaftNodeInterface {
                 this.commitWaiters.delete(index);
             }
         }
+    }
+
+    private async takeSnapshot(): Promise<void> {
+        const snapshotIndex = this.volatileState.getLastApplied();
+        const snapshotTerm = await this.logManager.getTermAtIndex(snapshotIndex);
+
+        if (snapshotTerm === null) {
+            this.logger.error(`Failed to get term for snapshot index ${snapshotIndex}, skipping snapshot`);
+            return;
+        }
+
+        const data = await this.applicationStateMachine.takeSnapshot();
+
+        await this.snapshotManager.saveSnapshot({
+            lastIncludedIndex: snapshotIndex,
+            lastIncludedTerm: snapshotTerm,
+            data: data
+        });
+
+        await this.logManager.discardEntriesUpTo(snapshotIndex, snapshotTerm);
+
+        this.logger.info(`Took snapshot at index ${snapshotIndex} and term ${snapshotTerm}, discarded log entries up to index ${snapshotIndex}`);
     }
 }
 

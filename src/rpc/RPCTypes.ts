@@ -30,9 +30,22 @@ export interface AppendEntriesResponse {
     conflictTerm?: number;
 }
 
-export type RPCRequest = RequestVoteRequest | AppendEntriesRequest;
+export interface InstallSnapshotRequest {
+    term: number;
+    leaderId: NodeId;
+    lastIncludedIndex: number;
+    lastIncludedTerm: number;
+    data: Buffer;
+}
 
-export type RPCResponse = RequestVoteResponse | AppendEntriesResponse;
+export interface InstallSnapshotResponse {
+    term: number;
+    success: boolean;
+}
+
+export type RPCRequest = RequestVoteRequest | AppendEntriesRequest | InstallSnapshotRequest;
+
+export type RPCResponse = RequestVoteResponse | AppendEntriesResponse | InstallSnapshotResponse;
 
 export interface RequestVoteRequestMessage {
     type: "RequestVote";
@@ -58,11 +71,25 @@ export interface AppendEntriesResponseMessage {
     payload: AppendEntriesResponse;
 }
 
+export interface InstallSnapshotRequestMessage {
+    type: "InstallSnapshot";
+    direction: "request";
+    payload: InstallSnapshotRequest;
+}
+
+export interface InstallSnapshotResponseMessage {
+    type: "InstallSnapshot";
+    direction: "response";
+    payload: InstallSnapshotResponse;
+}
+
 export type RPCMessage = 
     | RequestVoteRequestMessage
     | RequestVoteResponseMessage
     | AppendEntriesRequestMessage
-    | AppendEntriesResponseMessage;
+    | AppendEntriesResponseMessage
+    | InstallSnapshotRequestMessage
+    | InstallSnapshotResponseMessage;
 
 export function isRequestVoteRequestMessage(message: RPCMessage): message is RequestVoteRequestMessage {
     return message.type === "RequestVote" && message.direction === "request";
@@ -78,6 +105,14 @@ export function isAppendEntriesRequestMessage(message: RPCMessage): message is A
 
 export function isAppendEntriesResponseMessage(message: RPCMessage): message is AppendEntriesResponseMessage {
     return message.type === "AppendEntries" && message.direction === "response";
+}
+
+export function isInstallSnapshotRequestMessage(message: RPCMessage): message is InstallSnapshotRequestMessage {
+    return message.type === "InstallSnapshot" && message.direction === "request";
+}
+
+export function isInstallSnapshotResponseMessage(message: RPCMessage): message is InstallSnapshotResponseMessage {
+    return message.type === "InstallSnapshot" && message.direction === "response";
 }
 
 export function validateRequestVoteRequest(request: RequestVoteRequest): void {
@@ -156,6 +191,38 @@ export function validateAppendEntriesResponse(response: AppendEntriesResponse): 
     }
 }
 
+export function validateInstallSnapshotRequest(request: InstallSnapshotRequest): void {
+    if (!Number.isInteger(request.term) || request.term < 0) {
+        throw new Error(`Invalid term: ${request.term}. term must be a non-negative integer.`);
+    }
+
+    if (!request.leaderId || typeof request.leaderId !== 'string') {
+        throw new Error(`Invalid leaderId: ${request.leaderId}. leaderId must be a non-empty string.`);
+    }
+
+    if (!Number.isInteger(request.lastIncludedIndex) || request.lastIncludedIndex < 0) {
+        throw new Error(`Invalid lastIncludedIndex: ${request.lastIncludedIndex}. lastIncludedIndex must be a non-negative integer.`);
+    }
+
+    if (!Number.isInteger(request.lastIncludedTerm) || request.lastIncludedTerm < 0) {
+        throw new Error(`Invalid lastIncludedTerm: ${request.lastIncludedTerm}. lastIncludedTerm must be a non-negative integer.`);
+    }
+
+    if (!Buffer.isBuffer(request.data)) {
+        throw new Error(`Invalid data: ${request.data}. data must be a Buffer.`);
+    }
+}
+
+export function validateInstallSnapshotResponse(response: InstallSnapshotResponse): void {
+    if (!Number.isInteger(response.term) || response.term < 0) {
+        throw new Error(`Invalid term: ${response.term}. term must be a non-negative integer.`);
+    }
+
+    if (typeof response.success !== 'boolean') {
+        throw new Error(`Invalid success: ${response.success}. success must be a boolean.`);
+    }
+}
+
 export function validateRPCMessage(message: RPCMessage): void {
     switch (message.type) {
         case "RequestVote":
@@ -170,6 +237,13 @@ export function validateRPCMessage(message: RPCMessage): void {
                 validateAppendEntriesRequest(message.payload);
             } else {
                 validateAppendEntriesResponse(message.payload);
+            }
+            break;
+        case "InstallSnapshot":
+            if (message.direction === "request") {
+                validateInstallSnapshotRequest(message.payload);
+            } else {
+                validateInstallSnapshotResponse(message.payload);
             }
             break;
         default:

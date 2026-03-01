@@ -262,12 +262,16 @@ async function runSizes(
   const discardRuns = opts?.discardRuns ?? 2;
   const summary = opts?.summary ?? 'median';
   const coolDownMs = opts?.coolDownMs ?? 200;
+  const canForceGc = typeof global.gc === 'function';
 
   if (discardRuns >= totalRuns) {
     throw new Error(`discardRuns (${discardRuns}) must be smaller than totalRuns (${totalRuns})`);
   }
 
   const summarize = summary === 'median' ? median : mean;
+  if (!canForceGc) {
+    console.warn('global.gc is unavailable. Run node with --expose-gc to force GC between benchmark runs.');
+  }
   console.log('n\tlog2(n)\tinsert_us/op\tsearch_us/op\tdelete_us/op');
 
   for (const n of sizes) {
@@ -312,6 +316,12 @@ async function runSizes(
   }
 }
 
+/**
+ * NOTE:
+ * This benchmark can force garbage collection between runs only when Node is
+ * started with `--expose-gc` (so `global.gc` exists). Without that flag, the
+ * benchmark still runs, but GC timing/noise may vary more between runs.
+ */
 async function main() {
   const sizes = [1000, 2500, 5000, 7500, 10000, 25000, 50000, 75000, 100000];
   const totalRuns = 11;

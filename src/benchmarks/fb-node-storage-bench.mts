@@ -137,11 +137,7 @@ async function timeInsertSearchDelete(
 ) {
   const activeKeys = initialKeys.slice();
   const rand = xorshift32(987654321);
-  let maxKey = Number.NEGATIVE_INFINITY;
-  for (const key of initialKeys) {
-    if (key > maxKey) maxKey = key;
-  }
-  let nextKey = Number.isFinite(maxKey) ? maxKey + 1 : 0;
+  let nextKey = initialKeys.length;
 
   let insertMs = 0;
   let searchMs = 0;

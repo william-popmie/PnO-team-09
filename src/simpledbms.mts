@@ -319,7 +319,6 @@ export class Collection {
    * @returns {Promise<Set<string> | null>} A set of document IDs that match the query, or null if no index is available.
    */
   private async applyFilterOps(filterOps: FilterOperators): Promise<Set<string> | null> {
-    const MAX_INTERSECTIONS = 3;
     const indexedFields: Array<{ field: string; ops: FilterOperators[string]; score: number }> = [];
 
     for (const [field, ops] of Object.entries(filterOps)) {
@@ -330,36 +329,58 @@ export class Collection {
       else if (ops.$in !== undefined) score = ops.$in.length;
       else if (ops.$gt !== undefined || ops.$gte !== undefined || ops.$lt !== undefined || ops.$lte !== undefined) {
         score = 100;
+      } else {
+        continue;
       }
 
       indexedFields.push({ field, ops, score });
     }
 
-    if (indexedFields.length === 0) {
-      return null;
-    }
-
+    if (indexedFields.length === 0) return null;
     indexedFields.sort((a, b) => a.score - b.score);
 
-    const collectIdsForOps = async (
+    const matchesOpsOnValue = (value: DocumentValue | undefined, ops: FilterOperators[string]): boolean => {
+      if (ops.$eq !== undefined && value !== ops.$eq) return false;
+      if (ops.$in !== undefined && !ops.$in.includes(value as DocumentValue)) return false;
+
+      if (ops.$gt !== undefined) {
+        if (value === null || value === undefined) return false;
+        if (!((value as unknown as number) > (ops.$gt as unknown as number))) return false;
+      }
+      if (ops.$gte !== undefined) {
+        if (value === null || value === undefined) return false;
+        if (!((value as unknown as number) >= (ops.$gte as unknown as number))) return false;
+      }
+      if (ops.$lt !== undefined) {
+        if (value === null || value === undefined) return false;
+        if (!((value as unknown as number) < (ops.$lt as unknown as number))) return false;
+      }
+      if (ops.$lte !== undefined) {
+        if (value === null || value === undefined) return false;
+        if (!((value as unknown as number) <= (ops.$lte as unknown as number))) return false;
+      }
+
+      return true;
+    };
+
+    const collectInitialIds = async (
       indexTree: BPlusTree<string, string, FBLeafNode<string, string>, FBInternalNode<string, string>>,
       ops: FilterOperators[string],
     ): Promise<Set<string>> => {
       const ids = new Set<string>();
 
       if (ops.$eq !== undefined) {
-        const value = ops.$eq;
-        const prefix = serializeFieldValue(value) + ':';
-        const startKey = prefix;
-        const endKey = prefix + '\uffff';
-
-        for await (const { value: docId } of indexTree.range(startKey, endKey, {
+        const prefix = serializeFieldValue(ops.$eq) + ':';
+        for await (const { value: docId } of indexTree.range(prefix, prefix + '\uffff', {
           inclusiveStart: true,
           inclusiveEnd: true,
         })) {
           ids.add(docId);
         }
-      } else if (ops.$gt !== undefined || ops.$gte !== undefined || ops.$lt !== undefined || ops.$lte !== undefined) {
+        return ids;
+      }
+
+      if (ops.$gt !== undefined || ops.$gte !== undefined || ops.$lt !== undefined || ops.$lte !== undefined) {
         const minVal = ops.$gt !== undefined ? ops.$gt : ops.$gte;
         const maxVal = ops.$lt !== undefined ? ops.$lt : ops.$lte;
         const minInclusive = ops.$gte !== undefined;
@@ -374,9 +395,12 @@ export class Collection {
         })) {
           ids.add(docId);
         }
-      } else if (ops.$in !== undefined) {
+        return ids;
+      }
+
+      if (ops.$in !== undefined) {
         const sortedValues = ops.$in
-          .map((v) => ({ original: v, serialized: serializeFieldValue(v) }))
+          .map((v) => ({ serialized: serializeFieldValue(v) }))
           .sort((a, b) => (a.serialized < b.serialized ? -1 : a.serialized > b.serialized ? 1 : 0));
 
         if (sortedValues.length === 0) return ids;
@@ -400,54 +424,42 @@ export class Collection {
             ids.add(docId);
           }
 
-          if (valueIndex >= sortedValues.length) {
-            break;
-          }
+          if (valueIndex >= sortedValues.length) break;
         }
       }
 
       return ids;
     };
 
-    const intersectSets = (a: Set<string>, b: Set<string>): Set<string> => {
-      const [small, large] = a.size <= b.size ? [a, b] : [b, a];
-      const result = new Set<string>();
-      for (const value of small) {
-        if (large.has(value)) {
-          result.add(value);
+    const [first, ...rest] = indexedFields;
+    const firstIndex = this.secondaryIndexes.get(first.field)!;
+    let resultSet = await collectInitialIds(firstIndex, first.ops);
+
+    if (resultSet.size === 0) return resultSet;
+
+    const docCache = new Map<string, Document | null>();
+
+    for (const { field, ops } of rest) {
+      const previousSize = resultSet.size;
+      const nextSet = new Set<string>();
+
+      for (const id of resultSet) {
+        let doc = docCache.get(id);
+        if (doc === undefined) {
+          doc = await this.primaryTree.search(id);
+          docCache.set(id, doc);
+        }
+
+        if (!doc) continue;
+        if (matchesOpsOnValue(doc[field], ops)) {
+          nextSet.add(id);
         }
       }
-      return result;
-    };
 
-    let resultSet: Set<string> | null = null;
-    let intersectionCount = 0;
+      resultSet = nextSet;
+      if (resultSet.size === 0) break;
 
-    for (const { field, ops } of indexedFields) {
-      const indexTree = this.secondaryIndexes.get(field)!;
-      const ids = await collectIdsForOps(indexTree, ops);
-
-      if (!resultSet) {
-        resultSet = ids;
-        intersectionCount++;
-        continue;
-      }
-
-      if (intersectionCount >= MAX_INTERSECTIONS) {
-        break;
-      }
-
-      const previousSize = resultSet.size;
-      resultSet = intersectSets(resultSet, ids);
-      intersectionCount++;
-
-      if (resultSet.size === 0) {
-        break;
-      }
-
-      if (resultSet.size >= 0.9 * previousSize) {
-        break;
-      }
+      if (resultSet.size / previousSize < 0.9) break;
     }
 
     return resultSet;

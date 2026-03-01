@@ -283,6 +283,60 @@ export class FreeBlockFile {
   }
 
   /**
+   * Overwrite an existing blob starting at the given block ID.
+   * Reuses the existing block chain if possible, allocating or freeing blocks as needed.
+   *
+   * @param {number} startBlockId - The block ID of the first block to overwrite.
+   * @param {Buffer} data - The data to write.
+   * @returns {Promise<void>} A promise that resolves when the overwrite is complete.
+   */
+  async overwriteBlock(startBlockId: number, data: Buffer): Promise<void> {
+    this.ensureOpened();
+    if (startBlockId === NO_BLOCK) {
+      throw new Error('Cannot overwrite NO_BLOCK');
+    }
+
+    const lengthPrefix = Buffer.alloc(LENGTH_PREFIX_SIZE);
+    lengthPrefix.writeBigUInt64LE(BigInt(data.length), 0);
+    const full = Buffer.concat([lengthPrefix, data]);
+    const needed = Math.ceil(full.length / this.payloadSize) || 1;
+
+    // Collect existing blocks in the chain
+    let current = startBlockId;
+    const existingBlocks: number[] = [];
+    while (current !== NO_BLOCK && existingBlocks.length < needed) {
+      existingBlocks.push(current);
+      const blockBuf = await this.readRawBlock(current);
+      current = blockBuf.readUInt32LE(FREE_LIST_HEAD_OFFSET);
+    }
+
+    // If we have extra blocks in the old chain, free them
+    if (current !== NO_BLOCK) {
+      await this.freeBlob(current);
+    }
+
+    // If we need more blocks, allocate them
+    if (existingBlocks.length < needed) {
+      const additionalNeeded = needed - existingBlocks.length;
+      const newBlocksOrNumber = await this.allocateBlocks(additionalNeeded);
+      const newBlocks = Array.isArray(newBlocksOrNumber) ? newBlocksOrNumber : [newBlocksOrNumber];
+      existingBlocks.push(...newBlocks);
+    }
+
+    // Write data to the blocks
+    for (let i = 0; i < existingBlocks.length; i++) {
+      const blockId = existingBlocks[i];
+      const next = i + 1 < existingBlocks.length ? existingBlocks[i + 1] : NO_BLOCK;
+      const out = Buffer.alloc(this.blockSize, 0);
+      out.writeUInt32LE(next >>> 0, FREE_LIST_HEAD_OFFSET);
+      const start = i * this.payloadSize;
+      const end = Math.min(start + this.payloadSize, full.length);
+      full.copy(out, NEXT_POINTER_SIZE, start, end);
+      this.stagedWrites.set(blockId, out);
+    }
+  }
+
+  /**
    * Free a blob starting from the given block ID.
    *
    * @param {number} startBlockId - The block ID of the first block of the blob to free.

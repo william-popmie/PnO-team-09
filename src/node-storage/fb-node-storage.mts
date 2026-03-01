@@ -62,6 +62,42 @@ function deserializeValue(serializedValue: unknown): unknown {
   return obj['value'];
 }
 
+function lowerBound<Keystype>(
+  keys: Keystype[],
+  key: Keystype,
+  compareKeys: (a: Keystype, b: Keystype) => number,
+): number {
+  let lo = 0;
+  let hi = keys.length;
+  while (lo < hi) {
+    const mid = lo + Math.floor((hi - lo) / 2);
+    if (compareKeys(keys[mid], key) < 0) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo;
+}
+
+function upperBound<Keystype>(
+  keys: Keystype[],
+  key: Keystype,
+  compareKeys: (a: Keystype, b: Keystype) => number,
+): number {
+  let lo = 0;
+  let hi = keys.length;
+  while (lo < hi) {
+    const mid = lo + Math.floor((hi - lo) / 2);
+    if (compareKeys(keys[mid], key) <= 0) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo;
+}
+
 /**
  * FBNodeStorage is a NodeStorage implementation that uses FreeBlockFile for storage.
  *
@@ -108,6 +144,7 @@ export class FBNodeStorage<Keystype, ValuesType>
     children: (FBLeafNode<Keystype, ValuesType> | FBInternalNode<Keystype, ValuesType>)[],
     keys: Keystype[],
   ): Promise<FBInternalNode<Keystype, ValuesType>> {
+    // First pass: ensure all children have blockIds
     for (const child of children) {
       if (child.blockId === undefined || child.blockId === NO_BLOCK) {
         if (child.isLeaf) {
@@ -120,6 +157,15 @@ export class FBNodeStorage<Keystype, ValuesType>
       }
     }
 
+    // Second pass: re-persist all leaf children to sync nextBlockId/prevBlockId pointers
+    // This is necessary after splits where pointer relationships were established
+    for (const child of children) {
+      if (child.isLeaf) {
+        const old = await this.persistLeaf(child);
+        if (typeof old === 'number') this.enqueueForReclaim(old);
+      }
+    }
+
     const node = await this.createInternalNode(children, keys);
     if (node.blockId === undefined || node.blockId === NO_BLOCK) {
       const old = await this.persistInternal(node);
@@ -129,6 +175,16 @@ export class FBNodeStorage<Keystype, ValuesType>
   }
 
   async persistLeaf(node: FBLeafNode<Keystype, ValuesType>): Promise<number | undefined> {
+    // Sync blockId fields from object references before persisting
+    // Only update if the object reference exists and has a valid blockId
+    if (node.nextLeaf && node.nextLeaf.blockId !== undefined && node.nextLeaf.blockId !== NO_BLOCK) {
+      node.nextBlockId = node.nextLeaf.blockId;
+    }
+
+    if (node.prevLeaf && node.prevLeaf.blockId !== undefined && node.prevLeaf.blockId !== NO_BLOCK) {
+      node.prevBlockId = node.prevLeaf.blockId;
+    }
+
     const payload = {
       type: 'leaf',
       keys: node.keys.map((key) => serializeKey(key)),
@@ -138,23 +194,22 @@ export class FBNodeStorage<Keystype, ValuesType>
       version: 1,
     };
     const buffer = Buffer.from(JSON.stringify(payload), 'utf-8');
+
+    // In-place update: if node already has a blockId, overwrite it
+    if (node.blockId !== undefined && node.blockId !== NO_BLOCK) {
+      await this.FBfile.overwriteBlock(node.blockId, buffer);
+      // No old block to reclaim - same blockId
+      return undefined;
+    }
+
+    // First time: allocate new block
     const newBlockId = await this.FBfile.allocateAndWrite(buffer);
-    const oldBlockId = node.blockId;
     node.blockId = newBlockId;
     this.cache.set(newBlockId, node);
-
-    if (typeof oldBlockId === 'number' && oldBlockId !== NO_BLOCK && oldBlockId !== newBlockId) {
-      this.cache.delete(oldBlockId);
-      return oldBlockId;
-    }
     return undefined;
   }
 
-  async persistInternal(node: FBInternalNode<Keystype, ValuesType>): Promise<number | undefined> {
-    if (node.childBlockIds.some((id) => id === NO_BLOCK || id === undefined)) {
-      throw new Error('Cannot persist internal node with unpersisted children');
-    }
-
+  private async persistInternalShallow(node: FBInternalNode<Keystype, ValuesType>): Promise<number | undefined> {
     const payload = {
       type: 'internal',
       keys: node.keys.map((key) => serializeKey(key)),
@@ -162,16 +217,74 @@ export class FBNodeStorage<Keystype, ValuesType>
       version: 1,
     };
     const buffer = Buffer.from(JSON.stringify(payload), 'utf-8');
+
+    if (node.blockId !== undefined && node.blockId !== NO_BLOCK) {
+      await this.FBfile.overwriteBlock(node.blockId, buffer);
+      return undefined;
+    }
+
     const newBlockId = await this.FBfile.allocateAndWrite(buffer);
-    const oldBlockId = node.blockId;
     node.blockId = newBlockId;
     this.cache.set(newBlockId, node);
-
-    if (typeof oldBlockId === 'number' && oldBlockId !== NO_BLOCK && oldBlockId !== newBlockId) {
-      this.cache.delete(oldBlockId);
-      return oldBlockId;
-    }
     return undefined;
+  }
+
+  private async ensureNodeHasBlockId(
+    node: FBLeafNode<Keystype, ValuesType> | FBInternalNode<Keystype, ValuesType>,
+  ): Promise<void> {
+    if (node.blockId !== undefined && node.blockId !== NO_BLOCK) return;
+
+    if (node.isLeaf) {
+      const old = await this.persistLeaf(node);
+      if (typeof old === 'number') this.enqueueForReclaim(old);
+      return;
+    }
+
+    const internalNode = node;
+    const hasCompleteChildIds =
+      internalNode.childBlockIds.length === internalNode.keys.length + 1 &&
+      internalNode.childBlockIds.every((id) => id !== NO_BLOCK && id !== undefined);
+
+    if (hasCompleteChildIds) {
+      const old = await this.persistInternalShallow(internalNode);
+      if (typeof old === 'number') this.enqueueForReclaim(old);
+      return;
+    }
+
+    const old = await this.persistInternal(internalNode);
+    if (typeof old === 'number') this.enqueueForReclaim(old);
+  }
+
+  async persistInternal(node: FBInternalNode<Keystype, ValuesType>): Promise<number | undefined> {
+    const expectedChildren = node.keys.length + 1;
+    if (node.childBlockIds.length < expectedChildren) {
+      node.childBlockIds = node.childBlockIds.concat(
+        Array(expectedChildren - node.childBlockIds.length).fill(NO_BLOCK),
+      );
+    } else if (node.childBlockIds.length > expectedChildren) {
+      node.childBlockIds = node.childBlockIds.slice(0, expectedChildren);
+    }
+
+    if (node.children.length > 0) {
+      const maxIndex = Math.min(node.children.length, expectedChildren);
+      for (let i = 0; i < maxIndex; i++) {
+        const child = node.children[i];
+        if (!child) continue;
+        if (child.blockId === undefined || child.blockId === NO_BLOCK) {
+          await this.ensureNodeHasBlockId(child);
+        }
+        node.childBlockIds[i] = child.blockId as number;
+      }
+    }
+
+    if (
+      node.childBlockIds.length !== expectedChildren ||
+      node.childBlockIds.some((id) => id === NO_BLOCK || id === undefined)
+    ) {
+      throw new Error('Cannot persist internal node with unpersisted children');
+    }
+
+    return this.persistInternalShallow(node);
   }
 
   enqueueForReclaim(blockId?: number): void {
@@ -194,6 +307,16 @@ export class FBNodeStorage<Keystype, ValuesType>
     // console.log('[FBNodeStorage] reclaimQueuedBlocksNow: freeing ids: ${ids.join(',')}');
     for (const id of ids) {
       await this.freeAndDeleteCache(id);
+    }
+  }
+
+  async persistNode(node: FBLeafNode<Keystype, ValuesType> | FBInternalNode<Keystype, ValuesType>): Promise<void> {
+    if (node.isLeaf) {
+      const old = await this.persistLeaf(node);
+      if (typeof old === 'number') this.enqueueForReclaim(old);
+    } else {
+      const old = await this.persistInternal(node);
+      if (typeof old === 'number') this.enqueueForReclaim(old);
     }
   }
 
@@ -231,7 +354,11 @@ export class FBNodeStorage<Keystype, ValuesType>
       nextBlockId?: number;
       prevBlockId?: number;
     };
-    type InternalPayload = { type: 'internal'; keys?: SerializedKey[]; childBlockIds?: number[] };
+    type InternalPayload = {
+      type: 'internal';
+      keys?: SerializedKey[];
+      childBlockIds?: number[];
+    };
 
     function isLeafPayload(x: unknown): x is LeafPayload {
       if (typeof x !== 'object' || x === null) return false;
@@ -264,15 +391,6 @@ export class FBNodeStorage<Keystype, ValuesType>
       node.blockId = blockId;
       node.children = [];
       this.cache.set(blockId, node);
-
-      for (const childId of childIds) {
-        if (typeof childId === 'number' && childId !== NO_BLOCK) {
-          const childNode = await this.loadNode(childId);
-          node.children.push(childNode);
-        } else {
-          continue;
-        }
-      }
       return node;
     } else {
       throw new Error('Unknown node type in payload');
@@ -363,15 +481,9 @@ export class FBLeafNode<Keystype, ValuesType>
     cursor: LeafCursor<Keystype, ValuesType, FBLeafNode<Keystype, ValuesType>, FBInternalNode<Keystype, ValuesType>>;
     isAtKey: boolean;
   } {
-    let index = -1;
-    for (let i = 0; i < this.keys.length; i++) {
-      if (this.storage.compareKeys(this.keys[i], key) >= 0) {
-        index = i;
-        break;
-      }
-    }
+    const index = lowerBound(this.keys, key, this.storage.compareKeys);
     const cursor = new FBLeafCursor<Keystype, ValuesType>(this, index - 1);
-    const isAtKey = index >= 0 && this.storage.compareKeys(this.keys[index], key) === 0;
+    const isAtKey = index < this.keys.length && this.storage.compareKeys(this.keys[index], key) === 0;
     return { cursor, isAtKey };
   }
 
@@ -485,14 +597,7 @@ export class FBLeafCursor<Keystype, ValuesType>
     key: Keystype,
     value: ValuesType,
   ): Promise<{ nodes: FBLeafNode<Keystype, ValuesType>[]; keys: Keystype[] }> {
-    let index = -1;
-    for (let i = 0; i < this.leaf.keys.length; i++) {
-      if (this.leaf.getStorage().compareKeys(this.leaf.keys[i], key) >= 0) {
-        index = i;
-        break;
-      }
-    }
-    const insertPosition = index === -1 ? this.leaf.keys.length : index;
+    const insertPosition = lowerBound(this.leaf.keys, key, this.leaf.getStorage().compareKeys);
     this.leaf.keys.splice(insertPosition, 0, key);
     this.leaf.values.splice(insertPosition, 0, value);
 
@@ -557,10 +662,7 @@ export class FBInternalNode<Keystype, ValuesType>
     cursor: ChildCursor<Keystype, ValuesType, FBLeafNode<Keystype, ValuesType>, FBInternalNode<Keystype, ValuesType>>;
     isAtKey: boolean;
   }> {
-    let index = 0;
-    while (index < this.keys.length && this.storage.compareKeys(key, this.keys[index]) >= 0) {
-      index++;
-    }
+    const index = upperBound(this.keys, key, this.storage.compareKeys);
     const cursor = new FBChildCursor<Keystype, ValuesType>(this);
     cursor.setPosition(index);
     const isAtKey = index > 0 && this.storage.compareKeys(key, this.keys[index - 1]) === 0;
@@ -576,16 +678,36 @@ export class FBInternalNode<Keystype, ValuesType>
     return Promise.resolve(this);
   }
 
+  private hasFullyMaterializedChildren(): boolean {
+    if (this.children.length !== this.childBlockIds.length) return false;
+    for (let i = 0; i < this.childBlockIds.length; i++) {
+      if (!(i in this.children)) return false;
+      if (!this.children[i]) return false;
+    }
+    return true;
+  }
+
+  private clearChildrenCache(): void {
+    this.children = [];
+  }
+
   async moveLastChildTo(separatorKey: Keystype, nextNode: FBInternalNode<Keystype, ValuesType>): Promise<Keystype> {
     const lastChildBlockId = this.childBlockIds.pop()!;
     const lastKey = this.keys.pop()!;
     nextNode.childBlockIds.unshift(lastChildBlockId);
     nextNode.keys.unshift(separatorKey);
 
-    let movedChild: FBLeafNode<Keystype, ValuesType> | FBInternalNode<Keystype, ValuesType>;
-    if (this.children.length > 0) {
-      movedChild = this.children.pop()!;
-      nextNode.children.unshift(movedChild);
+    if (this.hasFullyMaterializedChildren() && nextNode.hasFullyMaterializedChildren()) {
+      const movedChild = this.children.pop();
+      if (movedChild) {
+        nextNode.children.unshift(movedChild);
+      } else {
+        this.clearChildrenCache();
+        nextNode.clearChildrenCache();
+      }
+    } else {
+      this.clearChildrenCache();
+      nextNode.clearChildrenCache();
     }
 
     const oldThis = await this.storage.persistInternal(this);
@@ -605,10 +727,17 @@ export class FBInternalNode<Keystype, ValuesType>
     previousNode.childBlockIds.push(firstChildBlockId);
     previousNode.keys.push(separatorKey);
 
-    let movedChild: FBLeafNode<Keystype, ValuesType> | FBInternalNode<Keystype, ValuesType>;
-    if (this.children.length > 0) {
-      movedChild = this.children.shift()!;
-      previousNode.children.push(movedChild);
+    if (this.hasFullyMaterializedChildren() && previousNode.hasFullyMaterializedChildren()) {
+      const movedChild = this.children.shift();
+      if (movedChild) {
+        previousNode.children.push(movedChild);
+      } else {
+        this.clearChildrenCache();
+        previousNode.clearChildrenCache();
+      }
+    } else {
+      this.clearChildrenCache();
+      previousNode.clearChildrenCache();
     }
 
     const oldThis = await this.storage.persistInternal(this);
@@ -639,8 +768,10 @@ export class FBInternalNode<Keystype, ValuesType>
     this.keys.push(_key, ...nextInternal.keys);
     this.childBlockIds.push(...nextInternal.childBlockIds);
 
-    if (nextInternal.children.length > 0) {
+    if (this.hasFullyMaterializedChildren() && nextInternal.hasFullyMaterializedChildren()) {
       this.children.push(...nextInternal.children);
+    } else {
+      this.clearChildrenCache();
     }
 
     const oldThis = await this.getStorage().persistInternal(this);
@@ -705,6 +836,7 @@ export class FBChildCursor<Keystype, ValuesType>
     }
 
     const childNode = await this.parent.getStorage().loadNode(blockId);
+    this.parent.children[targetPosition] = childNode;
     return childNode;
   }
 
@@ -752,11 +884,9 @@ export class FBChildCursor<Keystype, ValuesType>
 
     await this.parent.getStorage().reclaimQueuedBlocksNow();
 
-    const nodes: (FBLeafNode<Keystype, ValuesType> | FBInternalNode<Keystype, ValuesType>)[] = [];
-    for (const id of this.parent.childBlockIds) {
-      const node = await this.parent.getStorage().loadNode(id);
-      nodes.push(node);
-    }
+    const nodes = this.parent.children.filter(
+      (node): node is FBLeafNode<Keystype, ValuesType> | FBInternalNode<Keystype, ValuesType> => node !== undefined,
+    );
     return { nodes, keys: this.parent.keys.slice() };
   }
 }

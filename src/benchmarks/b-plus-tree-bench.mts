@@ -1,6 +1,20 @@
 import { performance } from 'perf_hooks';
+import * as fsp from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { randomUUID } from 'crypto';
+
 import { BPlusTree } from '../b-plus-tree.mjs';
-import { TrivialNodeStorage, TrivialLeafNode, TrivialInternalNode } from '../node-storage/trivial-node-storage.mjs';
+import { FreeBlockFile } from '../freeblockfile.mjs';
+import { FBNodeStorage, FBLeafNode, FBInternalNode } from '../node-storage/fb-node-storage.mjs';
+import { RealFile, type File as DbFile } from '../file/file.mjs';
+import { MockFile } from '../file/mockfile.mjs';
+import { AtomicFileImpl } from '../atomic-operations/atomic-file.mjs';
+import { WALManagerImpl } from '../atomic-operations/wal-manager.mjs';
+
+type BenchLeaf = FBLeafNode<number, number>;
+type BenchInternal = FBInternalNode<number, number>;
+type BenchTree = BPlusTree<number, number, BenchLeaf, BenchInternal>;
 
 function xorshift32(seed: number) {
   let s = seed >>> 0;
@@ -12,11 +26,6 @@ function xorshift32(seed: number) {
   };
 }
 
-function makeRandomKeys(n: number, maxKey: number, seed = 1234567): number[] {
-  const rand = xorshift32(seed);
-  return Array.from({ length: n }, () => rand() % Math.max(1, maxKey));
-}
-
 function shuffle<T>(arr: T[], seed = 42) {
   const rnd = xorshift32(seed);
   for (let i = arr.length - 1; i > 0; i--) {
@@ -25,48 +34,78 @@ function shuffle<T>(arr: T[], seed = 42) {
   }
 }
 
-function makeTree(order = 32) {
+type FileBackend = 'real' | 'mock';
+
+async function makeTree(order = 32, backend: FileBackend = 'mock') {
   const compareKeys = (a: number, b: number) => (a < b ? -1 : a > b ? 1 : 0);
   const keySize = (_k: number) => 8;
-  const storage = new TrivialNodeStorage<number, number>(compareKeys, keySize);
-  const tree = new BPlusTree<number, number, TrivialLeafNode<number, number>, TrivialInternalNode<number, number>>(
-    storage,
-    order,
-  );
-  return { tree, storage };
+
+  let dbFile: DbFile;
+  let walFile: DbFile;
+  let filePath: string | null = null;
+  let walPath: string | null = null;
+
+  if (backend === 'mock') {
+    dbFile = new MockFile(512);
+    walFile = new MockFile(512);
+  } else {
+    filePath = join(tmpdir(), `bpt-fb-${process.pid}-${randomUUID()}.db`);
+    walPath = `${filePath}.wal`;
+
+    dbFile = new RealFile(filePath);
+    walFile = new RealFile(walPath);
+
+    // RealFile.open() uses 'r+', so ensure files exist first.
+    await dbFile.create();
+    await dbFile.close();
+    await walFile.create();
+    await walFile.close();
+  }
+
+  const wal = new WALManagerImpl(walFile, dbFile);
+  const atomicFile = new AtomicFileImpl(dbFile, wal);
+  const fbFile = new FreeBlockFile(dbFile, atomicFile, 4096);
+  await fbFile.open();
+
+  const storage = new FBNodeStorage<number, number>(compareKeys, keySize, fbFile, order);
+  const tree = new BPlusTree<number, number, BenchLeaf, BenchInternal>(storage, order);
+
+  const dispose = async () => {
+    await fbFile.close();
+    if (filePath) await fsp.unlink(filePath).catch(() => {});
+    if (walPath) await fsp.unlink(walPath).catch(() => {});
+  };
+
+  return { tree, storage, fbFile, dispose };
 }
 
-async function timeInsert(
-  tree: BPlusTree<number, number, TrivialLeafNode<number, number>, TrivialInternalNode<number, number>>,
-  keys: number[],
-) {
+async function timeInsert(tree: BenchTree, fbFile: FreeBlockFile, keys: number[]) {
   const t0 = performance.now();
-  for (const key of keys) {
-    await tree.insert(key, key);
+  for (const k of keys) {
+    await tree.insert(k, k);
+    await fbFile.commit();
   }
   const t1 = performance.now();
   return t1 - t0;
 }
 
-async function timeSearch(
-  tree: BPlusTree<number, number, TrivialLeafNode<number, number>, TrivialInternalNode<number, number>>,
-  keys: number[],
-) {
+async function timeSearch(tree: BenchTree, keys: number[]) {
   const t0 = performance.now();
   for (const key of keys) {
-    await tree.search(key);
+    const found = await tree.search(key);
+    if (found === null) {
+      throw new Error(`Searched key not found during benchmark: ${key}`);
+    }
   }
   const t1 = performance.now();
   return t1 - t0;
 }
 
-async function timeDelete(
-  tree: BPlusTree<number, number, TrivialLeafNode<number, number>, TrivialInternalNode<number, number>>,
-  keys: number[],
-) {
+async function timeDelete(tree: BenchTree, fbFile: FreeBlockFile, keys: number[]) {
   const t0 = performance.now();
-  for (const key of keys) {
-    await tree.delete(key);
+  for (const k of keys) {
+    await tree.delete(k);
+    await fbFile.commit();
   }
   const t1 = performance.now();
   return t1 - t0;
@@ -86,52 +125,81 @@ function printRow(n: number, insMs: number, srchMs: number, delMs: number) {
   );
 }
 
-async function runOnce(n: number, opts: { mode: 'random' | 'sequential'; order?: number }) {
-  const { tree } = makeTree(opts.order ?? 32);
-  await tree.init();
+async function runOnce(n: number, opts: { mode: 'random' | 'sequential'; order?: number; backend?: FileBackend }) {
+  const { tree, storage, fbFile, dispose } = await makeTree(opts.order ?? 32, opts.backend ?? 'mock');
 
-  let keys: number[];
-  if (opts.mode === 'sequential') {
-    keys = Array.from({ length: n }, (_, i) => i);
-  } else {
-    keys = makeRandomKeys(n, Math.max(n * 2, 1000), 12345);
+  try {
+    await tree.init();
+
+    let keys: number[];
+    if (opts.mode === 'sequential') {
+      keys = Array.from({ length: n }, (_, i) => i);
+    } else {
+      keys = Array.from({ length: n }, (_, i) => i);
+      shuffle(keys, 12345);
+    }
+
+    const insertMs = await timeInsert(tree, fbFile, keys);
+    await storage.commitAndReclaim();
+
+    const searchKeys = keys.slice();
+    shuffle(searchKeys, 9999);
+    const srchMs = await timeSearch(tree, searchKeys);
+
+    const delMs = await timeDelete(tree, fbFile, keys);
+    await storage.commitAndReclaim();
+
+    return { n, insertMs, srchMs, delMs };
+  } finally {
+    await dispose();
   }
-
-  const warmup = Math.min(50, Math.floor(n * 0.01));
-  for (let i = 0; i < warmup; i++) {
-    await tree.insert(keys[i], keys[i]);
-  }
-
-  const insertKeys = keys.slice(warmup);
-
-  const insertMs = await timeInsert(tree, insertKeys);
-  const searchKeys = keys.slice();
-  shuffle(searchKeys, 9999);
-  const srchMs = await timeSearch(tree, searchKeys);
-
-  const delMs = await timeDelete(tree, keys);
-
-  return { n, insertMs, srchMs, delMs };
 }
 
-async function runSizes(sizes: number[], mode: 'random' | 'sequential') {
+async function runSizes(
+  sizes: number[],
+  mode: 'random' | 'sequential',
+  opts?: {
+    totalRuns?: number;
+    discardRuns?: number;
+    summary?: 'median' | 'average';
+    backend?: FileBackend;
+  },
+) {
+  const totalRuns = opts?.totalRuns ?? 9;
+  const discardRuns = opts?.discardRuns ?? 2;
+  const summary = opts?.summary ?? 'median';
+
+  if (discardRuns >= totalRuns) {
+    throw new Error(`discardRuns (${discardRuns}) must be smaller than totalRuns (${totalRuns})`);
+  }
+
+  const summarize = summary === 'median' ? median : mean;
+
+  console.log(
+    `Using ${summary} of ${totalRuns - discardRuns} runs per size (discarding first ${discardRuns} warmup run(s))`,
+  );
   console.log(
     'n\tlog2(n)\tinsert_total_ms\tinsert_us/op\tsearch_total_ms\tsearch_us/op\tdelete_total_ms\tdelete_us/op',
   );
+
   for (const n of sizes) {
     try {
-      const repeats = 2;
       const insertArr: number[] = [];
       const searchArr: number[] = [];
       const deleteArr: number[] = [];
-      for (let r = 0; r < repeats; r++) {
-        const res = await runOnce(n, { mode, order: 32 });
+
+      for (let r = 0; r < totalRuns; r++) {
+        const res = await runOnce(n, { mode, order: 32, backend: opts?.backend ?? 'mock' });
+
+        // Discard full benchmark warmup runs to reduce JIT/cold-start spikes.
+        if (r < discardRuns) continue;
+
         insertArr.push(res.insertMs);
         searchArr.push(res.srchMs);
         deleteArr.push(res.delMs);
       }
-      const avg = (a: number[]) => a.reduce((s, v) => s + v, 0) / a.length;
-      printRow(n, avg(insertArr), avg(searchArr), avg(deleteArr));
+
+      printRow(n, summarize(insertArr), summarize(searchArr), summarize(deleteArr));
     } catch (err) {
       console.error('error running size', n, err);
       break;
@@ -139,70 +207,52 @@ async function runSizes(sizes: number[], mode: 'random' | 'sequential') {
   }
 }
 
+function mean(values: number[]): number {
+  if (values.length === 0) return NaN;
+  return values.reduce((s, v) => s + v, 0) / values.length;
+}
+
+function median(values: number[]): number {
+  if (values.length === 0) return NaN;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
 async function main() {
   const sizes = [1000, 5000, 10000, 50000, 100000];
-  console.log('Simple benchmark using TrivialNodeStorage + BPlusTree');
+  const backend: FileBackend = process.argv.includes('--real') ? 'real' : 'mock';
+
+  console.log(`Benchmark using FBNodeStorage + FreeBlockFile (backend=${backend})`);
   console.log('Mode: random inserts/searches');
-  await runSizes(sizes, 'random');
+  await runSizes(sizes, 'random', { totalRuns: 9, discardRuns: 2, summary: 'median', backend });
 
   console.log('\nMode: sequential inserts/searches');
-  await runSizes(sizes, 'sequential');
+  await runSizes(sizes, 'sequential', { totalRuns: 9, discardRuns: 2, summary: 'median', backend });
 
   console.log('\nDone.');
 }
 
 await main();
 
-/*
-Mode: random inserts/searches
-n       log2(n)         insert_total_ms         insert_us/op            search_total_ms         search_us/op            delete_total_ms         delete_us/op
-1000    log2(n)=9.97    insert_total_ms=4.86    insert_us/op=4.863      search_total_ms=1.41    search_us/op=1.413      delete_total_ms=2.28    delete_us/op=2.284
-5000    log2(n)=12.29   insert_total_ms=30.67   insert_us/op=6.134      search_total_ms=5.42    search_us/op=1.085      delete_total_ms=18.05   delete_us/op=3.609
-10000   log2(n)=13.29   insert_total_ms=93.21   insert_us/op=9.321      search_total_ms=9.03    search_us/op=0.903      delete_total_ms=55.06   delete_us/op=5.506
-50000   log2(n)=15.61   insert_total_ms=1979.79 insert_us/op=39.596     search_total_ms=58.37   search_us/op=1.167      delete_total_ms=1205.82 delete_us/op=24.116
-100000  log2(n)=16.61   insert_total_ms=7805.24 insert_us/op=78.052     search_total_ms=120.30  search_us/op=1.203      delete_total_ms=4860.59 delete_us/op=48.606
+// Mode: random inserts/searches
+// Using median of 7 runs per size (discarding first 2 warmup run(s))
+// n       log2(n) insert_total_ms insert_us/op    search_total_ms search_us/op    delete_total_ms delete_us/op
+// 1000    log2(n)=9.97    insert_total_ms=32.19   insert_us/op=32.194     search_total_ms=1.23    search_us/op=1.233      delete_total_ms=22.84   delete_us/op=22.837
+// 5000    log2(n)=12.29   insert_total_ms=187.18  insert_us/op=37.437     search_total_ms=5.34    search_us/op=1.068      delete_total_ms=126.57  delete_us/op=25.314
+// 10000   log2(n)=13.29   insert_total_ms=398.07  insert_us/op=39.807     search_total_ms=10.60   search_us/op=1.060      delete_total_ms=254.14  delete_us/op=25.414
+// 50000   log2(n)=15.61   insert_total_ms=2180.48 insert_us/op=43.610     search_total_ms=65.64   search_us/op=1.313      delete_total_ms=1447.23 delete_us/op=28.945
+// 100000  log2(n)=16.61   insert_total_ms=4310.00 insert_us/op=43.100     search_total_ms=140.23  search_us/op=1.402      delete_total_ms=2904.56 delete_us/op=29.046
+// 500000  log2(n)=18.93   insert_total_ms=23472.53        insert_us/op=46.945     search_total_ms=923.60  search_us/op=1.847      delete_total_ms=15992.10        delete_us/op=31.984
+// 1000000 log2(n)=19.93   insert_total_ms=50839.26        insert_us/op=50.839     search_total_ms=2311.86 search_us/op=2.312      delete_total_ms=34434.65        delete_us/op=34.435
 
-Mode: sequential inserts/searches
-n       log2(n)         insert_total_ms         insert_us/op            search_total_ms         search_us/op            delete_total_ms         delete_us/op
-1000    log2(n)=9.97    insert_total_ms=2.68    insert_us/op=2.681      search_total_ms=0.74    search_us/op=0.739      delete_total_ms=0.95    delete_us/op=0.947
-5000    log2(n)=12.29   insert_total_ms=37.13   insert_us/op=7.427      search_total_ms=4.70    search_us/op=0.940      delete_total_ms=7.00    delete_us/op=1.400
-10000   log2(n)=13.29   insert_total_ms=137.98  insert_us/op=13.798     search_total_ms=9.60    search_us/op=0.960      delete_total_ms=14.51   delete_us/op=1.451
-50000   log2(n)=15.61   insert_total_ms=2954.60 insert_us/op=59.092     search_total_ms=60.78   search_us/op=1.216      delete_total_ms=79.91   delete_us/op=1.598
-100000  log2(n)=16.61   insert_total_ms=11544.3 insert_us/op=115.443    search_total_ms=125.06  search_us/op=1.251      delete_total_ms=170.94  delete_us/op=1.709
-*/
-
-/*
-Mode: random inserts/searches
-n       log2(n) insert_total_ms insert_us/op    search_total_ms search_us/op    delete_total_ms delete_us/op
-1000    log2(n)=9.97    insert_total_ms=3.59    insert_us/op=3.588      search_total_ms=1.67    search_us/op=1.670      delete_total_ms=2.62    delete_us/op=2.624
-5000    log2(n)=12.29   insert_total_ms=10.36   insert_us/op=2.072      search_total_ms=6.12    search_us/op=1.224      delete_total_ms=18.81   delete_us/op=3.762
-10000   log2(n)=13.29   insert_total_ms=18.71   insert_us/op=1.871      search_total_ms=10.57   search_us/op=1.057      delete_total_ms=57.85   delete_us/op=5.785
-50000   log2(n)=15.61   insert_total_ms=169.72  insert_us/op=3.394      search_total_ms=80.60   search_us/op=1.612      delete_total_ms=1274.46 delete_us/op=25.489
-100000  log2(n)=16.61   insert_total_ms=468.99  insert_us/op=4.690      search_total_ms=140.50  search_us/op=1.405      delete_total_ms=4681.17 delete_us/op=46.812
-
-Mode: sequential inserts/searches
-n       log2(n) insert_total_ms insert_us/op    search_total_ms search_us/op    delete_total_ms delete_us/op
-1000    log2(n)=9.97    insert_total_ms=1.32    insert_us/op=1.320      search_total_ms=0.85    search_us/op=0.855      delete_total_ms=1.18    delete_us/op=1.182
-5000    log2(n)=12.29   insert_total_ms=8.40    insert_us/op=1.681      search_total_ms=5.35    search_us/op=1.070      delete_total_ms=6.81    delete_us/op=1.362
-10000   log2(n)=13.29   insert_total_ms=19.82   insert_us/op=1.982      search_total_ms=10.42   search_us/op=1.042      delete_total_ms=14.72   delete_us/op=1.472
-50000   log2(n)=15.61   insert_total_ms=178.89  insert_us/op=3.578      search_total_ms=75.95   search_us/op=1.519      delete_total_ms=92.00   delete_us/op=1.840
-100000  log2(n)=16.61   insert_total_ms=553.38  insert_us/op=5.534      search_total_ms=140.83  search_us/op=1.408      delete_total_ms=185.06  delete_us/op=1.851
-*/
-
-/*
-Mode: random inserts/searches
-n       log2(n) insert_total_ms insert_us/op    search_total_ms search_us/op    delete_total_ms delete_us/op
-1000    log2(n)=9.97    insert_total_ms=3.61    insert_us/op=3.612      search_total_ms=1.64    search_us/op=1.642      delete_total_ms=1.80    delete_us/op=1.796
-5000    log2(n)=12.29   insert_total_ms=10.05   insert_us/op=2.010      search_total_ms=5.92    search_us/op=1.183      delete_total_ms=6.93    delete_us/op=1.386
-10000   log2(n)=13.29   insert_total_ms=18.68   insert_us/op=1.868      search_total_ms=10.91   search_us/op=1.091      delete_total_ms=12.59   delete_us/op=1.259
-50000   log2(n)=15.61   insert_total_ms=158.52  insert_us/op=3.170      search_total_ms=69.58   search_us/op=1.392      delete_total_ms=74.95   delete_us/op=1.499
-100000  log2(n)=16.61   insert_total_ms=481.52  insert_us/op=4.815      search_total_ms=139.44  search_us/op=1.394      delete_total_ms=156.87  delete_us/op=1.569
-
-Mode: sequential inserts/searches
-n       log2(n) insert_total_ms insert_us/op    search_total_ms search_us/op    delete_total_ms delete_us/op
-1000    log2(n)=9.97    insert_total_ms=1.28    insert_us/op=1.285      search_total_ms=0.74    search_us/op=0.741      delete_total_ms=0.82    delete_us/op=0.816
-5000    log2(n)=12.29   insert_total_ms=8.76    insert_us/op=1.752      search_total_ms=5.18    search_us/op=1.036      delete_total_ms=5.49    delete_us/op=1.098
-10000   log2(n)=13.29   insert_total_ms=19.24   insert_us/op=1.924      search_total_ms=10.62   search_us/op=1.062      delete_total_ms=9.61    delete_us/op=0.961
-50000   log2(n)=15.61   insert_total_ms=166.05  insert_us/op=3.321      search_total_ms=70.53   search_us/op=1.411      delete_total_ms=54.55   delete_us/op=1.091
-100000  log2(n)=16.61   insert_total_ms=531.77  insert_us/op=5.318      search_total_ms=139.36  search_us/op=1.394      delete_total_ms=118.55  delete_us/op=1.186
-*/
+// Mode: sequential inserts/searches
+// Using median of 7 runs per size (discarding first 2 warmup run(s))
+// n       log2(n) insert_total_ms insert_us/op    search_total_ms search_us/op    delete_total_ms delete_us/op
+// 1000    log2(n)=9.97    insert_total_ms=30.79   insert_us/op=30.787     search_total_ms=0.68    search_us/op=0.679      delete_total_ms=29.26   delete_us/op=29.263
+// 5000    log2(n)=12.29   insert_total_ms=175.73  insert_us/op=35.146     search_total_ms=4.66    search_us/op=0.933      delete_total_ms=158.69  delete_us/op=31.738
+// 10000   log2(n)=13.29   insert_total_ms=364.97  insert_us/op=36.497     search_total_ms=9.74    search_us/op=0.974      delete_total_ms=319.56  delete_us/op=31.956
+// 50000   log2(n)=15.61   insert_total_ms=1904.04 insert_us/op=38.081     search_total_ms=61.76   search_us/op=1.235      delete_total_ms=1758.61 delete_us/op=35.172
+// 100000  log2(n)=16.61   insert_total_ms=3841.62 insert_us/op=38.416     search_total_ms=133.75  search_us/op=1.338      delete_total_ms=3547.30 delete_us/op=35.473
+// 500000  log2(n)=18.93   insert_total_ms=19966.55        insert_us/op=39.933     search_total_ms=860.68  search_us/op=1.721      delete_total_ms=17781.71        delete_us/op=35.563
+// 1000000 log2(n)=19.93   insert_total_ms=40201.31        insert_us/op=40.201     search_total_ms=1857.67 search_us/op=1.858      delete_total_ms=35054.60        delete_us/op=35.055

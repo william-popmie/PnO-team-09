@@ -287,16 +287,12 @@ export class BPlusTree<
    */
   public async *entries(): AsyncGenerator<{ key: KeysType; value: ValuesType }, void, unknown> {
     if (!this.root) return;
-    let leaf = await this.getLeftmostLeaf();
+    let leaf: LeafNodeStorageType | null = await this.getLeftmostLeaf();
     while (leaf) {
       for (let i = 0; i < leaf.keys.length; i++) {
         yield { key: leaf.keys[i], value: leaf.values[i] };
       }
-      if (leaf.nextLeaf) {
-        leaf = leaf.nextLeaf;
-      } else {
-        break;
-      }
+      leaf = (await leaf.getNextLeaf()) as LeafNodeStorageType | null;
     }
   }
 
@@ -307,16 +303,12 @@ export class BPlusTree<
    */
   public async *reverseEntries(): AsyncGenerator<{ key: KeysType; value: ValuesType }, void, unknown> {
     if (!this.root) return;
-    let leaf = await this.getRightmostLeaf();
+    let leaf: LeafNodeStorageType | null = await this.getRightmostLeaf();
     while (leaf) {
       for (let i = leaf.keys.length - 1; i >= 0; i--) {
         yield { key: leaf.keys[i], value: leaf.values[i] };
       }
-      if (leaf.prevLeaf) {
-        leaf = leaf.prevLeaf;
-      } else {
-        break;
-      }
+      leaf = (await leaf.getPrevLeaf()) as LeafNodeStorageType | null;
     }
   }
 
@@ -369,14 +361,14 @@ export class BPlusTree<
       const startIdx = leaf.keys.findIndex((k) => cmp(k, startKey) >= 0);
 
       if (startIdx === -1) {
-        leaf = leaf.nextLeaf ?? null;
+        leaf = (await leaf.getNextLeaf()) as LeafNodeStorageType | null;
         continue;
       }
 
       for (let i = startIdx; i < leaf.keys.length; i++) {
         yield { key: leaf.keys[i], value: leaf.values[i] };
       }
-      leaf = leaf.nextLeaf ?? null;
+      leaf = (await leaf.getNextLeaf()) as LeafNodeStorageType | null;
     }
   }
 
@@ -435,12 +427,12 @@ export class BPlusTree<
     this.root = await this.storage.createTree();
   }
 
-  private lowerBoundKey(keys: KeysType[], key: KeysType): number {
+  private upperBoundKey(keys: KeysType[], key: KeysType): number {
     let lo = 0;
     let hi = keys.length;
     while (lo < hi) {
       const mid = lo + Math.floor((hi - lo) / 2);
-      if (this.storage.compareKeys(keys[mid], key) < 0) {
+      if (this.storage.compareKeys(keys[mid], key) <= 0) {
         lo = mid + 1;
       } else {
         hi = mid;
@@ -681,7 +673,7 @@ export class BPlusTree<
       const child = await cursor.getChild();
       if (!child) throw new Error('Child not found while descending');
 
-      const idx = this.lowerBoundKey(internal.keys, key);
+      const idx = this.upperBoundKey(internal.keys, key);
       parents.push(internal);
       parentIndices.push(idx);
 

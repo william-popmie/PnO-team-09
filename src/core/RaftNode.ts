@@ -183,8 +183,8 @@ export class RaftNode implements RaftNodeInterface {
                         return await this.stateMachine.handleAppendEntries(request, from);
                     },
 
-                    onInstallSnapshot: async (request, from) => {
-                        return await this.stateMachine.handleInstallSnapshot(request, from);
+                    onInstallSnapshot: async (from, request) => {
+                        return await this.stateMachine.handleInstallSnapshot(from, request);
                     }
                 });
             });

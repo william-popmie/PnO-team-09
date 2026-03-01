@@ -41,6 +41,7 @@ export interface StateMachineInterface {
     becomeLeader(): Promise<void>;
     handleRequestVote(from: NodeId, request: RequestVoteRequest): Promise<RequestVoteResponse>;
     handleAppendEntries(from: NodeId, request: AppendEntriesRequest): Promise<AppendEntriesResponse>;
+    handleInstallSnapshot(from: NodeId, request: InstallSnapshotRequest): Promise<InstallSnapshotResponse>;
 }
 
 export class StateMachine implements StateMachineInterface {

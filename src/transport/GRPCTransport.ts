@@ -34,7 +34,15 @@ export function rpcMessageToGrpc(message: RPCMessage): { method: string, payload
                 entries: message.payload.entries.map((entry: any) => StorageCodec.serializeLogEntry(entry))
             }
         };
-    };
+    } else if ( message.type === "InstallSnapshot" && message.direction === "request") {
+        return {
+            method: "InstallSnapshot",
+            payload: {
+                ...message.payload,
+                data: message.payload.data
+            }
+        };
+    }
 
     throw new NetworkError(`Unsupported message type or direction: ${message.type} ${message.direction}`);
 }
@@ -49,21 +57,34 @@ export function grpcToRpcMessage(method: string, raw: any): RPCMessage {
                 voteGranted: raw.voteGranted
             }
         };
-    };
+    } else if (method === "AppendEntries") {
 
-    const payload: AppendEntriesResponse = {
-        term: raw.term,
-        success: raw.success,
-        ...(raw.hasMatchIndex && { matchIndex: raw.matchIndex }),
-        ...(raw.hasConflictIndex && { conflictIndex: raw.conflictIndex }),
-        ...(raw.hasConflictTerm && { conflictTerm: raw.conflictTerm }),
-    };
+        const payload: AppendEntriesResponse = {
+            term: raw.term,
+            success: raw.success,
+            ...(raw.hasMatchIndex && { matchIndex: raw.matchIndex }),
+            ...(raw.hasConflictIndex && { conflictIndex: raw.conflictIndex }),
+            ...(raw.hasConflictTerm && { conflictTerm: raw.conflictTerm }),
+        };
 
-    return {
-        type: "AppendEntries",
-        direction: "response",
-        payload: payload
-    };
+        return {
+            type: "AppendEntries",
+            direction: "response",
+            payload: payload
+        };
+
+    } else if (method === "InstallSnapshot") {
+        return {
+            type: "InstallSnapshot",
+            direction: "response",
+            payload: {
+                term: raw.term,
+                success: raw.success
+            }
+        };
+    }
+
+    throw new NetworkError(`Unsupported gRPC method: ${method}`);
 }
 
 export function serializeAppendEntriesResponse(response: AppendEntriesResponse): object {
@@ -284,6 +305,36 @@ export class GrpcTransport implements Transport {
                     }
 
                     callback(null, serializeAppendEntriesResponse(response.payload));
+                } catch (err) {
+                    callback({ code: grpc.status.INTERNAL, message: (err as Error).message });
+                }
+            },
+
+            InstallSnapshot: async (call: any, callback: any) => {
+                if (!this.handler) {
+                    callback({ code: grpc.status.UNAVAILABLE, message: "No message handler registered" });
+                    return;
+                }
+
+                try {
+                    const from = this.extractSender(call);
+                    const message: RPCMessage = {
+                        type: "InstallSnapshot",
+                        direction: "request",
+                        payload: {
+                            ...call.request,
+                            data: Buffer.isBuffer(call.request.data) ? call.request.data : Buffer.from(call.request.data)
+                        }
+                    };
+                    
+                    const response = await this.handler(from, message);
+
+                    if (response.type !== "InstallSnapshot" || response.direction !== "response") {
+                        callback({ code: grpc.status.INTERNAL, message: "Invalid response type from handler" });
+                        return;
+                    }
+
+                    callback(null, response.payload);
                 } catch (err) {
                     callback({ code: grpc.status.INTERNAL, message: (err as Error).message });
                 }

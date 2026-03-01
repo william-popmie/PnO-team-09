@@ -284,7 +284,7 @@ describe('LogManager.ts, LogManager', () => {
 
     it('should throw when deleting entries from index < 1', async () => {
         await logManager.initialize();
-        await expect(logManager.deleteEntriesFrom(0)).rejects.toThrow('Cannot delete from index 0 as it is less than 1');
+        await expect(logManager.deleteEntriesFrom(0)).rejects.toThrow('Cannot delete from index 0 as it is less than or equal to snapshot index 0');
     });
 
     it('should throw when deleting entries from index > last index', async () => {
@@ -375,7 +375,7 @@ describe('LogManager.ts, LogManager', () => {
 
     it('should throw when index < 1 for getEntriesFromIndex', async () => {
         await logManager.initialize();
-        await expect(logManager.getEntriesFromIndex(0)).rejects.toThrow('Invalid fromIndex: 0 is less than 1');
+        await expect(logManager.getEntriesFromIndex(0)).rejects.toThrow('Invalid fromIndex: 0 is less than or equal to snapshot index 0');
     });
 
     it('should return empty array for getEntriesFromIndex when fromIndex > last index', async () => {

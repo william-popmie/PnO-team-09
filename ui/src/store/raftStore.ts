@@ -13,6 +13,7 @@ interface RaftStore {
     totalEventCount: number;
     messageVisibility: Record<string, boolean>;
     snapshottingNodes: Set<string>;
+    installingSnapshotNodes: Set<string>;
     toggleMessageVisibility: (messageType: string) => void;
     setNodeIds: (ids: string[]) => void;
     pushEvent: (event: RaftEvent) => void;
@@ -60,6 +61,7 @@ export const useRaftStore = create<RaftStore>((set, get) => ({
         InstallSnapshot: true,
     },
     snapshottingNodes: new Set<string>(),
+    installingSnapshotNodes: new Set<string>(),
     setNodeIds: (ids) => { 
         const nodes: Record<string, NodeUIState> = {};
         for (const id of ids) {
@@ -145,9 +147,24 @@ export const useRaftStore = create<RaftStore>((set, get) => ({
                     }, 1000);
 
                 } else if (event.messageType === "InstallSnapshotResponse") {
+                    const returnId = event.messageId + "-response";
                     setTimeout(() => {
                         set(s => ({ arrows: s.arrows.filter(a => a.id !== event.messageId) }));
-                    }, 800);
+                    }, 400);
+                    setTimeout(() => {
+                        set(s => ({ arrows: [...s.arrows, {
+                            id: returnId,
+                            fromNodeId: event.fromNodeId,
+                            toNodeId: event.toNodeId,
+                            messageType: event.messageType,
+                            status: "inFlight" as const,
+                            createdAt: Date.now(),
+                            isHeartbeat: false,
+                        }]}));
+                    }, 500);
+                    setTimeout(() => {
+                        set(s => ({ arrows: s.arrows.filter(a => a.id !== returnId) }));
+                    }, 1000);
                 }
                 break;
             }
@@ -225,6 +242,8 @@ export const useRaftStore = create<RaftStore>((set, get) => ({
                             ...state.nodes[event.nodeId],
                             crashed: false,
                             term: event.term,
+                            commitIndex: event.commitIndex,
+                            snapshotIndex: event.snapshotIndex,
                         },
                     },
                 }));
@@ -317,7 +336,15 @@ export const useRaftStore = create<RaftStore>((set, get) => ({
                                 e => e.index > event.lastIncludedIndex) ?? [],
                         },
                     },
+                    installingSnapshotNodes: new Set([...state.installingSnapshotNodes, event.nodeId]),
                 }));
+                setTimeout(() => {
+                    set(state => {
+                        const next = new Set(state.installingSnapshotNodes);
+                        next.delete(event.nodeId);
+                        return { installingSnapshotNodes: next };
+                    });
+                }, 2000);
                 break;
             }
         }
@@ -355,7 +382,7 @@ export const useRaftStore = create<RaftStore>((set, get) => ({
             [messageType]: !state.messageVisibility[messageType],
         },
     })),
-    reset: () => set({ nodeIds: [], events: [], nodes: {}, arrows: [], selectedNodeId: null, dropRateByNode: {}, cutLinks: new Set(), totalEventCount: 0, messageVisibility: { RequestVote: true, AppendEntries: true, Heartbeat: true, Dropped: true, InstallSnapshot: true }, snapshottingNodes: new Set()}),
+    reset: () => set({ nodeIds: [], events: [], nodes: {}, arrows: [], selectedNodeId: null, dropRateByNode: {}, cutLinks: new Set(), totalEventCount: 0, messageVisibility: { RequestVote: true, AppendEntries: true, Heartbeat: true, Dropped: true, InstallSnapshot: true }, snapshottingNodes: new Set(), installingSnapshotNodes: new Set()}),
     })
 )
 

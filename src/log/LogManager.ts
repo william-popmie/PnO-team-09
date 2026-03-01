@@ -600,6 +600,11 @@ export class LogManager implements LogManagerInterface {
         this.lastTerm = snapshotTerm;
     }
 
+    getSnapshotIndex(): number {
+        this.ensureInitialized();
+        return this.snapshotIndex;
+    }
+
     private async safeStorage<T>(fn : () => Promise<T>, context: string): Promise<T> {
         try {
             return await fn();

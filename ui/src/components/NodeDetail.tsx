@@ -40,6 +40,7 @@ export function NodeDetail() {
             <Row label="Role"         value={node.role} />
             <Row label="Term"         value={String(node.term)} />
             <Row label="Commit index" value={String(node.commitIndex)} />
+            <Row label="Snapshot index" value={String(node.snapshotIndex)} />
             <Row label="Voted for"    value={node.votedFor ?? '—'} />
             <Row label="Crashed"      value={node.crashed ? 'yes' : 'no'} />
 

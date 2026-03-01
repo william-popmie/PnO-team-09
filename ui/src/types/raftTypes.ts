@@ -43,6 +43,8 @@ export interface NodeRecoveredEvent extends BaseEvent {
     type: "NodeRecovered";
     term: number;
     logLength: number;
+    commitIndex: number;
+    snapshotIndex: number;
 }
 
 export interface LogAppendedEvent extends BaseEvent {

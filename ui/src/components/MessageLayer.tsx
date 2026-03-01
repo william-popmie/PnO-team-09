@@ -25,10 +25,14 @@ export function MessageLayer({ positions, nodeRadius, width, height }: Props) {
                     refX={6} refY={3.5} orient="auto">
                     <polygon points="0 0, 7 3.5, 0 7" fill="context-stroke" />
                 </marker>
-                    <marker id="arrow-dropped" markerWidth={7} markerHeight={7}
-                        refX={6} refY={3.5} orient="auto">
-                        <polygon points="0 0, 7 3.5, 0 7" fill={messageColors.Dropped} />
-                    </marker>
+                <marker id="arrow-dropped" markerWidth={7} markerHeight={7}
+                    refX={6} refY={3.5} orient="auto">
+                    <polygon points="0 0, 7 3.5, 0 7" fill={messageColors.Dropped} />
+                </marker>
+                <marker id="arrow-snapshot" markerWidth={7} markerHeight={7}
+                    refX={6} refY={3.5} orient="auto">
+                    <polygon points="0 0, 7 3.5, 0 7" fill={messageColors.InstallSnapshotRequest} />
+                </marker>
             </defs>
             {arrows.map(arrow => {
                 const from = positions[arrow.fromNodeId];
@@ -48,15 +52,19 @@ export function MessageLayer({ positions, nodeRadius, width, height }: Props) {
 
                 const isRV = arrow.messageType === "RequestVote" || arrow.messageType === "RequestVoteResponse";
                 const isDropped = arrow.status === 'dropped';
+                const isSnapshot = arrow.messageType === "InstallSnapshotRequest" || arrow.messageType === "InstallSnapshotResponse";
 
                 if (isDropped && !messageVisibility.Dropped) return null;
                 if (isRV && !messageVisibility.RequestVote) return null;
-                if (!isRV && arrow.isHeartbeat && !messageVisibility.Heartbeat) return null;
-                if (!isRV && !arrow.isHeartbeat && !isDropped && !messageVisibility.AppendEntries) return null;
+                if (isSnapshot && !messageVisibility.InstallSnapshot) return null;
+                if (!isRV && arrow.isHeartbeat && !isSnapshot && !messageVisibility.Heartbeat) return null;
+                if (!isRV && !arrow.isHeartbeat && !isDropped &&  !isSnapshot &&!messageVisibility.AppendEntries) return null;
 
-                const strokeColor = isRV ? messageColors.RequestVote 
-                        : arrow.isHeartbeat ? messageColors.Heartbeat
-                        : messageColors.AppendEntries;
+                const strokeColor = isDropped ? messageColors.Dropped
+                                  : isRV ? messageColors.RequestVote
+                                  : arrow.isHeartbeat ? messageColors.Heartbeat
+                                  : isSnapshot ? messageColors.InstallSnapshotRequest
+                                  : messageColors.AppendEntries;
 
                 const kx = x1 + (x2 - x1) * 0.65;
                 const ky = y1 + (y2 - y1) * 0.65;
@@ -91,7 +99,7 @@ export function MessageLayer({ positions, nodeRadius, width, height }: Props) {
                                 stroke={strokeColor}
                                 strokeWidth={arrow.isHeartbeat ? 1 : 2.5}
                                 strokeDasharray={arrow.isHeartbeat ? "3 3" : undefined}
-                                markerEnd={`url(#arrow-${isRV ? "rv" : "ae"})`}
+                                markerEnd={`url(#arrow-${isRV ? "rv" : isSnapshot ? "snapshot" : "ae"})`}
                             />
                         )}
                     </g>

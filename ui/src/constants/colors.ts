@@ -4,6 +4,7 @@ export const roleColors = {
     Candidate : "#d73a49",
     Crashed : "#8b0000",
     TakingSnapshot: "#f97316",
+    InstallingSnapshot: "#8964c9",
 };
 
 export const messageColors = {

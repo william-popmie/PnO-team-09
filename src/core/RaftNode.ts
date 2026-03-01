@@ -67,7 +67,7 @@ export class RaftNode implements RaftNodeInterface {
 
     private commitWaiters: Map<number, Array<(Commited: boolean) => void>> = new Map();
 
-    private snapshotTreshold: number = 10;
+    private snapshotTreshold: number = 5;
     private snapshotManager: SnapshotManager;
 
     constructor(
@@ -205,7 +205,9 @@ export class RaftNode implements RaftNodeInterface {
                 nodeId: this.config.nodeId,
                 type: "NodeRecovered",
                 term: restoredTerm,
-                logLength: lastLogIndex
+                logLength: lastLogIndex,
+                commitIndex: this.volatileState.getCommitIndex(),
+                snapshotIndex: this.logManager.getSnapshotIndex(),
             });
 
         } catch (error) {

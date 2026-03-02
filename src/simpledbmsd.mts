@@ -5,8 +5,9 @@ import 'dotenv/config';
 import express from 'express';
 import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
-import { SimpleDBMS } from './simpledbms.mjs';
+import { SimpleDBMS, type Document, type AggregateQuery } from './simpledbms.mjs';
 import { RealFile } from './file/file.mjs';
+import { FBNodeStorage } from './node-storage/fb-node-storage.mjs';
 
 const app = express();
 const port = 3000;
@@ -300,7 +301,7 @@ app.post('/db', async (req, res) => {
 app.post('/db/:collection', async (req, res) => {
   try {
     const collectionName = req.params.collection;
-    const doc = req.body as Omit<import('./simpledbms.mjs').Document, 'id'> & { id?: string };
+    const doc = req.body as Omit<Document, 'id'> & { id?: string };
     const collection = await db.getCollection(collectionName);
     const newDoc = await collection.insert(doc);
     res.status(201).json(newDoc);
@@ -336,7 +337,6 @@ app.post('/db/:collection/indexes/:field', async (req, res) => {
     const collection = await db.getCollection(collectionName);
 
     // Create storage for the index
-    const { FBNodeStorage } = await import('./node-storage/fb-node-storage.mjs');
     const indexStorage = new FBNodeStorage<string, string>(
       (a, b) => (a < b ? -1 : a > b ? 1 : 0),
       () => 1024,
@@ -386,7 +386,7 @@ app.post('/db/:collection/indexes/:field', async (req, res) => {
 app.post('/db/:collection/aggregate', async (req, res) => {
   try {
     const collectionName = req.params.collection;
-    const body = req.body as { groupBy?: string | null; operations: import('./simpledbms.mjs').AggregateQuery['operations'] };
+    const body = req.body as { groupBy?: string | null; operations: AggregateQuery['operations'] };
     const { groupBy, operations } = body;
 
     if (!operations) {
@@ -461,13 +461,13 @@ app.post('/db/:collection/bulk', async (req, res) => {
         const operation = op as { type: string; document?: unknown; id?: string; updates?: unknown };
         if (operation.type === 'insert') {
           const doc = await collection.insert(
-            operation.document as Omit<import('./simpledbms.mjs').Document, 'id'> & { id?: string },
+            operation.document as Omit<Document, 'id'> & { id?: string },
           );
           results.push({ success: true, type: 'insert', id: doc.id });
         } else if (operation.type === 'update') {
           const doc = await collection.update(
             operation.id as string,
-            operation.updates as Partial<import('./simpledbms.mjs').Document>,
+            operation.updates as Partial<Document>,
           );
           results.push({ success: true, type: 'update', id: operation.id, found: !!doc });
         } else if (operation.type === 'delete') {
@@ -571,7 +571,7 @@ app.put('/db/:collection/:id', async (req, res) => {
   try {
     const collectionName = req.params.collection;
     const id = req.params.id;
-    const updates = req.body as Partial<import('./simpledbms.mjs').Document>;
+    const updates = req.body as Partial<Document>;
     const collection = await db.getCollection(collectionName);
     const updated = await collection.update(id, updates);
     if (updated) {

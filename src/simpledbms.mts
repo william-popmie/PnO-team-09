@@ -544,21 +544,19 @@ export class Collection {
   }
 
   /**
-   * Finds documents in the collection using offset pagination.
+   * Finds documents in the collection using keyset pagination by id.
    * @param {number} limit Maximum number of documents to return.
-   * @param {number} [offset=0] Number of documents to skip.
+   * @param {string} [afterId] Return documents strictly after this id.
    * @returns {Promise<Document[]>} A page of documents.
    */
-  async findPaged(limit: number, offset: number = 0): Promise<Document[]> {
+  async findPagedAfter(limit: number, afterId?: string): Promise<Document[]> {
     const safeLimit = Math.max(1, Math.floor(limit));
-    const safeOffset = Math.max(0, Math.floor(offset));
 
     const results: Document[] = [];
-    let index = 0;
+    const iterator = afterId ? this.primaryTree.entriesFrom(afterId) : this.primaryTree.entries();
 
-    for await (const { value } of this.primaryTree.entries()) {
-      if (index < safeOffset) {
-        index++;
+    for await (const { key, value } of iterator) {
+      if (afterId && key <= afterId) {
         continue;
       }
 
@@ -566,8 +564,6 @@ export class Collection {
       if (results.length >= safeLimit) {
         break;
       }
-
-      index++;
     }
 
     return results;

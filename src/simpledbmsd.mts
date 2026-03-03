@@ -264,7 +264,7 @@ app.get('/db/:collection', async (req, res) => {
  * @swagger
  * /db/{collection}/paged:
  *   get:
- *     summary: Find documents in a collection with offset pagination
+ *     summary: Find documents in a collection with keyset pagination
  *     parameters:
  *       - in: path
  *         name: collection
@@ -278,11 +278,10 @@ app.get('/db/:collection', async (req, res) => {
  *           minimum: 1
  *         description: Maximum number of documents to return
  *       - in: query
- *         name: offset
+ *         name: after
  *         schema:
- *           type: integer
- *           minimum: 0
- *         description: Number of documents to skip before returning results
+ *           type: string
+ *         description: Cursor id; returns documents strictly after this id (keyset pagination)
  *     responses:
  *       200:
  *         description: Paged documents with metadata
@@ -292,37 +291,29 @@ app.get('/db/:collection/paged', async (req, res) => {
     const collectionName = req.params.collection;
     const collection = await db.getCollection(collectionName);
     const rawLimit = req.query['limit'];
-    const rawOffset = req.query['offset'];
+    const rawAfter = req.query['after'];
 
     const limit = typeof rawLimit === 'string' && rawLimit.length > 0 ? Number.parseInt(rawLimit, 10) : undefined;
-    const offset = typeof rawOffset === 'string' && rawOffset.length > 0 ? Number.parseInt(rawOffset, 10) : undefined;
+    const after = typeof rawAfter === 'string' && rawAfter.length > 0 ? rawAfter : undefined;
 
     if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
       res.status(400).json({ error: 'Invalid limit. Expected integer >= 1.' });
       return;
     }
 
-    if (offset !== undefined && (!Number.isInteger(offset) || offset < 0)) {
-      res.status(400).json({ error: 'Invalid offset. Expected integer >= 0.' });
-      return;
-    }
-
     const resolvedLimit = limit ?? 25;
-    const resolvedOffset = offset ?? 0;
-
-    const docs = await collection.findPaged(resolvedLimit, resolvedOffset);
-    const totalCount = await collection.countDocuments();
-
-    const nextOffset = resolvedOffset + docs.length;
-    const hasNextPage = nextOffset < totalCount;
+    const pagePlusOne = await collection.findPagedAfter(resolvedLimit + 1, after);
+    const hasNextPage = pagePlusOne.length > resolvedLimit;
+    const docs = hasNextPage ? pagePlusOne.slice(0, resolvedLimit) : pagePlusOne;
+    const nextCursor = hasNextPage ? (docs[docs.length - 1]?.id ?? null) : null;
 
     res.json({
       items: docs,
-      totalCount,
       limit: resolvedLimit,
-      offset: resolvedOffset,
+      after: after ?? null,
+      mode: 'keyset',
       hasNextPage,
-      nextOffset: hasNextPage ? nextOffset : null,
+      nextCursor,
     });
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });

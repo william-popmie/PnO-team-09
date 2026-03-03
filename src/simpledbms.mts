@@ -544,6 +544,51 @@ export class Collection {
   }
 
   /**
+   * Finds documents in the collection using offset pagination.
+   * @param {number} limit Maximum number of documents to return.
+   * @param {number} [offset=0] Number of documents to skip.
+   * @returns {Promise<Document[]>} A page of documents.
+   */
+  async findPaged(limit: number, offset: number = 0): Promise<Document[]> {
+    const safeLimit = Math.max(1, Math.floor(limit));
+    const safeOffset = Math.max(0, Math.floor(offset));
+
+    const results: Document[] = [];
+    let index = 0;
+
+    for await (const { value } of this.primaryTree.entries()) {
+      if (index < safeOffset) {
+        index++;
+        continue;
+      }
+
+      results.push(value);
+      if (results.length >= safeLimit) {
+        break;
+      }
+
+      index++;
+    }
+
+    return results;
+  }
+
+  /**
+   * Counts the total number of documents in the collection.
+   * @returns {Promise<number>} The total document count.
+   */
+  async countDocuments(): Promise<number> {
+    let count = 0;
+    const iterator = this.primaryTree.entries();
+
+    while (!(await iterator.next()).done) {
+      count++;
+    }
+
+    return count;
+  }
+
+  /**
    * Performs aggregation on the collection.
    * Uses secondary indexes when available for efficient grouping (O(log n + k)).
    * @param {object} options The aggregation options.

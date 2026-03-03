@@ -245,11 +245,6 @@ app.post('/db/:collection', async (req, res) => {
  *         required: true
  *         schema:
  *           type: string
- *       - in: query
- *         name: filter
- *         schema:
- *           type: string
- *         description: JSON string for filter (not fully implemented in query parser yet)
  *     responses:
  *       200:
  *         description: List of documents
@@ -260,6 +255,75 @@ app.get('/db/:collection', async (req, res) => {
     const collection = await db.getCollection(collectionName);
     const docs = await collection.find();
     res.json(docs);
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * @swagger
+ * /db/{collection}/paged:
+ *   get:
+ *     summary: Find documents in a collection with offset pagination
+ *     parameters:
+ *       - in: path
+ *         name: collection
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *         description: Maximum number of documents to return
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           minimum: 0
+ *         description: Number of documents to skip before returning results
+ *     responses:
+ *       200:
+ *         description: Paged documents with metadata
+ */
+app.get('/db/:collection/paged', async (req, res) => {
+  try {
+    const collectionName = req.params.collection;
+    const collection = await db.getCollection(collectionName);
+    const rawLimit = req.query['limit'];
+    const rawOffset = req.query['offset'];
+
+    const limit = typeof rawLimit === 'string' && rawLimit.length > 0 ? Number.parseInt(rawLimit, 10) : undefined;
+    const offset = typeof rawOffset === 'string' && rawOffset.length > 0 ? Number.parseInt(rawOffset, 10) : undefined;
+
+    if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+      res.status(400).json({ error: 'Invalid limit. Expected integer >= 1.' });
+      return;
+    }
+
+    if (offset !== undefined && (!Number.isInteger(offset) || offset < 0)) {
+      res.status(400).json({ error: 'Invalid offset. Expected integer >= 0.' });
+      return;
+    }
+
+    const resolvedLimit = limit ?? 25;
+    const resolvedOffset = offset ?? 0;
+
+    const docs = await collection.findPaged(resolvedLimit, resolvedOffset);
+    const totalCount = await collection.countDocuments();
+
+    const nextOffset = resolvedOffset + docs.length;
+    const hasNextPage = nextOffset < totalCount;
+
+    res.json({
+      items: docs,
+      totalCount,
+      limit: resolvedLimit,
+      offset: resolvedOffset,
+      hasNextPage,
+      nextOffset: hasNextPage ? nextOffset : null,
+    });
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
   }

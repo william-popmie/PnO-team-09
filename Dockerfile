@@ -1,3 +1,6 @@
+# @author Maarten Haine
+# @date 2026-03-03
+
 # Use Node.js based on Alpine Linux for a smaller image
 FROM node:22-alpine
 

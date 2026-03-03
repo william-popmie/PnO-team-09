@@ -1,3 +1,6 @@
+# @author Maarten Haine
+# @date 2026-03-03
+
 .PHONY: all build dev test clean up down logs restart
 
 # Default target

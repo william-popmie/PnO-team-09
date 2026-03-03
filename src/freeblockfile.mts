@@ -32,6 +32,13 @@
 // =============================================================
 
 import { type File } from './file/file.mjs';
+import {
+  CompressionService,
+  type CompressionResult,
+  COMPRESSION_ALGORITHM_ZSTD_ID,
+  COMPRESSION_ENVELOPE_HEADER_SIZE,
+  FREEBLOCK_COMPRESSED_PAYLOAD_MAGIC,
+} from './compression/compression.mjs';
 
 /**
  * Test interface for atomic file operations used by FreeBlockFile.
@@ -101,6 +108,7 @@ export class FreeBlockFile {
   private cachedHeaderBuf: Buffer = Buffer.alloc(0);
 
   private opened = false;
+  private readonly compressionService = new CompressionService({ algorithm: 'zstd' });
 
   private ensureOpened(): void {
     if (!this.opened) throw new Error('FreeBlockFile is not open');
@@ -259,9 +267,10 @@ export class FreeBlockFile {
    */
   async allocateAndWrite(data: Buffer): Promise<number> {
     this.ensureOpened();
+    const payload = this.encodePayload(data);
     const lengthPrefix = Buffer.alloc(LENGTH_PREFIX_SIZE);
-    lengthPrefix.writeBigUInt64LE(BigInt(data.length), 0);
-    const full = Buffer.concat([lengthPrefix, data]);
+    lengthPrefix.writeBigUInt64LE(BigInt(payload.length), 0);
+    const full = Buffer.concat([lengthPrefix, payload]);
     const needed = Math.ceil(full.length / this.payloadSize) || 1;
 
     const blocksOrNumber = await this.allocateBlocks(needed);
@@ -296,9 +305,10 @@ export class FreeBlockFile {
       throw new Error('Cannot overwrite NO_BLOCK');
     }
 
+    const payload = this.encodePayload(data);
     const lengthPrefix = Buffer.alloc(LENGTH_PREFIX_SIZE);
-    lengthPrefix.writeBigUInt64LE(BigInt(data.length), 0);
-    const full = Buffer.concat([lengthPrefix, data]);
+    lengthPrefix.writeBigUInt64LE(BigInt(payload.length), 0);
+    const full = Buffer.concat([lengthPrefix, payload]);
     const needed = Math.ceil(full.length / this.payloadSize) || 1;
 
     // Collect existing blocks in the chain
@@ -371,8 +381,78 @@ export class FreeBlockFile {
     const full = Buffer.concat(parts);
     if (full.length < LENGTH_PREFIX_SIZE) return Buffer.alloc(0);
     const len = Number(full.readBigUInt64LE(0));
-    const data = full.slice(LENGTH_PREFIX_SIZE, LENGTH_PREFIX_SIZE + len);
-    return Buffer.from(data);
+    const payload = full.slice(LENGTH_PREFIX_SIZE, LENGTH_PREFIX_SIZE + len);
+    return this.decodePayload(payload);
+  }
+
+  private encodePayload(data: Buffer): Buffer {
+    const compressed = this.compressionService.compress(data);
+    if (compressed.compressedSize >= compressed.originalSize) {
+      return Buffer.from(data);
+    }
+
+    return this.serializeCompressedPayload(compressed);
+  }
+
+  private decodePayload(payload: Buffer): Buffer {
+    const decoded = this.tryDeserializeCompressedPayload(payload);
+    if (decoded === null) {
+      return Buffer.from(payload);
+    }
+
+    try {
+      return this.compressionService.decompress(decoded);
+    } catch {
+      return Buffer.from(payload);
+    }
+  }
+
+  private serializeCompressedPayload(result: CompressionResult): Buffer {
+    const envelopeHeaderSize = COMPRESSION_ENVELOPE_HEADER_SIZE as number;
+    const algorithmId = COMPRESSION_ALGORITHM_ZSTD_ID as number;
+    const envelopeMagic = FREEBLOCK_COMPRESSED_PAYLOAD_MAGIC as Buffer;
+
+    const meta = Buffer.alloc(envelopeHeaderSize);
+    envelopeMagic.copy(meta, 0);
+    meta.writeUInt8(algorithmId, 4);
+    meta.writeUInt32LE(result.originalSize >>> 0, 5);
+    meta.writeUInt32LE(result.compressedSize >>> 0, 9);
+    return Buffer.concat([meta, result.payload]);
+  }
+
+  private tryDeserializeCompressedPayload(payload: Buffer): CompressionResult | null {
+    const envelopeHeaderSize = COMPRESSION_ENVELOPE_HEADER_SIZE as number;
+    const algorithmId = COMPRESSION_ALGORITHM_ZSTD_ID as number;
+    const envelopeMagic = FREEBLOCK_COMPRESSED_PAYLOAD_MAGIC as Buffer;
+
+    if (payload.length < envelopeHeaderSize) {
+      return null;
+    }
+
+    const magic = payload.subarray(0, 4);
+    if (!magic.equals(envelopeMagic)) {
+      return null;
+    }
+
+    const payloadAlgorithmId = payload.readUInt8(4);
+    if (payloadAlgorithmId !== algorithmId) {
+      return null;
+    }
+
+    const originalSize = payload.readUInt32LE(5);
+    const compressedSize = payload.readUInt32LE(9);
+    if (payload.length < envelopeHeaderSize + compressedSize) {
+      return null;
+    }
+
+    const compressedPayload = payload.subarray(envelopeHeaderSize, envelopeHeaderSize + compressedSize);
+
+    return {
+      algorithm: 'zstd',
+      originalSize,
+      compressedSize,
+      payload: Buffer.from(compressedPayload),
+    };
   }
 
   private async readRawBlock(blockId: number): Promise<Buffer> {

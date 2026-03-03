@@ -10,7 +10,11 @@ import type {
   ChildCursor,
 } from './node-storage.mjs';
 import { FreeBlockFile, NO_BLOCK } from '../freeblockfile.mjs';
-import { CompressionService } from '../compression/compression.mjs';
+import {
+  CompressionService,
+  COMPRESSION_ENVELOPE_HEADER_SIZE,
+  NODE_STORAGE_COMPRESSED_PAYLOAD_MAGIC,
+} from '../compression/compression.mjs';
 
 type SerializedKey =
   | { type: 'string'; value: string }
@@ -108,7 +112,6 @@ function upperBound<Keystype>(
 export class FBNodeStorage<Keystype, ValuesType>
   implements NodeStorage<Keystype, ValuesType, FBLeafNode<Keystype, ValuesType>, FBInternalNode<Keystype, ValuesType>>
 {
-  private static readonly COMPRESSED_NODE_MAGIC = Buffer.from('ZST1');
   private cache = new Map<number, FBLeafNode<Keystype, ValuesType> | FBInternalNode<Keystype, ValuesType>>();
   private reclaimQueue = new Set<number>();
   private readonly compressionService = new CompressionService({ algorithm: 'zstd' });
@@ -128,8 +131,8 @@ export class FBNodeStorage<Keystype, ValuesType>
     const jsonBuffer = Buffer.from(JSON.stringify(payload), 'utf-8');
     const compressed = this.compressionService.compress(jsonBuffer);
 
-    const header = Buffer.alloc(12);
-    FBNodeStorage.COMPRESSED_NODE_MAGIC.copy(header, 0);
+    const header = Buffer.alloc(COMPRESSION_ENVELOPE_HEADER_SIZE as number);
+    (NODE_STORAGE_COMPRESSED_PAYLOAD_MAGIC as Buffer).copy(header, 0);
     header.writeUInt32LE(compressed.originalSize, 4);
     header.writeUInt32LE(compressed.compressedSize, 8);
 
@@ -137,17 +140,20 @@ export class FBNodeStorage<Keystype, ValuesType>
   }
 
   private decodeNodePayload(buffer: Buffer): Buffer {
-    if (buffer.length < 12) {
+    if (buffer.length < COMPRESSION_ENVELOPE_HEADER_SIZE) {
       return buffer;
     }
 
-    if (!buffer.subarray(0, 4).equals(FBNodeStorage.COMPRESSED_NODE_MAGIC)) {
+    const envelopeHeaderSize = COMPRESSION_ENVELOPE_HEADER_SIZE as number;
+    const envelopeMagic = NODE_STORAGE_COMPRESSED_PAYLOAD_MAGIC as Buffer;
+
+    if (!buffer.subarray(0, 4).equals(envelopeMagic)) {
       return buffer;
     }
 
     const originalSize = buffer.readUInt32LE(4);
     const compressedSize = buffer.readUInt32LE(8);
-    const start = 12;
+    const start = envelopeHeaderSize;
     const end = start + compressedSize;
 
     if (end > buffer.length) {

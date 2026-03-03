@@ -5,6 +5,11 @@ import { zstdCompressSync, zstdDecompressSync } from 'node:zlib';
 
 export type CompressionAlgorithm = 'zstd';
 
+export const COMPRESSION_ALGORITHM_ZSTD_ID: number = 1;
+export const COMPRESSION_ENVELOPE_HEADER_SIZE: number = 4 + 1 + 4 + 4;
+export const FREEBLOCK_COMPRESSED_PAYLOAD_MAGIC: Buffer = Buffer.from('FBC1', 'ascii');
+export const NODE_STORAGE_COMPRESSED_PAYLOAD_MAGIC: Buffer = Buffer.from('ZST1', 'ascii');
+
 export interface CompressionOptions {
   algorithm: CompressionAlgorithm;
   minSizeBytes?: number;

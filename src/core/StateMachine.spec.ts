@@ -17,6 +17,7 @@ describe('StateMachine.ts, StateMachine', () => {
     let volatileState: {
         getCommitIndex: ReturnType<typeof vi.fn>,
         setCommitIndex: ReturnType<typeof vi.fn>,
+        setLastApplied: ReturnType<typeof vi.fn>,
     };
 
     let logManager: {
@@ -27,7 +28,9 @@ describe('StateMachine.ts, StateMachine', () => {
         appendEntriesFrom: ReturnType<typeof vi.fn>,
         matchesPrevLog: ReturnType<typeof vi.fn>,
         getConflictInfo: ReturnType<typeof vi.fn>,
-        calculateCommitIndex: ReturnType<typeof vi.fn>
+        calculateCommitIndex: ReturnType<typeof vi.fn>,
+        discardEntriesUpTo: ReturnType<typeof vi.fn>,
+        resetToSnapshot: ReturnType<typeof vi.fn>,
     };
 
     let snapshotManager: {
@@ -96,6 +99,7 @@ describe('StateMachine.ts, StateMachine', () => {
         volatileState = {
             getCommitIndex: vi.fn().mockReturnValue(0),
             setCommitIndex: vi.fn(),
+            setLastApplied: vi.fn(),
         };
 
         logManager = {
@@ -107,6 +111,8 @@ describe('StateMachine.ts, StateMachine', () => {
             matchesPrevLog: vi.fn().mockReturnValue(true),
             getConflictInfo: vi.fn().mockReturnValue({ conflictIndex: 1, conflictTerm: 0 }),
             calculateCommitIndex: vi.fn().mockReturnValue(0),
+            discardEntriesUpTo: vi.fn().mockResolvedValue(undefined),
+            resetToSnapshot: vi.fn().mockResolvedValue(undefined),
         };
 
         snapshotManager = {
@@ -834,5 +840,246 @@ describe('StateMachine.ts, StateMachine', () => {
 
         expect(largeMachine.getCurrentState()).not.toBe(RaftState.Leader);
         expect(logger.info).toHaveBeenCalled();
+    });
+
+    it('should call updateTermAndVote when snapshot term exceeds current term', async () => {
+        (rpcHandler as any).sendInstallSnapshot = vi.fn().mockResolvedValue({ term: 5, success: true });
+        logManager.getLastIndex.mockReturnValue(10);
+
+        await stateMachine.handleInstallSnapshot('node2', {
+            term: 5, leaderId: 'node2',
+            lastIncludedIndex: 5, lastIncludedTerm: 1,
+            data: Buffer.from('snap')
+        });
+
+        expect(persistentState.updateTermAndVote).toHaveBeenCalledWith(5, null);
+    });
+
+    it('should call resetToSnapshot when lastIncludedIndex exceeds lastIndex', async () => {
+        persistentState.getCurrentTerm.mockReturnValue(1);
+        logManager.getLastIndex.mockReturnValue(3);
+
+        const resetSpy = vi.fn().mockResolvedValue(undefined);
+        logManager['resetToSnapshot'] = resetSpy;
+
+        await stateMachine.handleInstallSnapshot('node2', {
+            term: 1,
+            leaderId: 'node2',
+            lastIncludedIndex: 10,
+            lastIncludedTerm: 1,
+            data: Buffer.from('snapshot')
+        });
+
+        expect(resetSpy).toHaveBeenCalledWith(10, 1);
+    });
+
+    it('should reject InstallSnapshot with stale term and return current term', async () => {
+        persistentState.getCurrentTerm.mockReturnValue(10);
+
+        const response = await stateMachine.handleInstallSnapshot('node2', {
+            term: 5,
+            leaderId: 'node2',
+            lastIncludedIndex: 3,
+            lastIncludedTerm: 5,
+            data: Buffer.from('snap'),
+        });
+
+        expect(response).toEqual({ term: 10, success: false });
+        expect(persistentState.updateTermAndVote).not.toHaveBeenCalled();
+        expect(snapshotManager.saveSnapshot).not.toHaveBeenCalled();
+    });
+
+    it('should trigger sendSnapshot path when nextIndex <= snapshotIndex', async () => {
+        snapshotManager.getSnapshotMetadata.mockReturnValue({ lastIncludedIndex: 5 });
+
+        const fakeSnapshot = {
+            lastIncludedIndex: 5,
+            lastIncludedTerm: 1,
+            data: Buffer.from('snapshot-data'),
+        };
+        snapshotManager.loadSnapshot.mockResolvedValue(fakeSnapshot);
+
+        (rpcHandler as any).sendInstallSnapshot = vi.fn().mockResolvedValue({
+            term: 1,
+            success: true,
+        });
+
+        await stateMachine.becomeLeader();
+
+        await vi.waitFor(() => {
+            expect((rpcHandler as any).sendInstallSnapshot).toHaveBeenCalled();
+        });
+
+        expect(rpcHandler.sendAppendEntries).not.toHaveBeenCalled();
+    });
+
+    it('should log error and return early from sendSnapshot when no snapshot is available', async () => {
+        snapshotManager.getSnapshotMetadata.mockReturnValue({ lastIncludedIndex: 5 });
+        snapshotManager.loadSnapshot.mockResolvedValue(null);
+
+        (rpcHandler as any).sendInstallSnapshot = vi.fn();
+
+        await stateMachine.becomeLeader();
+
+        await vi.waitFor(() => {
+            expect(logger.error).toHaveBeenCalledWith(
+                expect.stringContaining('has no snapshot to send'),
+            );
+        });
+
+        expect((rpcHandler as any).sendInstallSnapshot).not.toHaveBeenCalled();
+    });
+
+    it('should become follower when InstallSnapshot response has higher term', async () => {
+        snapshotManager.getSnapshotMetadata.mockReturnValue({ lastIncludedIndex: 5 });
+        snapshotManager.loadSnapshot.mockResolvedValue({
+            lastIncludedIndex: 5,
+            lastIncludedTerm: 1,
+            data: Buffer.from('snap'),
+        });
+
+        (rpcHandler as any).sendInstallSnapshot = vi.fn().mockResolvedValue({
+            term: 99,
+            success: false,
+        });
+
+        await stateMachine.becomeLeader();
+
+        await vi.waitFor(() => {
+            expect(stateMachine.getCurrentState()).toBe(RaftState.Follower);
+        });
+    });
+
+    it('should update matchIndex when InstallSnapshot succeeds', async () => {
+        snapshotManager.getSnapshotMetadata.mockReturnValue({ lastIncludedIndex: 5 });
+        snapshotManager.loadSnapshot.mockResolvedValue({
+            lastIncludedIndex: 5,
+            lastIncludedTerm: 1,
+            data: Buffer.from('snap'),
+        });
+
+        (rpcHandler as any).sendInstallSnapshot = vi.fn().mockResolvedValue({
+            term: 1,
+            success: true,
+        });
+
+        await stateMachine.becomeLeader();
+
+        await vi.waitFor(() => {
+            expect(logger.info).toHaveBeenCalledWith(
+                expect.stringContaining('successfully sent snapshot'),
+            );
+        });
+    });
+
+    it('should log debug and return early from sendSnapshot response handler when leaderState is null', async () => {
+        snapshotManager.getSnapshotMetadata.mockReturnValue({ lastIncludedIndex: 5 });
+        snapshotManager.loadSnapshot.mockResolvedValue({
+            lastIncludedIndex: 5,
+            lastIncludedTerm: 1,
+            data: Buffer.from('snap'),
+        });
+
+        (rpcHandler as any).sendInstallSnapshot = vi.fn().mockImplementation(async () => {
+            (stateMachine as any)['leaderState'] = null;
+            return { term: 1, success: true };
+        });
+
+        await stateMachine.becomeLeader();
+
+        await vi.waitFor(() => {
+            expect(logger.debug).toHaveBeenCalledWith(
+                expect.stringContaining('received InstallSnapshotResponse'),
+            );
+        });
+    });
+
+    it('should log Error instance when sendInstallSnapshot RPC throws', async () => {
+        snapshotManager.getSnapshotMetadata.mockReturnValue({ lastIncludedIndex: 5 });
+        snapshotManager.loadSnapshot.mockResolvedValue({
+            lastIncludedIndex: 5,
+            lastIncludedTerm: 1,
+            data: Buffer.from('snap'),
+        });
+
+        (rpcHandler as any).sendInstallSnapshot = vi
+            .fn()
+            .mockRejectedValue(new Error('snapshot RPC failed'));
+
+        await stateMachine.becomeLeader();
+
+        await vi.waitFor(() => {
+            expect(logger.error).toHaveBeenCalledWith(
+                expect.stringContaining('snapshot RPC failed'),
+            );
+        });
+    });
+
+    it('should log plain string error when sendInstallSnapshot RPC throws non-Error', async () => {
+        snapshotManager.getSnapshotMetadata.mockReturnValue({ lastIncludedIndex: 5 });
+        snapshotManager.loadSnapshot.mockResolvedValue({
+            lastIncludedIndex: 5,
+            lastIncludedTerm: 1,
+            data: Buffer.from('snap'),
+        });
+
+        (rpcHandler as any).sendInstallSnapshot = vi
+            .fn()
+            .mockRejectedValue('plain string snapshot error');
+
+        await stateMachine.becomeLeader();
+
+        await vi.waitFor(() => {
+            expect(logger.error).toHaveBeenCalledWith(
+                expect.stringContaining('plain string snapshot error'),
+            );
+        });
+    });
+
+    it("should not decrement nextIndex in catch block when leaderState is null at catch time", async () => {
+        rpcHandler.sendAppendEntries.mockImplementation(async () => {
+            (stateMachine as any)["leaderState"] = null;
+            throw new Error("rpc error");
+        });
+
+        await stateMachine.becomeLeader();
+
+        await vi.waitFor(() => {
+            expect(logger.error).toHaveBeenCalledWith(
+                expect.stringContaining("rpc error"),
+            );
+        });
+
+        const decrementLog = (logger.debug as ReturnType<typeof vi.fn>).mock.calls.some(
+            (args: unknown[]) => typeof args[0] === "string" && args[0].includes("decremented nextIndex"),
+        );
+        expect(decrementLog).toBe(false);
+    });
+
+    it("should do nothing when sendInstallSnapshot response is success:false with non-higher term", async () => {
+        snapshotManager.getSnapshotMetadata.mockReturnValue({ lastIncludedIndex: 5 });
+        snapshotManager.loadSnapshot.mockResolvedValue({
+            lastIncludedIndex: 5,
+            lastIncludedTerm: 1,
+            data: Buffer.from("snap"),
+        });
+
+        (rpcHandler as any).sendInstallSnapshot = vi.fn().mockResolvedValue({
+            term: 1,
+            success: false,
+        });
+
+        await stateMachine.becomeLeader();
+
+        await vi.waitFor(() => {
+            expect((rpcHandler as any).sendInstallSnapshot).toHaveBeenCalled();
+        });
+
+        expect(stateMachine.getCurrentState()).toBe(RaftState.Leader);
+
+        const successLog = (logger.info as ReturnType<typeof vi.fn>).mock.calls.some(
+            (args: unknown[]) => typeof args[0] === "string" && args[0].includes("successfully sent snapshot"),
+        );
+        expect(successLog).toBe(false);
     });
 });

@@ -2,7 +2,7 @@
 // @date 2025-12-03
 
 import { describe, it, expect } from 'vitest';
-import { PasswordHasher } from '../password-hashing.mjs';
+import { PasswordHasher } from './password-hashing.mjs';
 
 describe('PasswordHasher', () => {
   const password = 'MyDirtyLittleSecret123!';

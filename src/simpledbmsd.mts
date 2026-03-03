@@ -7,7 +7,7 @@ import express from 'express';
 import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
 import cors from 'cors';
-import { EncryptionService } from './encryption-service.mjs';
+import { EncryptionService } from './encryption/encryption-service.mjs';
 import { SimpleDBMS, type DocumentValue } from './simpledbms.mjs';
 import { RealFile } from './file/file.mjs';
 import { rename } from 'node:fs/promises';
@@ -21,7 +21,7 @@ import {
   validateAndRefreshToken,
   type AuthenticatedRequest,
 } from './authentication.mjs';
-import { PasswordHasher } from './password-hashing.mjs';
+import { PasswordHasher } from './encryption/password-hashing.mjs';
 import { readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 

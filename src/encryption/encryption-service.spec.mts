@@ -1,7 +1,7 @@
 // author @woutvanhemelrijck
 // date: 27/11/2025
 import { describe, it, expect } from 'vitest';
-import { EncryptionService } from './encryption-service.mjs';
+import { EncryptionService } from './encryption/encryption-service.mjs';
 
 describe('EncryptionService', () => {
   // Gebruik een geldige master key voor alle "happy path" tests

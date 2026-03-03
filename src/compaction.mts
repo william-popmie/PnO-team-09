@@ -1,20 +1,36 @@
 // @author Wout Van Hemelrijck
 // @date 2026-02-24
 //
-// Database compaction module.
-// Implements a streaming rebuild compaction strategy (similar to SQLite's VACUUM):
-// 1. Create a new database on temporary files
-// 2. Stream documents one-by-one from old DB → new DB (O(1) memory)
-// 3. Recreate secondary indexes
-// 4. Swap temp files into the original location
+// Database compaction & defragmentation module.
 //
-// This reduces the physical file size by eliminating accumulated empty space
-// from deleted or updated records. The streaming approach keeps memory usage
-// constant regardless of database size, making it suitable for TB-scale databases.
+// Two strategies for reclaiming wasted space:
+//
+// 1. compactDatabase — Streaming rebuild (similar to SQLite's VACUUM)
+//    Creates a new database on temporary files, streams documents one-by-one
+//    from old DB → new DB (O(1) memory), recreates secondary indexes, then
+//    swaps temp files into the original location. Requires 2× disk space.
+//
+// 2. defragDatabase — In-place block defragmentation
+//    Moves live blocks into free slots at the raw block level, then truncates
+//    the file. Requires zero extra disk space. Works in 4 phases:
+//    a) Build block map (walk free list + all B+ trees)
+//    b) Build relocation table (pair highest live blocks with lowest free slots)
+//    c) Execute relocations (rewrite block ID references, stage, commit atomically)
+//    d) Truncate file
+//    The database must be closed and reopened after defrag.
 
 import { SimpleDBMS } from './simpledbms.mjs';
 import { FBNodeStorage } from './node-storage/fb-node-storage.mjs';
 import { type File } from './file/file.mjs';
+import {
+  FreeBlockFile,
+  NO_BLOCK,
+  NEXT_POINTER_SIZE,
+  LENGTH_PREFIX_SIZE,
+  FREE_LIST_HEAD_OFFSET,
+  HEADER_LENGTH_OFFSET,
+  HEADER_CLIENT_AREA_OFFSET,
+} from './freeblockfile.mjs';
 
 /**
  * Result returned after a compaction operation.
@@ -196,5 +212,369 @@ export async function compactDatabase(
       sizeBefore,
       sizeAfter,
     },
+  };
+}
+
+/**
+ * Result returned after a defragmentation operation.
+ */
+export interface DefragResult {
+  success: boolean;
+  blocksTotal: number;
+  blocksFree: number;
+  blocksMoved: number;
+  sizeBefore: number;
+  sizeAfter: number;
+}
+
+/** Tree kind used to distinguish which leaf values contain block IDs. */
+const enum TreeKind {
+  CATALOG,
+  COLLECTION,
+  INDEX,
+}
+
+/** Metadata for one blob (one B+ tree node). */
+interface BlobInfo {
+  startBlockId: number;
+  chain: number[];
+  treeKind: TreeKind;
+}
+
+/**
+ * Defragments a database file in-place by moving live blocks into free slots
+ * and truncating the file. Requires zero extra disk space.
+ *
+ * The database must be closed and reopened after this function returns,
+ * because in-memory caches hold stale block IDs.
+ *
+ * @param {FreeBlockFile} fbf - The open FreeBlockFile to defragment.
+ * @returns {Promise<DefragResult>} Statistics about the defragmentation.
+ */
+export async function defragDatabase(fbf: FreeBlockFile): Promise<DefragResult> {
+  const blockSize = fbf.blockSize;
+  const payloadSize = fbf.payloadSize;
+  const totalBlocks = await fbf.getTotalBlockCount();
+  const file = fbf.getFile();
+  const sizeBefore = (await file.stat()).size;
+
+  // Trivial case: empty or header-only file
+  if (totalBlocks <= 1) {
+    return {
+      success: true,
+      blocksTotal: totalBlocks,
+      blocksFree: 0,
+      blocksMoved: 0,
+      sizeBefore,
+      sizeAfter: sizeBefore,
+    };
+  }
+
+  // ── Phase 1: Build Block Map ──────────────────────────────────────────
+
+  // Track which blocks are free vs live
+  const blockStatus = new Array<'FREE' | 'LIVE' | undefined>(totalBlocks);
+  const freeBlockIds = new Set<number>();
+  const blobInfos: BlobInfo[] = [];
+
+  // 1a: Walk the free list
+  let freeHead = await fbf.debug_getFreeListHead();
+  while (freeHead !== NO_BLOCK && freeHead < totalBlocks) {
+    freeBlockIds.add(freeHead);
+    blockStatus[freeHead] = 'FREE';
+    const block = await fbf.readRawBlock(freeHead);
+    freeHead = block.readUInt32LE(0);
+  }
+
+  // 1b: Parse header JSON from block 0
+  const headerBuf = await fbf.readHeader();
+  if (headerBuf.length === 0) {
+    return {
+      success: true,
+      blocksTotal: totalBlocks,
+      blocksFree: freeBlockIds.size,
+      blocksMoved: 0,
+      sizeBefore,
+      sizeAfter: sizeBefore,
+    };
+  }
+
+  const header = JSON.parse(headerBuf.toString()) as {
+    catalogRootBlockId: number;
+    collections: {
+      [name: string]: {
+        rootBlockId: number;
+        indexes: { [field: string]: number };
+      };
+    };
+  };
+
+  // Helper: follow a blob's block chain via nextPtr
+  async function readBlobChain(startBlockId: number): Promise<number[]> {
+    const chain: number[] = [startBlockId];
+    let cur = startBlockId;
+    for (;;) {
+      const block = await fbf.readRawBlock(cur);
+      const next = block.readUInt32LE(0);
+      if (next === NO_BLOCK) break;
+      chain.push(next);
+      cur = next;
+    }
+    return chain;
+  }
+
+  // Helper: read blob payload from a chain (strips length prefix)
+  function readBlobDataFromParts(parts: Buffer[]): Buffer {
+    const full = Buffer.concat(parts);
+    if (full.length < LENGTH_PREFIX_SIZE) return Buffer.alloc(0);
+    const len = Number(full.readBigUInt64LE(0));
+    return Buffer.from(full.slice(LENGTH_PREFIX_SIZE, LENGTH_PREFIX_SIZE + len));
+  }
+
+  // 1c: Recursively walk all B+ trees
+  async function walkTree(rootBlockId: number, treeKind: TreeKind): Promise<void> {
+    if (rootBlockId === NO_BLOCK || rootBlockId >= totalBlocks) return;
+    if (blockStatus[rootBlockId] === 'LIVE') return; // already visited
+
+    const chain = await readBlobChain(rootBlockId);
+    for (const blockId of chain) {
+      blockStatus[blockId] = 'LIVE';
+    }
+    blobInfos.push({ startBlockId: rootBlockId, chain, treeKind });
+
+    // Read and parse the node JSON
+    const parts: Buffer[] = [];
+    for (const blockId of chain) {
+      const block = await fbf.readRawBlock(blockId);
+      parts.push(Buffer.from(block.slice(NEXT_POINTER_SIZE)));
+    }
+    const data = readBlobDataFromParts(parts);
+    if (data.length === 0) return;
+
+    const node = JSON.parse(data.toString('utf-8')) as {
+      type: string;
+      childBlockIds?: number[];
+      values?: Array<{ t?: string; value?: unknown }>;
+      nextBlockId?: number;
+      prevBlockId?: number;
+    };
+
+    if (node.type === 'internal' && Array.isArray(node.childBlockIds)) {
+      for (const childId of node.childBlockIds) {
+        if (typeof childId === 'number' && childId !== NO_BLOCK) {
+          await walkTree(childId, treeKind);
+        }
+      }
+    } else if (node.type === 'leaf' && treeKind === TreeKind.CATALOG) {
+      // Catalog leaf values are collection root block IDs
+      if (Array.isArray(node.values)) {
+        for (const val of node.values) {
+          const blockId =
+            val && typeof val === 'object' && val.t === 'number' && typeof val.value === 'number'
+              ? val.value
+              : undefined;
+          if (typeof blockId === 'number' && blockId !== NO_BLOCK) {
+            await walkTree(blockId, TreeKind.COLLECTION);
+          }
+        }
+      }
+    }
+  }
+
+  // Walk catalog tree
+  await walkTree(header.catalogRootBlockId, TreeKind.CATALOG);
+
+  // Walk index trees (referenced from header, not from catalog tree)
+  for (const collMeta of Object.values(header.collections)) {
+    for (const indexRootBlockId of Object.values(collMeta.indexes)) {
+      if (typeof indexRootBlockId === 'number' && indexRootBlockId !== NO_BLOCK) {
+        await walkTree(indexRootBlockId, TreeKind.INDEX);
+      }
+    }
+  }
+
+  // Any unvisited block is an orphan → treat as free
+  for (let i = 1; i < totalBlocks; i++) {
+    if (blockStatus[i] === undefined) {
+      freeBlockIds.add(i);
+      blockStatus[i] = 'FREE';
+    }
+  }
+
+  const blocksFree = freeBlockIds.size;
+  if (blocksFree === 0) {
+    return {
+      success: true,
+      blocksTotal: totalBlocks,
+      blocksFree: 0,
+      blocksMoved: 0,
+      sizeBefore,
+      sizeAfter: sizeBefore,
+    };
+  }
+
+  // ── Phase 2: Build Relocation Table ───────────────────────────────────
+
+  const freeSorted = [...freeBlockIds].sort((a, b) => a - b);
+  const liveSorted: number[] = [];
+  for (let i = totalBlocks - 1; i >= 1; i--) {
+    if (blockStatus[i] === 'LIVE') liveSorted.push(i);
+  }
+
+  const relocationMap = new Map<number, number>();
+  let fi = 0;
+  let li = 0;
+  while (fi < freeSorted.length && li < liveSorted.length) {
+    const freeSlot = freeSorted[fi];
+    const liveBlock = liveSorted[li];
+    if (liveBlock > freeSlot) {
+      relocationMap.set(liveBlock, freeSlot);
+      fi++;
+      li++;
+    } else {
+      break;
+    }
+  }
+
+  const relocated = (blockId: number): number => relocationMap.get(blockId) ?? blockId;
+
+  // ── Phase 3: Execute Relocations ──────────────────────────────────────
+
+  for (const blobInfo of blobInfos) {
+    const { chain, treeKind } = blobInfo;
+
+    // Read raw blocks for this blob
+    const rawBlocks: Buffer[] = [];
+    const payloadParts: Buffer[] = [];
+    for (const blockId of chain) {
+      const block = await fbf.readRawBlock(blockId);
+      rawBlocks.push(block);
+      payloadParts.push(Buffer.from(block.slice(NEXT_POINTER_SIZE)));
+    }
+    const data = readBlobDataFromParts(payloadParts);
+    if (data.length === 0) continue;
+
+    // Parse node JSON and apply relocations to block ID references
+    const node = JSON.parse(data.toString('utf-8')) as Record<string, unknown>;
+    let jsonChanged = false;
+
+    if (node['type'] === 'internal') {
+      const childBlockIds = node['childBlockIds'] as number[];
+      if (Array.isArray(childBlockIds)) {
+        for (let i = 0; i < childBlockIds.length; i++) {
+          const newId = relocated(childBlockIds[i]);
+          if (newId !== childBlockIds[i]) {
+            childBlockIds[i] = newId;
+            jsonChanged = true;
+          }
+        }
+      }
+    } else if (node['type'] === 'leaf') {
+      // Update sibling pointers
+      const nextId = node['nextBlockId'] as number | undefined;
+      if (typeof nextId === 'number' && nextId !== NO_BLOCK) {
+        const newId = relocated(nextId);
+        if (newId !== nextId) {
+          node['nextBlockId'] = newId;
+          jsonChanged = true;
+        }
+      }
+      const prevId = node['prevBlockId'] as number | undefined;
+      if (typeof prevId === 'number' && prevId !== NO_BLOCK) {
+        const newId = relocated(prevId);
+        if (newId !== prevId) {
+          node['prevBlockId'] = newId;
+          jsonChanged = true;
+        }
+      }
+
+      // Catalog leaf values contain collection root block IDs
+      if (treeKind === TreeKind.CATALOG) {
+        const values = node['values'] as Array<{ t?: string; value?: unknown }>;
+        if (Array.isArray(values)) {
+          for (let i = 0; i < values.length; i++) {
+            const val = values[i];
+            if (val && typeof val === 'object' && val.t === 'number' && typeof val.value === 'number') {
+              const newId = relocated(val.value);
+              if (newId !== val.value) {
+                values[i] = { t: 'number', value: newId };
+                jsonChanged = true;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Check if any block in chain was relocated
+    const chainMoved = chain.some((id) => relocationMap.has(id));
+
+    if (!jsonChanged && !chainMoved) continue;
+
+    if (jsonChanged) {
+      // Re-serialize JSON and write all blocks to (potentially new) positions
+      const newData = Buffer.from(JSON.stringify(node), 'utf-8');
+      const lengthPrefix = Buffer.alloc(LENGTH_PREFIX_SIZE);
+      lengthPrefix.writeBigUInt64LE(BigInt(newData.length), 0);
+      const newFull = Buffer.concat([lengthPrefix, newData]);
+
+      for (let i = 0; i < chain.length; i++) {
+        const newBlockId = relocated(chain[i]);
+        const nextNewBlockId = i + 1 < chain.length ? relocated(chain[i + 1]) : NO_BLOCK;
+
+        const out = Buffer.alloc(blockSize, 0);
+        out.writeUInt32LE(nextNewBlockId >>> 0, 0);
+        const start = i * payloadSize;
+        const end = Math.min(start + payloadSize, newFull.length);
+        if (start < newFull.length) {
+          newFull.copy(out, NEXT_POINTER_SIZE, start, end);
+        }
+        await fbf.stageRawBlock(newBlockId, out);
+      }
+    } else {
+      // JSON unchanged, only chain positions moved — copy raw blocks with updated nextPtr
+      for (let i = 0; i < chain.length; i++) {
+        const newBlockId = relocated(chain[i]);
+        const nextNewBlockId = i + 1 < chain.length ? relocated(chain[i + 1]) : NO_BLOCK;
+
+        const block = Buffer.from(rawBlocks[i]);
+        block.writeUInt32LE(nextNewBlockId >>> 0, 0);
+        await fbf.stageRawBlock(newBlockId, block);
+      }
+    }
+  }
+
+  // Update block 0 (header)
+  header.catalogRootBlockId = relocated(header.catalogRootBlockId);
+  for (const collMeta of Object.values(header.collections)) {
+    collMeta.rootBlockId = relocated(collMeta.rootBlockId);
+    for (const [field, indexBlockId] of Object.entries(collMeta.indexes)) {
+      collMeta.indexes[field] = relocated(indexBlockId);
+    }
+  }
+
+  const headerJson = Buffer.from(JSON.stringify(header));
+  const headerBlock = Buffer.alloc(blockSize, 0);
+  headerBlock.writeUInt32LE(NO_BLOCK >>> 0, FREE_LIST_HEAD_OFFSET); // no free blocks remain
+  headerBlock.writeUInt32LE(headerJson.length >>> 0, HEADER_LENGTH_OFFSET);
+  headerJson.copy(headerBlock, HEADER_CLIENT_AREA_OFFSET);
+  await fbf.stageRawBlock(0, headerBlock);
+
+  // Atomic commit — flushes all staged writes
+  await fbf.commit();
+
+  // ── Phase 4: Truncate ─────────────────────────────────────────────────
+
+  const liveBlockCount = totalBlocks - blocksFree;
+  const newFileSize = liveBlockCount * blockSize;
+  await file.truncate(newFileSize);
+
+  return {
+    success: true,
+    blocksTotal: totalBlocks,
+    blocksFree,
+    blocksMoved: relocationMap.size,
+    sizeBefore,
+    sizeAfter: newFileSize,
   };
 }

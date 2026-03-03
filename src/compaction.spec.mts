@@ -4,9 +4,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { SimpleDBMS } from './simpledbms.mjs';
 import { MockFile } from './file/mockfile.mjs';
-import { compactDatabase } from './compaction.mjs';
+import { compactDatabase, defragDatabase } from './compaction.mjs';
+import { FBNodeStorage } from './node-storage/fb-node-storage.mjs';
 
-describe('Database Compaction', () => {
+describe('Database Compaction & Defragmentation', () => {
   let dbFile: MockFile;
   let walFile: MockFile;
 
@@ -318,6 +319,227 @@ describe('Database Compaction', () => {
       expect(names).toContain('users');
       expect(names).toContain('posts');
       expect(names).toContain('comments');
+
+      await db.close();
+    });
+  });
+
+  describe('defragDatabase', () => {
+    it('should be a no-op on an empty database', async () => {
+      const db = await SimpleDBMS.create(dbFile, walFile);
+      const fbf = db.getFreeBlockFile();
+
+      const result = await defragDatabase(fbf);
+
+      expect(result.success).toBe(true);
+      expect(result.blocksMoved).toBe(0);
+
+      await db.close();
+    });
+
+    it('should handle a database with no deletions', async () => {
+      let db = await SimpleDBMS.create(dbFile, walFile);
+      const users = await db.getCollection('users');
+      await users.insert({ id: 'u1', name: 'Alice' });
+
+      const fbf = db.getFreeBlockFile();
+      const result = await defragDatabase(fbf);
+
+      expect(result.success).toBe(true);
+
+      // Close and reopen to verify integrity
+      await db.close();
+      db = await SimpleDBMS.open(dbFile, walFile);
+      const newUsers = await db.getCollection('users');
+      const alice = await newUsers.findById('u1');
+      expect(alice).toBeDefined();
+      expect(alice!['name']).toBe('Alice');
+
+      await db.close();
+    });
+
+    it('should shrink the file after deletions and preserve remaining data', async () => {
+      let db = await SimpleDBMS.create(dbFile, walFile);
+      const users = await db.getCollection('users');
+
+      for (let i = 0; i < 30; i++) {
+        await users.insert({ id: `user-${i}`, name: `User ${i}`, data: 'x'.repeat(50) });
+      }
+
+      // Delete most documents to create free space
+      for (let i = 10; i < 30; i++) {
+        await users.delete(`user-${i}`);
+      }
+
+      const sizeBefore = (await dbFile.stat()).size;
+      const fbf = db.getFreeBlockFile();
+
+      const result = await defragDatabase(fbf);
+
+      expect(result.success).toBe(true);
+      expect(result.sizeAfter).toBeLessThan(sizeBefore);
+      expect(result.blocksFree).toBeGreaterThan(0);
+
+      // Close and reopen to verify data integrity
+      await db.close();
+      db = await SimpleDBMS.open(dbFile, walFile);
+
+      const newUsers = await db.getCollection('users');
+      const remaining = await newUsers.find();
+      expect(remaining).toHaveLength(10);
+
+      for (let i = 0; i < 10; i++) {
+        const user = await newUsers.findById(`user-${i}`);
+        expect(user).toBeDefined();
+        expect(user!['name']).toBe(`User ${i}`);
+      }
+
+      await db.close();
+    });
+
+    it('should preserve multiple collections after defrag', async () => {
+      let db = await SimpleDBMS.create(dbFile, walFile);
+
+      const users = await db.getCollection('users');
+      await users.insert({ id: 'u1', name: 'Alice' });
+      await users.insert({ id: 'u2', name: 'Bob' });
+
+      const posts = await db.getCollection('posts');
+      await posts.insert({ id: 'p1', title: 'Hello' });
+      await posts.insert({ id: 'p2', title: 'World' });
+
+      // Delete some to create fragmentation
+      await users.delete('u2');
+      await posts.delete('p2');
+
+      const fbf = db.getFreeBlockFile();
+      const result = await defragDatabase(fbf);
+      expect(result.success).toBe(true);
+
+      // Close and reopen
+      await db.close();
+      db = await SimpleDBMS.open(dbFile, walFile);
+
+      const newUsers = await db.getCollection('users');
+      const newPosts = await db.getCollection('posts');
+
+      expect(await newUsers.findById('u1')).toBeDefined();
+      expect((await newUsers.findById('u1'))!['name']).toBe('Alice');
+      expect(await newPosts.findById('p1')).toBeDefined();
+      expect((await newPosts.findById('p1'))!['title']).toBe('Hello');
+
+      await db.close();
+    });
+
+    it('should preserve secondary indexes after defrag', async () => {
+      let db = await SimpleDBMS.create(dbFile, walFile);
+      const users = await db.getCollection('users');
+
+      for (let i = 0; i < 10; i++) {
+        await users.insert({ id: `user-${i}`, name: `User ${i}`, age: 20 + i });
+      }
+
+      // Create a secondary index
+      const indexStorage = new FBNodeStorage<string, string>(
+        (a, b) => (a < b ? -1 : a > b ? 1 : 0),
+        () => 1024,
+        db.getFreeBlockFile(),
+        4096,
+      );
+      await users.createIndex('name', indexStorage);
+
+      // Delete some to create free space
+      for (let i = 5; i < 10; i++) {
+        await users.delete(`user-${i}`);
+      }
+
+      const fbf = db.getFreeBlockFile();
+      const result = await defragDatabase(fbf);
+      expect(result.success).toBe(true);
+
+      // Close and reopen
+      await db.close();
+      db = await SimpleDBMS.open(dbFile, walFile);
+
+      const newUsers = await db.getCollection('users');
+      const remaining = await newUsers.find();
+      expect(remaining).toHaveLength(5);
+
+      for (let i = 0; i < 5; i++) {
+        const user = await newUsers.findById(`user-${i}`);
+        expect(user).toBeDefined();
+        expect(user!['name']).toBe(`User ${i}`);
+      }
+
+      await db.close();
+    });
+
+    it('should persist data across close/reopen after defrag', async () => {
+      let db = await SimpleDBMS.create(dbFile, walFile);
+      const users = await db.getCollection('users');
+      await users.insert({ id: 'u1', name: 'Alice' });
+      await users.insert({ id: 'u2', name: 'Bob' });
+      await users.insert({ id: 'u3', name: 'Charlie' });
+
+      // Delete one to create fragmentation
+      await users.delete('u2');
+
+      const fbf = db.getFreeBlockFile();
+      await defragDatabase(fbf);
+
+      await db.close();
+
+      // Reopen and verify
+      db = await SimpleDBMS.open(dbFile, walFile);
+      const reopenedUsers = await db.getCollection('users');
+
+      expect(await reopenedUsers.findById('u1')).toBeDefined();
+      expect((await reopenedUsers.findById('u1'))!['name']).toBe('Alice');
+      expect(await reopenedUsers.findById('u3')).toBeDefined();
+      expect((await reopenedUsers.findById('u3'))!['name']).toBe('Charlie');
+      expect(await reopenedUsers.findById('u2')).toBeNull();
+
+      await db.close();
+    });
+
+    it('should allow normal operations after defrag', async () => {
+      let db = await SimpleDBMS.create(dbFile, walFile);
+      const users = await db.getCollection('users');
+      await users.insert({ id: 'u1', name: 'Alice' });
+      await users.insert({ id: 'u2', name: 'Bob' });
+
+      // Delete to create fragmentation
+      await users.delete('u2');
+
+      const fbf = db.getFreeBlockFile();
+      await defragDatabase(fbf);
+
+      // Close and reopen (required after defrag)
+      await db.close();
+      db = await SimpleDBMS.open(dbFile, walFile);
+
+      const newUsers = await db.getCollection('users');
+
+      // Verify existing data
+      const alice = await newUsers.findById('u1');
+      expect(alice).toBeDefined();
+      expect(alice!['name']).toBe('Alice');
+
+      // Insert new documents
+      await newUsers.insert({ id: 'u3', name: 'Charlie' });
+      const charlie = await newUsers.findById('u3');
+      expect(charlie).toBeDefined();
+      expect(charlie!['name']).toBe('Charlie');
+
+      // Update existing documents
+      const updated = await newUsers.update('u1', { age: 31 });
+      expect(updated).toBeDefined();
+      expect(updated!['age']).toBe(31);
+
+      // Delete a document
+      const deleted = await newUsers.delete('u3');
+      expect(deleted).toBe(true);
+      expect(await newUsers.findById('u3')).toBeNull();
 
       await db.close();
     });

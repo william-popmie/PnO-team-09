@@ -11,7 +11,7 @@ import { EncryptionService } from './encryption/encryption-service.mjs';
 import { SimpleDBMS, type DocumentValue } from './simpledbms.mjs';
 import { RealFile } from './file/file.mjs';
 import { rename } from 'node:fs/promises';
-import { compactDatabase } from './compaction.mjs';
+import { compactDatabase, defragDatabase } from './compaction.mjs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import {
@@ -711,6 +711,60 @@ app.post('/db/compact', async (_req, res) => {
     res.json(result);
   } catch (error) {
     console.error('Compaction error:', error);
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+/**
+ * @swagger
+ * /db/defrag:
+ *   post:
+ *     summary: Defragment the database in-place
+ *     description: >
+ *       Moves live blocks into free slots and truncates the file,
+ *       reducing size without requiring extra disk space.
+ *       This is a blocking maintenance operation.
+ *     responses:
+ *       200:
+ *         description: Defragmentation completed successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 blocksTotal:
+ *                   type: number
+ *                 blocksFree:
+ *                   type: number
+ *                 blocksMoved:
+ *                   type: number
+ *                 sizeBefore:
+ *                   type: number
+ *                 sizeAfter:
+ *                   type: number
+ *       500:
+ *         description: Defragmentation failed
+ */
+app.post('/db/defrag', async (_req, res) => {
+  try {
+    const result = await defragDatabase(db.getFreeBlockFile());
+
+    // Close and reopen the DB (in-memory caches hold stale block IDs)
+    await db.close();
+    const reopenedDbFile = new RealFile(currentDbPath);
+    const reopenedWalFile = new RealFile(currentWalPath);
+    db = await SimpleDBMS.open(reopenedDbFile, reopenedWalFile);
+
+    console.log(
+      `Database defragmented: ${result.sizeBefore} -> ${result.sizeAfter} bytes ` +
+        `(${result.blocksMoved} blocks moved, ${result.blocksFree} free blocks reclaimed)`,
+    );
+
+    res.json(result);
+  } catch (error) {
+    console.error('Defrag error:', error);
     res.status(500).json({ success: false, error: (error as Error).message });
   }
 });

@@ -321,7 +321,7 @@ export class FreeBlockFile {
     return Buffer.from(data);
   }
 
-  private async readRawBlock(blockId: number): Promise<Buffer> {
+  async readRawBlock(blockId: number): Promise<Buffer> {
     if (this.stagedWrites.has(blockId)) {
       return Buffer.from(this.stagedWrites.get(blockId)!);
     }
@@ -455,6 +455,21 @@ export class FreeBlockFile {
           : Buffer.alloc(0);
       this.stageHeaderBlock();
     }
+  }
+
+  /**
+   * Returns the underlying file.
+   */
+  getFile(): File {
+    return this.file;
+  }
+
+  /**
+   * Returns the total number of blocks in the file.
+   */
+  async getTotalBlockCount(): Promise<number> {
+    const st = await this.file.stat();
+    return Math.floor(st.size / this.blockSize);
   }
 
   /**

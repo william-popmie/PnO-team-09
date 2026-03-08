@@ -28,7 +28,7 @@ message Command {
 message LogEntry {
     int32   term    = 1;
     int32   index   = 2;
-    string  type    = 3
+    string  type    = 3;
     Command command = 4;
     string config   = 5;
 }

@@ -200,17 +200,23 @@ export class Collection {
   private onChangeCallback?: () => Promise<void>;
   private createIndexStorage?: () => FBNodeStorage<string, string>;
   private onIndexCreated?: (fieldName: string, rootBlockId: number) => Promise<void>;
+  private onDocumentCountChanged?: (documentCount: number) => Promise<void>;
+  private cachedDocumentCount: number | null = null;
 
   constructor(
     primaryTree: BPlusTree<string, Document, FBLeafNode<string, Document>, FBInternalNode<string, Document>>,
     onChangeCallback?: () => Promise<void>,
     createIndexStorage?: () => FBNodeStorage<string, string>,
     onIndexCreated?: (fieldName: string, rootBlockId: number) => Promise<void>,
+    onDocumentCountChanged?: (documentCount: number) => Promise<void>,
+    initialDocumentCount?: number,
   ) {
     this.primaryTree = primaryTree;
     this.onChangeCallback = onChangeCallback;
     this.createIndexStorage = createIndexStorage;
     this.onIndexCreated = onIndexCreated;
+    this.onDocumentCountChanged = onDocumentCountChanged;
+    this.cachedDocumentCount = initialDocumentCount ?? null;
   }
 
   //TODO: check if nodestorage changes affected this function.
@@ -345,6 +351,16 @@ export class Collection {
 
     if (this.onChangeCallback) {
       await this.onChangeCallback();
+    }
+
+    if (this.cachedDocumentCount === null) {
+      this.cachedDocumentCount = 1;
+    } else {
+      this.cachedDocumentCount++;
+    }
+
+    if (this.onDocumentCountChanged) {
+      await this.onDocumentCountChanged(this.cachedDocumentCount);
     }
 
     return newDoc;
@@ -506,6 +522,21 @@ export class Collection {
     return resultSet;
   }
 
+  private async getCachedDocumentCount(): Promise<number> {
+    if (this.cachedDocumentCount !== null) {
+      return this.cachedDocumentCount;
+    }
+
+    let count = 0;
+    for await (const entry of this.primaryTree.entries()) {
+      void entry;
+      count++;
+    }
+
+    this.cachedDocumentCount = count;
+    return count;
+  }
+
   /**
    * Finds documents in the collection.
    * @param {Query} query The query options.
@@ -520,9 +551,12 @@ export class Collection {
       candidateIds = await this.applyFilterOps(query.filterOps);
 
       if (candidateIds) {
-        const RANDOM_LOOKUP_THRESHOLD = 100;
+        const estimatedTotalDocs = await this.getCachedDocumentCount();
+        const totalDocs = Math.max(1, estimatedTotalDocs);
+        const candidateRatio = candidateIds.size / totalDocs;
+        const scanRatio = 1 - candidateRatio;
 
-        if (candidateIds.size <= RANDOM_LOOKUP_THRESHOLD) {
+        if (candidateRatio <= scanRatio) {
           for (const id of candidateIds) {
             const doc = await this.primaryTree.search(id);
             if (doc) {
@@ -1003,6 +1037,14 @@ export class Collection {
 
     await this.primaryTree.delete(id);
 
+    if (this.cachedDocumentCount !== null && this.cachedDocumentCount > 0) {
+      this.cachedDocumentCount--;
+    }
+
+    if (this.onDocumentCountChanged && this.cachedDocumentCount !== null) {
+      await this.onDocumentCountChanged(this.cachedDocumentCount);
+    }
+
     if (this.onChangeCallback) {
       await this.onChangeCallback();
     }
@@ -1078,6 +1120,7 @@ export class SimpleDBMS {
       [name: string]: {
         rootBlockId: number;
         indexes: { [field: string]: number };
+        documentCount: number;
       };
     };
   } = { catalogRootBlockId: 0, collections: {} };
@@ -1163,6 +1206,12 @@ export class SimpleDBMS {
       50,
     );
 
+    this.dbHeader.collections[name] = {
+      rootBlockId: 0,
+      indexes: {},
+      documentCount: 0,
+    };
+
     await tree.init();
     await this.saveCollectionRoot(name, tree, storage);
 
@@ -1181,6 +1230,10 @@ export class SimpleDBMS {
       async (fieldName: string, rootBlockId: number) => {
         await this.saveIndexMetadata(name, fieldName, rootBlockId);
       },
+      async (documentCount: number) => {
+        await this.saveDocumentCountMetadata(name, documentCount);
+      },
+      0,
     );
 
     this.collections.set(name, collection);
@@ -1217,6 +1270,8 @@ export class SimpleDBMS {
     const rootNode = await storage.loadNode(rootBlockId);
     tree.load(rootNode);
 
+    const collectionMeta = this.dbHeader.collections[name];
+
     const collection = new Collection(
       tree,
       async () => {
@@ -1232,9 +1287,12 @@ export class SimpleDBMS {
       async (fieldName: string, rootBlockId: number) => {
         await this.saveIndexMetadata(name, fieldName, rootBlockId);
       },
+      async (documentCount: number) => {
+        await this.saveDocumentCountMetadata(name, documentCount);
+      },
+      collectionMeta.documentCount,
     );
 
-    const collectionMeta = this.dbHeader.collections[name];
     if (collectionMeta?.indexes) {
       const indexMap = new Map<
         string,
@@ -1354,7 +1412,7 @@ export class SimpleDBMS {
     }
 
     if (!this.dbHeader.collections[name]) {
-      this.dbHeader.collections[name] = { rootBlockId: rootId, indexes: {} };
+      this.dbHeader.collections[name] = { rootBlockId: rootId, indexes: {}, documentCount: 0 };
     } else {
       this.dbHeader.collections[name].rootBlockId = rootId;
     }
@@ -1373,9 +1431,17 @@ export class SimpleDBMS {
    */
   async saveIndexMetadata(collectionName: string, field: string, rootBlockId: number): Promise<void> {
     if (!this.dbHeader.collections[collectionName]) {
-      this.dbHeader.collections[collectionName] = { rootBlockId: 0, indexes: {} };
+      this.dbHeader.collections[collectionName] = { rootBlockId: 0, indexes: {}, documentCount: 0 };
     }
     this.dbHeader.collections[collectionName].indexes[field] = rootBlockId;
+    await this.saveCatalogRoot();
+  }
+
+  async saveDocumentCountMetadata(collectionName: string, documentCount: number): Promise<void> {
+    if (!this.dbHeader.collections[collectionName]) {
+      this.dbHeader.collections[collectionName] = { rootBlockId: 0, indexes: {}, documentCount: 0 };
+    }
+    this.dbHeader.collections[collectionName].documentCount = documentCount;
     await this.saveCatalogRoot();
   }
 

@@ -5,8 +5,16 @@ import { zstdCompressSync, zstdDecompressSync } from 'node:zlib';
 
 export type CompressionAlgorithm = 'zstd';
 
+// Compression envelope layout (13 bytes total):
+// - 4 bytes magic marker (e.g. FBC1/ZST1) to identify compressed payload format
+// - 1 byte algorithm id (currently zstd = 1)
+// - 4 bytes original (uncompressed) payload size (UInt32LE)
+// - 4 bytes compressed payload size (UInt32LE)
 export const COMPRESSION_ALGORITHM_ZSTD_ID: number = 1;
 export const COMPRESSION_ENVELOPE_HEADER_SIZE: number = 4 + 1 + 4 + 4;
+// Magic markers are custom format identifiers:
+// - FBC1: FreeBlock compressed payload envelope, version 1
+// - ZST1: Node-storage zstd payload envelope, version 1
 export const FREEBLOCK_COMPRESSED_PAYLOAD_MAGIC: Buffer = Buffer.from('FBC1', 'ascii');
 export const NODE_STORAGE_COMPRESSED_PAYLOAD_MAGIC: Buffer = Buffer.from('ZST1', 'ascii');
 

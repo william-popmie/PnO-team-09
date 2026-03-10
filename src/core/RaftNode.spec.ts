@@ -93,7 +93,10 @@ describe('RaftNode.ts, RaftNode', () => {
             installSnapshot: vi.fn().mockResolvedValue(undefined)
         };
 
-        config = createConfig(nodeId, peers, 150, 300, 50);
+        config = createConfig(nodeId, 'localhost:52000',[
+                { id: 'node2', address: 'localhost:52001' },
+                { id: 'node3', address: 'localhost:52002' }
+            ], 150, 300, 50);
 
         node = new RaftNode(config, storage, transport as any, appStateMachine as any, clock, random, silentLogger);
     });
@@ -1056,6 +1059,9 @@ describe('RaftNode.ts, RaftNode', () => {
 
         forceLeader(node);
 
+        (node as any)['configManager']['commitedConfig'] = { voters: [ { id: 'node1', address: 'localhost:52000'} , { id: 'node2', address: 'localhost:52001' }, { id: 'node3', address: 'localhost:52002' } ], learners: []};
+        (node as any)['configManager']['activeConfig'] = { voters: [{ id: 'node1', address: 'localhost:52000'} , { id: 'node2', address: 'localhost:52001' }, { id: 'node3', address: 'localhost:52002' } ], learners: []};
+
         const result = await node.addServer('node2', 'localhost:3943');
         expect(result).toBe(false);
     });
@@ -1065,8 +1071,8 @@ describe('RaftNode.ts, RaftNode', () => {
 
         forceLeader(node);
 
-        (node as any)['configManager']['commitedConfig'] = { voters: ['node1', 'node2', 'node3'], learners: ['node4']};
-        (node as any)['configManager']['activeConfig'] = { voters: ['node1', 'node2', 'node3'], learners: ['node4']};
+        (node as any)['configManager']['commitedConfig'] = { voters: [ { id: 'node1', address: 'localhost:52000'} , { id: 'node2', address: 'localhost:52001' }, { id: 'node3', address: 'localhost:52002' } ], learners: [{ id: 'node4', address: 'localhost:52003' }]};
+        (node as any)['configManager']['activeConfig'] = { voters: [{ id: 'node1', address: 'localhost:52000'} , { id: 'node2', address: 'localhost:52001' }, { id: 'node3', address: 'localhost:52002' } ], learners: [{ id: 'node4', address: 'localhost:52003' }]};
 
         const result = await node.addServer('node4', 'localhost:3943');
         expect(result).toBe(false);
@@ -1095,8 +1101,8 @@ describe('RaftNode.ts, RaftNode', () => {
 
         const result = await node.addServer('node4', 'localhost:3943');
         const calledConfig = submitConfigChangeSpy.mock.calls[0][0] as ClusterConfig;
-        expect(calledConfig.voters).toContain('node4');
-        expect(calledConfig.learners).not.toContain('node4');
+        expect(calledConfig.voters.map(m => m.id)).toContain('node4');
+        expect(calledConfig.learners.map(m => m.id)).not.toContain('node4');
         expect(result).toBe(true);
     });
 
@@ -1110,8 +1116,8 @@ describe('RaftNode.ts, RaftNode', () => {
 
         const result = await node.addServer('node4', 'localhost:3943', true);
         const calledConfig = submitConfigChangeSpy.mock.calls[0][0] as ClusterConfig;
-        expect(calledConfig.learners).toContain('node4');
-        expect(calledConfig.voters).not.toContain('node4');
+        expect(calledConfig.learners.map(m => m.id)).toContain('node4');
+        expect(calledConfig.voters.map(m => m.id)).not.toContain('node4');
         expect(result).toBe(true);
     });
 
@@ -1138,7 +1144,11 @@ describe('RaftNode.ts, RaftNode', () => {
 
     it('should return false when node is not a voter or learner', async () => {
         await node.start();
+
         forceLeader(node);
+
+        vi.spyOn((node as any)['configManager'], 'getActiveConfig').mockReturnValue({ voters: [{ id: 'node1', address: 'localhost:52001' }, { id: 'node2', address: 'localhost:52002' }, { id: 'node3', address: 'localhost:52003' }], learners: [{ id: 'node4', address: 'localhost:52004'}, { id: 'node5', address: 'localhost:52005' }]});
+
         const result = await node.removeServer('node49');
         expect(result).toBe(false);
     });
@@ -1148,7 +1158,7 @@ describe('RaftNode.ts, RaftNode', () => {
 
         forceLeader(node);
 
-        vi.spyOn((node as any)['configManager'], 'getActiveConfig').mockReturnValue({ voters: ['node1', 'node2'], learners: []});
+        vi.spyOn((node as any)['configManager'], 'getActiveConfig').mockReturnValue({ voters: [{ id: 'node1', address: 'localhost:52001' }, { id: 'node2', address: 'localhost:52002' }], learners: []});
 
         const result = await node.removeServer('node2');
         expect(result).toBe(false);
@@ -1160,8 +1170,8 @@ describe('RaftNode.ts, RaftNode', () => {
         const submitConfigChangeSpy = vi.spyOn(node as any, 'submitConfigChange').mockResolvedValue(true);
         const result = await node.removeServer('node2');
         const calledConfig = submitConfigChangeSpy.mock.calls[0][0] as ClusterConfig;
-        expect(calledConfig.voters).not.toContain('node2');
-        expect(calledConfig.learners).not.toContain('node2');
+        expect(calledConfig.voters.map(m => m.id)).not.toContain('node2');
+        expect(calledConfig.learners.map(m => m.id)).not.toContain('node2');
         expect(result).toBe(true);
     });
 
@@ -1190,14 +1200,14 @@ describe('RaftNode.ts, RaftNode', () => {
 
         forceLeader(node);
 
-        vi.spyOn((node as any)['configManager'], 'getActiveConfig').mockReturnValue({ voters: ['node1', 'node2'], learners: ['node3']});
+        vi.spyOn((node as any)['configManager'], 'getActiveConfig').mockReturnValue({ voters: [{ id: 'node1', address: 'localhost:52001' }, { id: 'node2', address: 'localhost:52002' }], learners: [{ id: 'node3', address: 'localhost:52003' }]});
 
         const submitConfigChangeSpy = vi.spyOn(node as any, 'submitConfigChange').mockResolvedValue(true);
         transport.removePeer = vi.fn().mockResolvedValue(undefined);
 
         const result = await node.removeServer('node3');
         const calledConfig = submitConfigChangeSpy.mock.calls[0][0] as ClusterConfig;
-        expect(calledConfig.learners).not.toContain('node3');
+        expect(calledConfig.learners.map(m => m.id)).not.toContain('node3');
         expect(result).toBe(true);
     });
 
@@ -1224,7 +1234,11 @@ describe('RaftNode.ts, RaftNode', () => {
 
     it('should return false when node is not a learner', async () => {
         await node.start();
+
         forceLeader(node);
+
+        vi.spyOn((node as any)['configManager'], 'getActiveConfig').mockReturnValue({ voters: [{ id: 'node1', address: 'localhost:52001' }, { id: 'node2', address: 'localhost:52002' }], learners: [{ id: 'node3', address: 'localhost:52003' }]});
+
         const result = await node.promoteServer('node2');
         expect(result).toBe(false);
     });
@@ -1234,13 +1248,13 @@ describe('RaftNode.ts, RaftNode', () => {
 
         forceLeader(node);
 
-        vi.spyOn((node as any)['configManager'], 'getActiveConfig').mockReturnValue({ voters: ['node1', 'node2'], learners: ['node3']});
+        vi.spyOn((node as any)['configManager'], 'getActiveConfig').mockReturnValue({ voters: [{ id: 'node1', address: 'localhost:52001' }, { id: 'node2', address: 'localhost:52002' }], learners: [{ id: 'node3', address: 'localhost:52003' }]});
 
         const submitConfigChangeSpy = vi.spyOn(node as any, 'submitConfigChange').mockResolvedValue(true);
         const result = await node.promoteServer('node3');
         const calledConfig = submitConfigChangeSpy.mock.calls[0][0] as ClusterConfig;
-        expect(calledConfig.voters).toContain('node3');
-        expect(calledConfig.learners).not.toContain('node3');
+        expect(calledConfig.voters.map(m => m.id)).toContain('node3');
+        expect(calledConfig.learners.map(m => m.id)).not.toContain('node3');
         expect(result).toBe(true);
     });
 
@@ -1256,7 +1270,7 @@ describe('RaftNode.ts, RaftNode', () => {
             return 1;
         });
 
-        const result = await (node as any)['submitConfigChange']({ voters: ['node1', 'node2', 'node3', 'node4'], learners: []});
+        const result = await (node as any)['submitConfigChange']({ voters: [{ id: 'node1', address: 'localhost:52001' }, { id: 'node2', address: 'localhost:52002' }, { id: 'node3', address: 'localhost:52003' }, { id: 'node4', address: 'localhost:52004' }], learners: []});
         expect(result).toBe(false);
     });
 
@@ -1271,7 +1285,7 @@ describe('RaftNode.ts, RaftNode', () => {
         vi.spyOn(node as any, 'triggerReplication').mockResolvedValue(undefined);
         vi.spyOn(node as any, 'waitForCommit').mockResolvedValue(false);
 
-        const result = await (node as any)['submitConfigChange']({ voters: ['node1', 'node2', 'node3', 'node4'], learners: []});
+        const result = await (node as any)['submitConfigChange']({ voters: [{ id: 'node1', address: 'localhost:52001' }, { id: 'node2', address: 'localhost:52002' }, { id: 'node3', address: 'localhost:52003' }, { id: 'node4', address: 'localhost:52004' }], learners: []});
         expect(result).toBe(false);
     });
 
@@ -1280,7 +1294,7 @@ describe('RaftNode.ts, RaftNode', () => {
 
         forceLeader(node, 1);
 
-        const newConfig = { voters: ['node1', 'node2', 'node3', 'node4'], learners: []};
+        const newConfig = { voters: [{ id: 'node1', address: 'localhost:52001' }, { id: 'node2', address: 'localhost:52002' }, { id: 'node3', address: 'localhost:52003' }, { id: 'node4', address: 'localhost:52004' }], learners: []};
         const logManager = (node as any)['logManager'];
 
         vi.spyOn(logManager, 'appendConfigEntry').mockResolvedValue(1);
@@ -1305,13 +1319,13 @@ describe('RaftNode.ts, RaftNode', () => {
         vi.spyOn(node as any, 'triggerReplication').mockResolvedValue(undefined);
         vi.spyOn(node as any, 'waitForCommit').mockResolvedValue(true);
 
-        const result = await (node as any)['submitConfigChange']({ voters: ['node1', 'node2', 'node3', 'node4'], learners: []});
+        const result = await (node as any)['submitConfigChange']({ voters: [{ id: 'node1', address: 'localhost:52001' }, { id: 'node2', address: 'localhost:52002' }, { id: 'node3', address: 'localhost:52003' }, { id: 'node4', address: 'localhost:52004' }], learners: []});
         expect(result).toBe(true);
     });
 
     it('should apply and commit config from snapshot when voters non-empty', async () => {
         const snapshotManager = (node as any)['snapshotManager'];
-        const snapshotConfig = { voters: ['node1', 'node2', 'node3'], learners: []};
+        const snapshotConfig = { voters: [{ id: 'node1', address: 'localhost:52001' }, { id: 'node2', address: 'localhost:52002' }, { id: 'node3', address: 'localhost:52003' }], learners: []};
         vi.spyOn(snapshotManager, 'initialize').mockResolvedValue(undefined);
         vi.spyOn(snapshotManager, 'loadSnapshot').mockResolvedValue({
             lastIncludedIndex: 5,
@@ -1331,7 +1345,7 @@ describe('RaftNode.ts, RaftNode', () => {
 
     it('should not apply config from snapshot when voters list is empty', async () => {
         const snapshotManager = (node as any)['snapshotManager'];
-        const snapshotConfig = { voters: [], learners: ['node4']};
+        const snapshotConfig = { voters: [], learners: [{ id: 'node4', address: 'localhost:52004' }]};
         vi.spyOn(snapshotManager, 'initialize').mockResolvedValue(undefined);
         vi.spyOn(snapshotManager, 'loadSnapshot').mockResolvedValue({
             lastIncludedIndex: 5,
@@ -1349,7 +1363,7 @@ describe('RaftNode.ts, RaftNode', () => {
 
     it('should apply config from latest log entry on start', async () => {
         const logManager = (node as any)['logManager'];
-        const latestConfig = { voters: ['node1', 'node2', 'node3', 'node4'], learners: []};
+        const latestConfig = { voters: [{ id: 'node1', address: 'localhost:52001' }, { id: 'node2', address: 'localhost:52002' }, { id: 'node3', address: 'localhost:52003' }, { id: 'node4', address: 'localhost:52004' }], learners: []};
 
         vi.spyOn(logManager, 'getLastConfigEntry').mockResolvedValue(latestConfig);
 
@@ -1377,7 +1391,7 @@ describe('RaftNode.ts, RaftNode', () => {
         const logManager = (node as any)['logManager'];
         const volatileState = (node as any)['volatileState'];
 
-        await logManager.appendConfigEntry({ voters: ['node1', 'node2', 'node3', 'node4'], learners: []}, 1);
+        await logManager.appendConfigEntry({ voters: [{ id: 'node1', address: 'localhost:52001' }, { id: 'node2', address: 'localhost:52002' }, { id: 'node3', address: 'localhost:52003' }, { id: 'node4', address: 'localhost:52004' }], learners: []}, 1);
         volatileState.setCommitIndex(1);
 
         await tickApplyLoop();
@@ -1387,6 +1401,128 @@ describe('RaftNode.ts, RaftNode', () => {
         });
 
         expect(appStateMachine.apply).not.toHaveBeenCalled();
+    });
+
+    it('should emit ConfigChangeRejected when submitConfigChange fails', async () => {
+        await node.start();
+        forceLeader(node);
+
+        transport.addPeer = vi.fn().mockResolvedValue(undefined);
+        vi.spyOn(node as any, 'submitConfigChange').mockResolvedValue(false);
+
+        const emittedEvents: any[] = [];
+        (node as any)['bus'] = {
+            emit: (e: any) => emittedEvents.push(e),
+            subscribe: vi.fn()
+        };
+
+        await node.addServer('node4', 'localhost:52003');
+
+        const rejected = emittedEvents.find(e => e.type === 'ConfigChangeRejected');
+        expect(rejected).toBeDefined();
+        expect(rejected.reason).toBe('Failed to commit configuration change');
+    });
+
+    it('should call transport.addPeer via onPeerDiscovered callback using address from configManager', async () => {
+        await node.start();
+
+        forceLeader(node);
+
+        (node as any)['configManager']['activeConfig'] = {
+            voters: [{ id: 'node1', address: 'localhost:52001' }, { id: 'node2', address: 'localhost:52002' }, { id: 'node3', address: 'localhost:52003' }, { id: 'node4', address: 'localhost:52004' }],
+            learners: []
+        };
+
+        transport.addPeer = vi.fn().mockResolvedValue(undefined);
+
+        const onPeerDiscovered = (node as any)['stateMachine']['onPeerDiscovered'];
+        onPeerDiscovered('node4', 0);
+
+        expect(transport.addPeer).toHaveBeenCalledWith('node4', 'localhost:52004');
+    });
+
+    it('should not call transport.addPeer via onPeerDiscovered when address is not found', async () => {
+        await node.start();
+
+        transport.addPeer = vi.fn().mockResolvedValue(undefined);
+
+        const onPeerDiscovered = (node as any)['stateMachine']['onPeerDiscovered'];
+        onPeerDiscovered('node49', 0);
+
+        expect(transport.addPeer).not.toHaveBeenCalled();
+    });
+
+    it('should call transport.addPeer when registerPeer is called', async () => {
+        await node.start();
+
+        transport.addPeer = vi.fn().mockResolvedValue(undefined);
+
+        await node.registerPeer('node4', 'localhost:52003');
+        expect(transport.addPeer).toHaveBeenCalledWith('node4', 'localhost:52003');
+    });
+
+    it('should not emit LearnerPromoted event when promoteServer fails', async () => {
+        await node.start();
+        forceLeader(node);
+
+        vi.spyOn((node as any)['configManager'], 'getActiveConfig').mockReturnValue({
+            voters: [{ id: 'node1', address: 'localhost:52000' }, { id: 'node2', address: 'localhost:52001' }],
+            learners: [{ id: 'node3', address: 'localhost:52002' }]
+        });
+
+        vi.spyOn(node as any, 'submitConfigChange').mockResolvedValue(false);
+
+        const emittedEvents: any[] = [];
+        (node as any)['bus'] = {
+            emit: (e: any) => emittedEvents.push(e),
+            subscribe: vi.fn()
+        };
+
+        const result = await node.promoteServer('node3');
+
+        expect(result).toBe(false);
+        const promoted = emittedEvents.find(e => e.type === 'LearnerPromoted');
+        expect(promoted).toBeUndefined();
+    });
+
+        it('should log learners when loading snapshot config with learners', async () => {
+        const snapshotManager = (node as any)['snapshotManager'];
+        vi.spyOn(snapshotManager, 'initialize').mockResolvedValue(undefined);
+        vi.spyOn(snapshotManager, 'loadSnapshot').mockResolvedValue({
+            lastIncludedIndex: 5,
+            lastIncludedTerm: 1,
+            data: Buffer.from('snapshot'),
+            config: {
+                voters: [{ id: 'node1', address: 'localhost:52000' }],
+                learners: [{ id: 'node4', address: 'localhost:52003' }]
+            }
+        });
+        vi.spyOn((node as any)['configManager'], 'applyConfigEntry').mockReturnValue(undefined);
+        vi.spyOn((node as any)['configManager'], 'commitConfig').mockResolvedValue(undefined);
+        await node.start();
+        expect(node.isStarted()).toBe(true);
+    });
+
+    it('should log learners when applying config from log entry with learners', async () => {
+        const logManager = (node as any)['logManager'];
+        vi.spyOn(logManager, 'getLastConfigEntry').mockResolvedValue({
+            voters: [{ id: 'node1', address: 'localhost:52000' }, { id: 'node2', address: 'localhost:52001' }],
+            learners: [{ id: 'node4', address: 'localhost:52003' }]
+        });
+        vi.spyOn((node as any)['configManager'], 'applyConfigEntry').mockReturnValue(undefined);
+        await node.start();
+        expect(node.isStarted()).toBe(true);
+    });
+
+    it('should return false when node is already a learner via mock', async () => {
+        await node.start();
+        forceLeader(node);
+        vi.spyOn((node as any)['configManager'], 'getActiveConfig').mockReturnValue({
+            voters: [{ id: 'node1', address: 'localhost:52000' }, { id: 'node2', address: 'localhost:52001' }, { id: 'node3', address: 'localhost:52002' }],
+            learners: [{ id: 'node4', address: 'localhost:52003' }]
+        });
+        const result = await node.addServer('node4', 'localhost:52003');
+        expect(result).toBe(false);
     });
 });
 

@@ -75,8 +75,6 @@ export class RaftNode implements RaftNodeInterface {
 
     private configManager: ConfigManager;
 
-    private peerAddresses: Map<NodeId, string> = new Map();
-
     constructor(
         private config: RaftConfig,
         private storage: Storage,
@@ -122,7 +120,10 @@ export class RaftNode implements RaftNodeInterface {
         this.snapshotManager = new SnapshotManager(storage);
 
         const bootstrapConfig: ClusterConfig = {
-            voters: [config.nodeId, ...config.peerIds],
+            voters: [
+                { id: config.nodeId, address: config.address },
+                ...config.peers.map(peer => ({ id: peer.id, address: peer.address }))
+            ],
             learners: []
         };
 
@@ -143,8 +144,11 @@ export class RaftNode implements RaftNodeInterface {
             this.applyLock,
             (newCommitIndex) => this.notifyCommitWaiters(newCommitIndex),
             this.bus,
-            (peerId, lastLogIndex) => {
-                this.transport.addPeer?.(peerId, this.peerAddresses.get(peerId)!)
+            (peerId) => {
+                const address = this.configManager.getMemberAddress(peerId);
+                if (address) {
+                    this.transport.addPeer?.(peerId, address);
+                }
             }
         );
     }
@@ -188,7 +192,7 @@ export class RaftNode implements RaftNodeInterface {
                 if (snapshot.config.voters.length > 0) {
                     this.configManager.applyConfigEntry(snapshot.config);
                     await this.configManager.commitConfig(snapshot.config);
-                    this.logger.info(`Node ${this.config.nodeId} loaded cluster configuration from snapshot: voters=${snapshot.config.voters.join(',')}, learners=${snapshot.config.learners.join(',')}`);
+                    this.logger.info(`Node ${this.config.nodeId} loaded cluster configuration from snapshot: voters=${snapshot.config.voters.map(m => m.id).join(',')}, learners=${snapshot.config.learners.map(m => m.id).join(',')}`);
                 }
                 await this.applicationStateMachine.installSnapshot(snapshot.data);
                 this.volatileState.setCommitIndex(snapshot.lastIncludedIndex);
@@ -200,7 +204,7 @@ export class RaftNode implements RaftNodeInterface {
 
             if (latestLogConfig) {
                 this.configManager.applyConfigEntry(latestLogConfig);
-                this.logger.info(`Node ${this.config.nodeId} applied cluster configuration from log entry: voters=${latestLogConfig.voters.join(',')}, learners=${latestLogConfig.learners.join(',')}`);
+                this.logger.info(`Node ${this.config.nodeId} applied cluster configuration from log entry: voters=${latestLogConfig.voters.map(m => m.id).join(',')}, learners=${latestLogConfig.learners.map(m => m.id).join(',')}`);
             }
 
             if(!this.transport.isStarted()) {
@@ -501,18 +505,16 @@ export class RaftNode implements RaftNodeInterface {
         }
 
         const currentConfig = this.configManager.getActiveConfig();
-        if (currentConfig.voters.includes(nodeId) || currentConfig.learners.includes(nodeId)) {
+        if (currentConfig.voters.some(m => m.id === nodeId) || currentConfig.learners.some(m => m.id === nodeId)) {
             this.logger.warn(`Node ${nodeId} is already part of the cluster configuration, cannot add again`);
             return false;
         }
 
-        this.peerAddresses.set(nodeId, address);
-
         await this.transport.addPeer?.(nodeId, address);
 
         const newConfig: ClusterConfig = asLearner
-            ? { voters: currentConfig.voters, learners: [...currentConfig.learners, nodeId] }
-            : { voters: [...currentConfig.voters, nodeId], learners: currentConfig.learners };
+            ? { voters: currentConfig.voters, learners: [...currentConfig.learners, { id: nodeId, address: address }] }
+            : { voters: [...currentConfig.voters, { id: nodeId, address: address }], learners: currentConfig.learners };
 
         const result = await this.submitConfigChange(newConfig);
 
@@ -561,19 +563,19 @@ export class RaftNode implements RaftNodeInterface {
         }
 
         const currentConfig = this.configManager.getActiveConfig();
-        if (!currentConfig.voters.includes(nodeId) && !currentConfig.learners.includes(nodeId)) {
+        if (!currentConfig.voters.some(m => m.id === nodeId) && !currentConfig.learners.some(m => m.id === nodeId)) {
             this.logger.warn(`Node ${nodeId} is not part of the cluster configuration, cannot remove`);
             return false;
         }
 
-        if (currentConfig.voters.includes(nodeId) && currentConfig.voters.length <= 2) {
+        if (currentConfig.voters.some(m => m.id === nodeId) && currentConfig.voters.length <= 2) {
             this.logger.warn(`Cannot remove voter ${nodeId} since it would leave the cluster with less than 2 voters`);
             return false;
         }
 
         const newConfig: ClusterConfig = {
-            voters: currentConfig.voters.filter(id => id !== nodeId),
-            learners: currentConfig.learners.filter(id => id !== nodeId)
+            voters: currentConfig.voters.filter(m => m.id !== nodeId),
+            learners: currentConfig.learners.filter(m => m.id !== nodeId)
         };
 
         const result = await this.submitConfigChange(newConfig);
@@ -612,14 +614,16 @@ export class RaftNode implements RaftNodeInterface {
         }
 
         const currentConfig = this.configManager.getActiveConfig();
-        if (!currentConfig.learners.includes(nodeId)) {
+        if (!currentConfig.learners.some(m => m.id === nodeId)) {
             this.logger.warn(`Node ${nodeId} is not a learner, cannot promote`);
             return false;
         }
 
+        const memberToPromote = currentConfig.learners.find(m => m.id === nodeId)!;
+
         const newConfig: ClusterConfig = {
-            voters: [...currentConfig.voters, nodeId],
-            learners: currentConfig.learners.filter(id => id !== nodeId)
+            voters: [...currentConfig.voters, memberToPromote],
+            learners: currentConfig.learners.filter(m => m.id !== nodeId)
         };
 
         const result = await this.submitConfigChange(newConfig);
@@ -641,7 +645,6 @@ export class RaftNode implements RaftNodeInterface {
     }
 
     async registerPeer(nodeId: NodeId, address: string): Promise<void> {
-        this.peerAddresses.set(nodeId, address);
         await this.transport.addPeer?.(nodeId, address);
     }
 

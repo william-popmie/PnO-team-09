@@ -9,8 +9,7 @@ import {
     InstallSnapshotRequest,
 } from "../rpc/RPCTypes";
 import { RaftState } from "../core/StateMachine";
-import { Cluster } from "node:cluster";
-import { ClusterConfig } from "../config/ClusterConfig";
+import { ClusterConfig, ClusterMember } from "../config/ClusterConfig";
 
 export interface BaseEvent {
     eventId: string;
@@ -248,15 +247,15 @@ export interface LearnerPromotedEvent extends BaseEvent {
 
 export interface ConfigChangedEvent extends BaseEvent {
     type: "ConfigChanged";
-    voters: NodeId[];
-    learners: NodeId[];
+    voters: ClusterMember[];
+    learners: ClusterMember[];
     commited: boolean;
 }
 
 export interface ConfigChangeRejectedEvent extends BaseEvent {
     type: "ConfigChangeRejected";
-    voters: NodeId[];
-    learners: NodeId[];
+    voters: ClusterMember[];
+    learners: ClusterMember[];
     reason: string;
 }
 
@@ -299,6 +298,7 @@ export interface InitialStateMessage {
     type: "InitialState";
     events: RaftEvent[];
     nodeIds: NodeId[];
+    config?: ClusterConfig;
 }
 
 export interface LiveEventMessage {

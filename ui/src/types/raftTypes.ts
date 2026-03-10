@@ -6,9 +6,14 @@ export interface LogEntry {
     command: unknown;
 }
 
+export interface ClusterMember {
+    id: string;
+    address: string;
+}
+
 export interface ClusterConfig {
-    voters: string[];
-    learners: string[];
+    voters: ClusterMember[];
+    learners: ClusterMember[];
 }
 
 interface BaseEvent {
@@ -215,15 +220,15 @@ export interface LearnerPromotedEvent extends BaseEvent {
 
 export interface ConfigChangedEvent extends BaseEvent {
     type: "ConfigChanged";
-    voters: string[];
-    learners: string[];
+    voters: ClusterMember[];
+    learners: ClusterMember[];
     commited: boolean;
 }
 
 export interface ConfigChangeRejectedEvent extends BaseEvent {
     type: "ConfigChangeRejected";
-    voters: string[];
-    learners: string[];
+    voters: ClusterMember[];
+    learners: ClusterMember[];
     reason: string;
 }
 

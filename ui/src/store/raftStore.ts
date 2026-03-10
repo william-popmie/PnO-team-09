@@ -57,10 +57,9 @@ const defaultConfig: ClusterConfig = {
 function applyConfig(nodes: Record<string, NodeUIState>, config: ClusterConfig): Record<string, NodeUIState> {
     const newNodes = { ...nodes };
     for (const nodeId of Object.keys(newNodes)) {
-        const isLearner = config.learners.includes(nodeId);
+        const isLearner = config.learners.some(m => m.id === nodeId);
         newNodes[nodeId] = { ...newNodes[nodeId], isLearner };
     }
-
     return newNodes;
 }
 
@@ -86,11 +85,11 @@ export const useRaftStore = create<RaftStore>((set, get) => ({
     clusterConfig: defaultConfig,
     pendingConfigChange: false,
 
-    setNodeIds: (ids, config) => { 
-        const configToApply = config ?? { voters: ids, learners: [] };
+    setNodeIds: (ids, config) => {
+        const configToApply = config ?? { voters: ids.map(id => ({ id, address: '' })), learners: [] };
         const nodes: Record<string, NodeUIState> = {};
         for (const id of ids) {
-            nodes[id] = makeNode(id, configToApply.learners.includes(id));
+            nodes[id] = makeNode(id, configToApply.learners.some(m => m.id === id));
         }
         set({ nodeIds: ids, nodes, clusterConfig: configToApply, pendingConfigChange: false });
     },

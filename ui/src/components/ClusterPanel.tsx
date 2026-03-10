@@ -101,7 +101,7 @@ export function ClusterPanel() {
                                 borderRadius: 4, padding: '2px 6px',
                                 marginBottom: 4,
                             }}>
-                                ⏳ config change pending
+                                config change pending
                             </div>
                         )}
 
@@ -110,10 +110,10 @@ export function ClusterPanel() {
                         </div>
                         {clusterConfig.voters.length === 0
                             ? <span style={{ color: '#8b949e', fontSize: 11 }}>—</span>
-                            : clusterConfig.voters.map(id => (
-                                <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: 4 }}>
+                            : clusterConfig.voters.map(m => (
+                                <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: 4 }}>
                                     <div style={{ width: 6, height: 6, borderRadius: '50%', background: roleColors.Leader, flexShrink: 0 }} />
-                                    <span style={{ color: '#e6edf3' }}>{id}</span>
+                                    <span style={{ color: '#e6edf3' }}>{m.id}</span>
                                 </div>
                             ))
                         }
@@ -123,10 +123,10 @@ export function ClusterPanel() {
                                 <div style={{ fontSize: 10, color: '#8b949e', marginTop: 6, marginBottom: 2 }}>
                                     learners ({clusterConfig.learners.length})
                                 </div>
-                                {clusterConfig.learners.map(id => (
-                                    <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: 4 }}>
+                                {clusterConfig.learners.map(m => (
+                                    <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: 4 }}>
                                         <div style={{ width: 6, height: 6, borderRadius: '50%', background: roleColors.Learner, flexShrink: 0 }} />
-                                        <span style={{ color: roleColors.Learner }}>{id}</span>
+                                        <span style={{ color: roleColors.Learner }}>{m.id}</span>
                                     </div>
                                 ))}
                             </>

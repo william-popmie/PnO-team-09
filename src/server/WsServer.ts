@@ -41,6 +41,7 @@ export class WsServer {
             type: "InitialState",
             events: this.eventStore.getAllEvents(),
             nodeIds: this.cluster.getNodeIds(),
+            config: this.cluster.getCommittedConfig()
         };
 
         ws.send(JSON.stringify(initial));

@@ -9,6 +9,9 @@ import { GrpcTransport } from "../transport/GRPCTransport";
 import { SystemRandom } from "../util/Random";
 import { DiskStorage } from "../storage/DiskStorage";
 import path from "node:path";
+import { ClusterMember } from "../config/ClusterConfig";
+import { StorageCodec } from "../storage/Storage";
+import { CONFIG_LEARNERS_KEY, CONFIG_VOTERS_KEY } from "../config/ConfigManager";
 
 
 export interface ClusterRunnerOptions {
@@ -27,6 +30,9 @@ export class ClusterRunnerGRPC {
     private nodes: Map<NodeId, RaftNode> = new Map();
     private nodeIds: NodeId[] = [];
 
+
+    private committedConfig: { voters: { id: NodeId, address: string }[], learners: { id: NodeId, address: string }[] } = { voters: [], learners: [] };
+
     constructor(
         private bus: RaftEventBus,
         private options: ClusterRunnerOptions
@@ -35,24 +41,44 @@ export class ClusterRunnerGRPC {
     async start(): Promise<void> {
         const { nodeCount, timerConfig } = this.options;
 
-        this.nodeIds = Array.from({ length: nodeCount }, (_, i) => `node${i + 1}`);
+        const baseNodeIds: NodeId[] = Array.from({ length: nodeCount }, (_, i) => `node${i+1}`);
+
+        const persistedMembers = await this.readPersistedConfig(baseNodeIds[0])
 
         const addressMap: Record<NodeId, string> = {};
-        this.nodeIds.forEach((nodeId, index) => {
+        baseNodeIds.forEach((nodeId, index) => {
             addressMap[nodeId] = `localhost:${52000 + index}`;
         });
 
-        for (const nodeId of this.nodeIds) {
+        if (persistedMembers) {
+            for (const m of [...persistedMembers.voters, ...persistedMembers.learners]) {
+                if (!(m.id in addressMap)) {
+                    addressMap[m.id] = m.address;
+                }
+            }
+        }
+
+        const allNodeIds: NodeId[] = persistedMembers
+            ? [
+                ...persistedMembers.voters.map(m => m.id),
+                ...persistedMembers.learners.map(m => m.id)
+              ]
+            : baseNodeIds;
+
+        this.nodeIds = allNodeIds;
+
+        for (const nodeId of allNodeIds) {
             const address = addressMap[nodeId];
+            const port = parseInt(address.split(':')[1]);
+
             const peerMembers = this.nodeIds
                 .filter(id => id !== nodeId)
                 .map(id => ({ id, address: addressMap[id] }));
+
             const config = createConfig(nodeId, address, peerMembers, timerConfig.electionTimeoutMin, timerConfig.electionTimeoutMax, timerConfig.heartbeatInterval);
 
             const storage = new DiskStorage(path.join(__dirname, "../../data", nodeId));
             await storage.open();
-
-            const port = 52000 + this.nodeIds.indexOf(nodeId);
 
             const peers = Object.fromEntries(
                 Object.entries(addressMap).filter(([id]) => id !== nodeId)
@@ -91,6 +117,11 @@ export class ClusterRunnerGRPC {
         for (const node of this.nodes.values()) {
             await node.start();
         }
+
+        this.committedConfig = persistedMembers ?? {
+            voters: baseNodeIds.map(id => ({ id, address: addressMap[id] })),
+            learners: []
+        };
     }
 
     async stop(): Promise<void> {
@@ -228,11 +259,26 @@ export class ClusterRunnerGRPC {
         }
 
         const success = await leader.addServer(nodeId, address, asLearner);
-        if (!success) {
+
+        const member = { id: nodeId, address };
+
+         if (!success) {
             this.nodes.delete(nodeId);
             this.nodeIds.pop();
             await node.stop();
             throw new Error(`Failed to add server ${nodeId} to the cluster`);
+        }
+        
+        if (asLearner) {
+            this.committedConfig = {
+                voters: this.committedConfig.voters,
+                learners: [...this.committedConfig.learners, member]
+            }
+        } else {
+            this.committedConfig = {
+                voters: [...this.committedConfig.voters, member],
+                learners: this.committedConfig.learners
+            }
         }
     }
 
@@ -250,6 +296,32 @@ export class ClusterRunnerGRPC {
             throw new Error('No leader available to promote server');
         }
         await leader.promoteServer(nodeId);
+    }
+
+    getCommittedConfig() {
+        return this.committedConfig;
+    }
+
+    private async readPersistedConfig(
+        seedNodeId: NodeId
+    ): Promise<{ voters: ClusterMember[]; learners: ClusterMember[] } | null> {
+        const storagePath = path.join(__dirname, "../../data", seedNodeId);
+        const storage = new DiskStorage(storagePath);
+        try {
+            await storage.open();
+            const votersBuf = await storage.get(CONFIG_VOTERS_KEY);
+            const learnersBuf = await storage.get(CONFIG_LEARNERS_KEY);
+            await storage.close();
+
+            if (!votersBuf || !learnersBuf) return null;
+
+            const voters = StorageCodec.decodeJSON<ClusterMember[]>(votersBuf);
+            const learners = StorageCodec.decodeJSON<ClusterMember[]>(learnersBuf);
+            return { voters, learners };
+        } catch {
+            try { await storage.close(); } catch {}
+            return null;
+        }
     }
 }
 

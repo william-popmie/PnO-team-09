@@ -11,7 +11,14 @@ describe('StateMachine.ts, StateMachine', () => {
     const nodeId = 'node1';
     const peers = ['node2', 'node3'];
     const allVoters = [nodeId, ...peers];
-    const defaultConfig = { voters: allVoters, learners: [] };
+    const defaultConfig = { 
+        voters: [
+            { id: 'node1', address: 'address1'},
+            { id: 'node2', address: 'address2' },
+            { id: 'node3', address: 'address3' }
+        ],
+        learners: []
+    };
 
     let configManager: {
         isVoter: ReturnType<typeof vi.fn>,
@@ -1269,5 +1276,66 @@ describe('StateMachine.ts, StateMachine', () => {
 
         expect(configManager.applyConfigEntry).not.toHaveBeenCalled();
         expect(configManager.commitConfig).not.toHaveBeenCalled();
+    });
+
+    it('should add new peer to leaderState and call onPeerDiscovered when peer not yet tracked', async () => {
+        const onPeerDiscovered = vi.fn();
+
+        const smWithCallback = new StateMachine(
+            nodeId,
+            configManager as any,
+            config as any,
+            persistentState as any,
+            volatileState as any,
+            logManager as any,
+            snapshotManager as any,
+            applicationStateMachine as any,
+            rpcHandler as any,
+            timerManager as any,
+            logger as any,
+            new AsyncLock(),
+            onCommitIndexAdvanced as any,
+            undefined,
+            onPeerDiscovered
+        );
+
+        await smWithCallback.becomeLeader();
+
+        configManager.getAllPeers.mockReturnValue([...peers, 'node4']);
+
+        await smWithCallback.triggerReplication();
+
+        await vi.waitFor(() => {
+            expect(onPeerDiscovered).toHaveBeenCalledWith('node4', expect.any(Number));
+        });
+    });
+
+    it('should skip addPeer loop when leaderState becomes null during config commit', async () => {
+        await stateMachine.becomeLeader();
+
+        await vi.waitFor(() => {
+            expect(rpcHandler.sendAppendEntries).toHaveBeenCalledTimes(peers.length);
+        });
+
+        const configEntry: LogEntry = {
+            index: 1,
+            term: 1,
+            type: LogEntryType.CONFIG,
+            config: defaultConfig
+        };
+
+        configManager.commitConfig.mockImplementation(async () => {
+            (stateMachine as any)['leaderState'] = null;
+        });
+
+        logManager.getEntry.mockReturnValue(configEntry);
+        volatileState.getCommitIndex.mockReturnValue(0);
+
+        const leaderState = (stateMachine as any)['leaderState'];
+        vi.spyOn(leaderState, 'calculateCommitIndex').mockResolvedValue(1);
+
+        await (stateMachine as any)['tryAdvanceCommitIndex']();
+
+        expect(configManager.commitConfig).toHaveBeenCalledWith(defaultConfig);
     });
 });

@@ -43,8 +43,11 @@ export class ClusterRunnerGRPC {
         });
 
         for (const nodeId of this.nodeIds) {
-            const peerIds = this.nodeIds.filter(id => id !== nodeId);
-            const config = createConfig(nodeId, peerIds, timerConfig.electionTimeoutMin, timerConfig.electionTimeoutMax, timerConfig.heartbeatInterval);
+            const address = addressMap[nodeId];
+            const peerMembers = this.nodeIds
+                .filter(id => id !== nodeId)
+                .map(id => ({ id, address: addressMap[id] }));
+            const config = createConfig(nodeId, address, peerMembers, timerConfig.electionTimeoutMin, timerConfig.electionTimeoutMax, timerConfig.heartbeatInterval);
 
             const storage = new DiskStorage(path.join(__dirname, "../../data", nodeId));
             await storage.open();
@@ -165,10 +168,14 @@ export class ClusterRunnerGRPC {
             Object.entries(addressMap).filter(([id]) => id !== nodeId)
         );
 
-        const peerIds = this.nodeIds.filter(id => id !== nodeId);
+        const peerMembers = this.nodeIds
+            .filter(id => id !== nodeId)
+            .map(id => ({ id, address: `localhost:${52000 + this.nodeIds.indexOf(id)}` }));
+
         const config = createConfig(
             nodeId,
-            peerIds,
+            address,
+            peerMembers,
             this.options.timerConfig.electionTimeoutMin,
             this.options.timerConfig.electionTimeoutMax,
             this.options.timerConfig.heartbeatInterval

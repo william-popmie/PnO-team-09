@@ -70,7 +70,10 @@ const installSnapshotRequest: RPCMessage = {
         lastIncludedIndex: 0,
         lastIncludedTerm: 0,
         data: Buffer.from("snapshot data"),
-        config: { voters: ['node1', 'node2'], learners: [] }
+        config: { voters: [
+            { id: "node1", address: "localhost:9090" },
+            { id: "node2", address: "localhost:9091"}
+        ], learners: [] }
     }
 };
 

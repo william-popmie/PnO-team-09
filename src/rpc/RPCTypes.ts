@@ -221,6 +221,14 @@ export function validateInstallSnapshotRequest(request: InstallSnapshotRequest):
     if (!Array.isArray(request.config.voters) || !Array.isArray(request.config.learners)) {
         throw new Error(`Invalid config: ${request.config}. voters and learners must be arrays.`);
     }
+
+    if (request.config.voters.some((m: any) => typeof m.id !== 'string' || typeof m.address !== 'string')) {
+        throw new Error(`Invalid config: voters must be ClusterMember objects with id and address strings.`);
+    }
+
+    if (request.config.learners.some((m: any) => typeof m.id !== 'string' || typeof m.address !== 'string')) {
+        throw new Error(`Invalid config: learners must be ClusterMember objects with id and address strings.`);
+    }
 }
 
 export function validateInstallSnapshotResponse(response: InstallSnapshotResponse): void {

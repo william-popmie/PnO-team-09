@@ -46,14 +46,33 @@ const COMPRESSION_ID_ALGORITHM_MAP: Record<number, CompressionAlgorithm> = {
   [COMPRESSION_ALGORITHM_DEFLATE_ID]: 'deflate',
 };
 
+/**
+ * Gets the numeric envelope ID for a compression algorithm.
+ *
+ * @param {CompressionAlgorithm} algorithm - The compression algorithm name.
+ * @returns {number} The numeric algorithm ID used in envelope headers.
+ */
 export function getCompressionAlgorithmId(algorithm: CompressionAlgorithm): number {
   return COMPRESSION_ALGORITHM_ID_MAP[algorithm];
 }
 
+/**
+ * Resolves a numeric envelope ID to a compression algorithm.
+ *
+ * @param {number} id - The numeric algorithm ID stored in an envelope header.
+ * @returns {CompressionAlgorithm | null} The mapped algorithm, or null if unknown.
+ */
 export function getCompressionAlgorithmById(id: number): CompressionAlgorithm | null {
   return COMPRESSION_ID_ALGORITHM_MAP[id] ?? null;
 }
 
+/**
+ * Parses and validates a compression algorithm string from configuration.
+ *
+ * @param {string | undefined} value - Raw algorithm value (e.g. from environment variables).
+ * @param {CompressionAlgorithm} fallback - Fallback algorithm when input is empty or invalid.
+ * @returns {CompressionAlgorithm} A valid compression algorithm.
+ */
 export function parseCompressionAlgorithm(
   value: string | undefined,
   fallback: CompressionAlgorithm = DEFAULT_COMPRESSION_ALGORITHM,
@@ -85,14 +104,31 @@ export interface CompressionResult {
 export class CompressionService {
   private readonly options: CompressionOptions;
 
+  /**
+   * Creates a new compression service.
+   *
+   * @param {CompressionOptions} options - Compression settings for this instance.
+   */
   constructor(options: CompressionOptions = { algorithm: 'zstd', minSizeBytes: 0 }) {
     this.options = options;
   }
 
+  /**
+   * Returns the active compression options.
+   *
+   * @returns {CompressionOptions} The configured compression options.
+   */
   getOptions(): CompressionOptions {
     return this.options;
   }
 
+  /**
+   * Compresses a buffer using the configured algorithm.
+   *
+   * @param {Buffer} data - The input buffer to compress.
+   * @returns {CompressionResult} Compression metadata and compressed payload.
+   * @throws {Error} If the input is not a Buffer.
+   */
   compress(data: Buffer): CompressionResult {
     if (!Buffer.isBuffer(data)) {
       throw new Error('CompressionService.compress expects a Buffer');
@@ -126,6 +162,13 @@ export class CompressionService {
     };
   }
 
+  /**
+   * Decompresses a previously compressed payload.
+   *
+   * @param {CompressionResult} compressed - Compressed payload and metadata.
+   * @returns {Buffer} The decompressed payload.
+   * @throws {Error} If the payload type is invalid, algorithm is unsupported, or sizes do not match.
+   */
   decompress(compressed: CompressionResult): Buffer {
     if (!Buffer.isBuffer(compressed.payload)) {
       throw new Error('CompressionService.decompress expects CompressionResult.payload to be a Buffer');

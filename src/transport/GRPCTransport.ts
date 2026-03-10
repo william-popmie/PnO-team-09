@@ -171,6 +171,7 @@ export class GrpcTransport implements Transport {
                 (err) => {
                     if (err) {
                         reject(new NetworkError(`Failed to bind gRPC server: ${err.message}`));
+                        return;
                     }
 
                     for (const [peerId, address] of Object.entries(this.peers)) {

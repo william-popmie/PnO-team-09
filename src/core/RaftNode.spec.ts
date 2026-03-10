@@ -1524,5 +1524,15 @@ describe('RaftNode.ts, RaftNode', () => {
         const result = await node.addServer('node4', 'localhost:52003');
         expect(result).toBe(false);
     });
+
+    it('should not throw when transport.removePeer is undefined', async () => {
+        await node.start();
+
+        transport.removePeer = undefined;
+
+        await expect(
+            node.removePeer('node4')
+        ).resolves.not.toThrow();
+    });
 });
 

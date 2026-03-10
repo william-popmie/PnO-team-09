@@ -131,8 +131,8 @@ export class FBNodeStorage<Keystype, ValuesType>
     const jsonBuffer = Buffer.from(JSON.stringify(payload), 'utf-8');
     const compressed = this.compressionService.compress(jsonBuffer);
 
-    const header = Buffer.alloc(COMPRESSION_ENVELOPE_HEADER_SIZE as number);
-    (NODE_STORAGE_COMPRESSED_PAYLOAD_MAGIC as Buffer).copy(header, 0);
+    const header = Buffer.alloc(COMPRESSION_ENVELOPE_HEADER_SIZE);
+    NODE_STORAGE_COMPRESSED_PAYLOAD_MAGIC.copy(header, 0);
     header.writeUInt32LE(compressed.originalSize, 4);
     header.writeUInt32LE(compressed.compressedSize, 8);
 
@@ -144,8 +144,8 @@ export class FBNodeStorage<Keystype, ValuesType>
       return buffer;
     }
 
-    const envelopeHeaderSize = COMPRESSION_ENVELOPE_HEADER_SIZE as number;
-    const envelopeMagic = NODE_STORAGE_COMPRESSED_PAYLOAD_MAGIC as Buffer;
+    const envelopeHeaderSize = COMPRESSION_ENVELOPE_HEADER_SIZE;
+    const envelopeMagic = NODE_STORAGE_COMPRESSED_PAYLOAD_MAGIC;
 
     if (!buffer.subarray(0, 4).equals(envelopeMagic)) {
       return buffer;

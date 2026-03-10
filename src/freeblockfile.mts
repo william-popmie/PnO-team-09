@@ -408,9 +408,9 @@ export class FreeBlockFile {
   }
 
   private serializeCompressedPayload(result: CompressionResult): Buffer {
-    const envelopeHeaderSize = COMPRESSION_ENVELOPE_HEADER_SIZE as number;
-    const algorithmId = COMPRESSION_ALGORITHM_ZSTD_ID as number;
-    const envelopeMagic = FREEBLOCK_COMPRESSED_PAYLOAD_MAGIC as Buffer;
+    const envelopeHeaderSize = COMPRESSION_ENVELOPE_HEADER_SIZE;
+    const algorithmId = COMPRESSION_ALGORITHM_ZSTD_ID;
+    const envelopeMagic = FREEBLOCK_COMPRESSED_PAYLOAD_MAGIC;
 
     const meta = Buffer.alloc(envelopeHeaderSize);
     envelopeMagic.copy(meta, 0);
@@ -421,9 +421,9 @@ export class FreeBlockFile {
   }
 
   private tryDeserializeCompressedPayload(payload: Buffer): CompressionResult | null {
-    const envelopeHeaderSize = COMPRESSION_ENVELOPE_HEADER_SIZE as number;
-    const algorithmId = COMPRESSION_ALGORITHM_ZSTD_ID as number;
-    const envelopeMagic = FREEBLOCK_COMPRESSED_PAYLOAD_MAGIC as Buffer;
+    const envelopeHeaderSize = COMPRESSION_ENVELOPE_HEADER_SIZE;
+    const algorithmId = COMPRESSION_ALGORITHM_ZSTD_ID;
+    const envelopeMagic = FREEBLOCK_COMPRESSED_PAYLOAD_MAGIC;
 
     if (payload.length < envelopeHeaderSize) {
       return null;

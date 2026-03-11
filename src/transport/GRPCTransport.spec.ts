@@ -5,7 +5,7 @@ import { LogEntry, LogEntryType } from "../log/LogEntry";
 import { NetworkError } from "../util/Error";
 import path from "path";
 
-let portCounter = 52000;
+let portCounter = 52000 + Math.floor(Math.random() * 5000);
 
 function nextPort() {
     return portCounter++;

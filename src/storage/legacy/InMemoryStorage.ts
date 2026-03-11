@@ -1,4 +1,4 @@
-import { StorageError } from "../util/Error";
+import { StorageError } from "../../util/Error";
 import { Storage, StorageOperation } from "./Storage";
 
 export class InMemoryStorage implements Storage {

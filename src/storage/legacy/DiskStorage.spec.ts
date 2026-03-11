@@ -3,7 +3,7 @@ import { DiskStorage } from "./DiskStorage";
 import fs from "fs/promises";
 import path from "node:path";
 import os from "os";
-import { StorageError } from "../util/Error";
+import { StorageError } from "../../util/Error";
 
 let testDir: string;
 

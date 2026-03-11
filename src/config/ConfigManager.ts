@@ -1,5 +1,6 @@
 import { NodeId } from "../core/Config";
-import { Storage, StorageCodec } from "../storage/Storage";
+import { Storage } from "../storage/legacy/Storage";
+import { StorageCodec } from "../storage/StorageUtil";
 import { StorageError } from "../util/Error";
 import { ClusterConfig, clusterConfigsEqual, ClusterMember, getQuorumSize, isLearner, isVoter } from "./ClusterConfig";
 

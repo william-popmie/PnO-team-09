@@ -1,5 +1,6 @@
 import { NodeId } from '../core/Config';
-import { StorageCodec, Storage, StorageOperation } from '../storage/Storage';
+import { Storage } from '../storage/legacy/Storage';
+import { StorageCodec, StorageOperation } from '../storage/StorageUtil';
 import { PersistentStateError, StorageError } from '../util/Error';
 
 export interface PersistentStateSnapshot {

@@ -7,10 +7,10 @@ import { SystemClock } from "../timing/Clock";
 import { TimerConfig } from "../timing/TimerManager";
 import { GrpcTransport } from "../transport/GRPCTransport";
 import { SystemRandom } from "../util/Random";
-import { DiskStorage } from "../storage/DiskStorage";
+import { DiskStorage } from "../storage/legacy/DiskStorage";
 import path from "node:path";
 import { ClusterMember } from "../config/ClusterConfig";
-import { StorageCodec } from "../storage/Storage";
+import { StorageCodec } from "../storage/StorageUtil";
 import { CONFIG_LEARNERS_KEY, CONFIG_VOTERS_KEY } from "../config/ConfigManager";
 import fs from "fs/promises";
 

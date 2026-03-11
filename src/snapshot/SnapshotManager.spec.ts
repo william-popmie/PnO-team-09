@@ -1,5 +1,6 @@
 import { SnapshotManager, SNAPSHOT_DATA_KEY, SNAPSHOT_INDEX_KEY, SNAPSHOT_TERM_KEY, SNAPSHOT_LEARNERS_KEY, SNAPSHOT_VOTERS_KEY } from './SnapshotManager';
-import { Storage, StorageCodec } from '../storage/Storage';
+import { Storage } from '../storage/legacy/Storage';
+import { StorageCodec } from '../storage/StorageUtil';
 import { StorageError } from '../util/Error';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -11,7 +12,7 @@ describe('SnapshotManager.ts, SnapshotManager', () => {
         lastIncludedIndex: 10,
         lastIncludedTerm: 3,
         data: Buffer.from("test data"),
-        config: { voters: ['node1', 'node2'], learners: []}
+        config: { voters: [{ id: 'node1', address: 'address1' }, { id: 'node2', address: 'address2' }], learners: [] }
     };
 
     beforeEach(() => {
@@ -146,7 +147,7 @@ describe('SnapshotManager.ts, SnapshotManager', () => {
             lastIncludedIndex: 20,
             lastIncludedTerm: 5,
             data: Buffer.from("new test data"),
-            config: { voters: ['node1', 'node2'], learners: []}
+            config: { voters: [{ id: 'node1', address: 'address1' }, { id: 'node2', address: 'address2' }], learners: [] }
         };
 
         await snapshotManager.saveSnapshot(newSnapshot);
@@ -195,7 +196,7 @@ describe('SnapshotManager.ts, SnapshotManager', () => {
                 return Buffer.from("test data");
             }
             if (key === SNAPSHOT_VOTERS_KEY) {
-                return StorageCodec.encodeJSON(['node1', 'node2']);
+                return StorageCodec.encodeJSON([{ id: 'node1', address: 'address1' }, { id: 'node2', address: 'address2' }]);
             }
             if (key === SNAPSHOT_LEARNERS_KEY) {
                 return StorageCodec.encodeJSON([]);
@@ -209,7 +210,7 @@ describe('SnapshotManager.ts, SnapshotManager', () => {
             lastIncludedIndex: 10,
             lastIncludedTerm: 3,
             data: Buffer.from("test data"),
-            config: { voters: ['node1', 'node2'], learners: []}
+            config: { voters: [{ id: 'node1', address: 'address1' }, { id: 'node2', address: 'address2' }], learners: [] }
         });
     });
 
@@ -287,7 +288,7 @@ describe('SnapshotManager.ts, SnapshotManager', () => {
             lastIncludedIndex: 20,
             lastIncludedTerm: 5,
             data: Buffer.from("new test data"),
-            config: { voters: ['node1', 'node2'], learners: []}
+            config: { voters: [{ id: 'node1', address: 'address1' }, { id: 'node2', address: 'address2' }], learners: [] }
         };
         await snapshotManager.saveSnapshot(newSnapshot);
         expect(snapshotManager.getSnapshotMetadata()).toEqual({ lastIncludedIndex: newSnapshot.lastIncludedIndex, lastIncludedTerm: newSnapshot.lastIncludedTerm });

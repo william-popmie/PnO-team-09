@@ -1,9 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ClusterConfig } from './ClusterConfig';
 import { ConfigManager, CONFIG_VOTERS_KEY, CONFIG_LEARNERS_KEY } from './ConfigManager';
-import { InMemoryStorage } from '../storage/InMemoryStorage';
+import { InMemoryStorage } from '../storage/legacy/InMemoryStorage';
 import { StorageError } from '../util/Error';
-import { config } from 'node:process';
 
 describe('ConfigManager.ts, ConfigManager', () => {
     const nodeId1 = 'node1';

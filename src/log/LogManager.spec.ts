@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { LogManager, SNAPSHOT_INDEX_KEY, SNAPSHOT_TERM_KEY } from "./LogManager";
 import { LogEntry, Command, LogEntryType } from "./LogEntry";
-import { InMemoryStorage } from "../storage/InMemoryStorage";
+import { InMemoryStorage } from "../storage/legacy/InMemoryStorage";
 import { LogInconsistencyError, StorageError } from "../util/Error";
-import { StorageCodec } from "../storage/Storage";
+import { StorageCodec } from "../storage/StorageUtil";
 
 describe('LogManager.ts, LogManager', () => {
 
@@ -715,12 +715,12 @@ describe('LogManager.ts, LogManager', () => {
     });
 
     it('should throw when not initialized for appendConfigEntry', async () => {
-        await expect(logManager.appendConfigEntry({ voters: ['node1', 'node2'], learners: [] }, 1 )).rejects.toThrow('LogManager is not initialized');
+        await expect(logManager.appendConfigEntry({ voters: [{ id: 'node1', address: 'address1' }, { id: 'node2', address: 'address2' }], learners: [] }, 1 )).rejects.toThrow('LogManager is not initialized');
     });
 
     it('should append a config entry and return the new index', async () => {
         await logManager.initialize();
-        const config = { voters: ['node1', 'node2'], learners: [] };
+        const config = { voters: [{ id: 'node1', address: 'address1' }, { id: 'node2', address: 'address2' }], learners: [] };
         const newIndex = await logManager.appendConfigEntry(config, 1);
         expect(newIndex).toBe(1);
         const entry = await logManager.getEntry(1);
@@ -740,7 +740,10 @@ describe('LogManager.ts, LogManager', () => {
 
     it('should return the last config entry for getLastConfigEntry', async () => {
         await logManager.initialize();
-        const config = { voters: ['node1', 'node2'], learners: []};
+        const config = { voters: [
+            { id: 'node1', address: 'address1' },
+            { id: 'node2', address: 'address2' }
+        ], learners: []};
         await logManager.appendCommand(validCommand, 1);
         await logManager.appendConfigEntry(config, 1);
         await logManager.appendCommand(validCommand2, 1);

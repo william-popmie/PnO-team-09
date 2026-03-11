@@ -10,7 +10,7 @@ import { TimerManager } from "../timing/TimerManager";
 import { ConsoleLogger, Logger } from "../util/Logger";
 import { Random } from "../util/Random";
 import { Clock } from "../timing/Clock";
-import { Storage } from "../storage/Storage";
+import { Storage } from "../storage/legacy/Storage";
 import { Transport } from "../transport/Transport";
 import { RaftError } from "../util/Error";
 import { AsyncLock } from "../lock/AsyncLock";

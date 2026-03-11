@@ -4,7 +4,7 @@ import * as path from "path";
 import { AppendEntriesResponse, RPCMessage } from "../rpc/RPCTypes";
 import { NetworkError } from "../util/Error";
 import { Transport, MessageHandler } from "./Transport";
-import { StorageCodec } from "../storage/Storage";
+import { StorageCodec } from "../storage/StorageUtil";
 import { NodeId } from "../core/Config";
 import fs from "fs/promises";
 

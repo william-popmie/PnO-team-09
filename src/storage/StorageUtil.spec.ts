@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { StorageCodec } from "./Storage";
 import { LogEntry, LogEntryType } from "../log/LogEntry";
+import { StorageCodec } from "./StorageUtil";
 
 describe('Storage.ts, StorageCodec', () => {
     it('should encode and decode numbers', () => {
@@ -135,13 +135,13 @@ describe('Storage.ts, StorageCodec', () => {
             index: 1,
             term: 1,
             type: LogEntryType.CONFIG,
-            config: { voters: ['node1', 'node2'], learners: [] }
+            config: { voters: [ { id: 'node1', address: 'address1' }, { id: 'node2', address: 'address2' } ], learners: [] }
         };
         const serialized = StorageCodec.serializeLogEntry(logEntry) as any;
         expect(serialized.index).toBe(1);
         expect(serialized.term).toBe(1);
         expect(serialized.type).toBe(LogEntryType.CONFIG);
-        expect(JSON.parse(serialized.config)).toEqual({ voters: ['node1', 'node2'], learners: [] });
+        expect(JSON.parse(serialized.config)).toEqual({ voters: [ { id: 'node1', address: 'address1' }, { id: 'node2', address: 'address2' } ], learners: [] });
     });
 
     it('should deserialize a COMMAND log entry correctly', () => {
@@ -161,7 +161,7 @@ describe('Storage.ts, StorageCodec', () => {
             index: 1,
             term: 1,
             type: LogEntryType.CONFIG,
-            config: { voters: ['node1', 'node2'], learners: [] }
+            config: { voters: [ { id: 'node1', address: 'address1' }, { id: 'node2', address: 'address2' } ], learners: [] }
         };
         const serialized = StorageCodec.serializeLogEntry(logEntry);
         const deserialized = StorageCodec.deserializeLogEntry(serialized);
@@ -173,7 +173,7 @@ describe('Storage.ts, StorageCodec', () => {
             term: 1,
             index: 1,
             type: LogEntryType.CONFIG,
-            config: JSON.stringify({ voters: ['node1', 'node2'], learners: [] })
+            config: JSON.stringify({ voters: [ { id: 'node1', address: 'address1' }, { id: 'node2', address: 'address2' } ], learners: [] })
         };
 
         const deserialized = StorageCodec.deserializeLogEntry(raw);
@@ -181,7 +181,7 @@ describe('Storage.ts, StorageCodec', () => {
             term: 1,
             index: 1,
             type: LogEntryType.CONFIG,
-            config: { voters: ['node1', 'node2'], learners: [] }
+            config: { voters: [ { id: 'node1', address: 'address1' }, { id: 'node2', address: 'address2' } ], learners: [] }
         });
     });
 
@@ -190,14 +190,14 @@ describe('Storage.ts, StorageCodec', () => {
             term: 1,
             index: 1,
             type: LogEntryType.CONFIG,
-            config: { voters: ['node1', 'node2'], learners: [] }
+            config: { voters: [ { id: 'node1', address: 'address1' }, { id: 'node2', address: 'address2' } ], learners: [] }
         };
         const deserialized = StorageCodec.deserializeLogEntry(raw);
         expect(deserialized).toEqual({
             term: 1,
             index: 1,
             type: LogEntryType.CONFIG,
-            config: { voters: ['node1', 'node2'], learners: [] }
+            config: { voters: [ { id: 'node1', address: 'address1' }, { id: 'node2', address: 'address2' } ], learners: [] }
         });
     });
 });

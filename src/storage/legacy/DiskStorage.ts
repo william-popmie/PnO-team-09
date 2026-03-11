@@ -1,6 +1,6 @@
-import { AsyncLock } from "../lock/AsyncLock";
+import { AsyncLock } from "../../lock/AsyncLock";
 import path from "node:path";
-import { StorageError } from "../util/Error";
+import { StorageError } from "../../util/Error";
 import { Storage, StorageOperation } from "./Storage";
 import fs from "fs/promises";
 

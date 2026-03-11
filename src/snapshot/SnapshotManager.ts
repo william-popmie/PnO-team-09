@@ -1,6 +1,7 @@
-import { Storage, StorageCodec } from "../storage/Storage";
+import { Storage } from "../storage/legacy/Storage";
+import { StorageCodec } from "../storage/StorageUtil";
 import { StorageError } from "../util/Error";
-import { ClusterConfig } from "../config/ClusterConfig";
+import { ClusterConfig, ClusterMember } from "../config/ClusterConfig";
 import { NodeId } from "../core/Config";
 
 export interface SnapshotMetaData {
@@ -109,8 +110,8 @@ export class SnapshotManager implements SnapshotManagerInterface {
         }
 
         const config: ClusterConfig = {
-            voters: StorageCodec.decodeJSON<NodeId[]>(votersBuffer),
-            learners: StorageCodec.decodeJSON<NodeId[]>(learnersBuffer)
+            voters: StorageCodec.decodeJSON<ClusterMember[]>(votersBuffer),
+            learners: StorageCodec.decodeJSON<ClusterMember[]>(learnersBuffer)
         };
 
         return {

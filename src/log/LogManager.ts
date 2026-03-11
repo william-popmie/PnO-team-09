@@ -1,6 +1,7 @@
 import { LogEntry, validateLogEntry, Command, LogEntryType } from './LogEntry';
 import { StorageError, LogInconsistencyError } from '../util/Error';
-import { Storage, StorageOperation, StorageCodec } from '../storage/Storage';
+import { Storage } from '../storage/legacy/Storage';
+import { StorageCodec, StorageOperation } from '../storage/StorageUtil';
 import { RaftEventBus } from '../events/RaftEvents';
 import { NoOpEventBus } from '../events/EventBus';
 import { NodeId } from '../core/Config';

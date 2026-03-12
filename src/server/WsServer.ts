@@ -1,17 +1,14 @@
-
 import { WebSocketServer, WebSocket } from "ws";
 import { EventStore } from "../events/EventStore";
-// import { ClusterRunner } from "./ClusterRunner";
 import { ClientMessage, ServerMessage } from "../events/RaftEvents";
-import { ClusterRunnerGRPC } from "./ClusterRunnerGRPC";
+import { ClusterRunnerInterface } from "./ClusterRunnerInterface";
 
 export class WsServer {
     private wss: WebSocketServer | null = null;
 
     constructor(
         private eventStore: EventStore,
-        // private cluster: ClusterRunner,
-        private cluster: ClusterRunnerGRPC,
+        private cluster: ClusterRunnerInterface,
         private port: number = 4001
     ) {}
 
@@ -56,7 +53,6 @@ export class WsServer {
                     type: "LiveEvent",
                     event,
                 };
-
                 ws.send(JSON.stringify(message));
             });
         });
@@ -68,7 +64,7 @@ export class WsServer {
             } catch (err) {
                 console.error("Failed to parse message from client:", err);
             }
-        })
+        });
 
         ws.on("close", () => {
             console.log("Client disconnected");

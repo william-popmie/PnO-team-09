@@ -1,4 +1,4 @@
-import { ClusterConfig } from "../config/ClusterConfig";
+import { ClusterConfig } from "../../config/ClusterConfig";
 
 export interface SnapshotMetaData {
     lastIncludedIndex: number;

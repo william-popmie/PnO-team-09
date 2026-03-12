@@ -1,11 +1,7 @@
 import { NodeId } from "../core/Config";
-import { Storage } from "../storage/legacy/Storage";
-import { StorageCodec } from "../storage/StorageUtil";
+import { ConfigStorage } from "../storage/interfaces/ConfigStorage";
 import { StorageError } from "../util/Error";
 import { ClusterConfig, clusterConfigsEqual, ClusterMember, getQuorumSize, isLearner, isVoter } from "./ClusterConfig";
-
-export const CONFIG_VOTERS_KEY = "raft:config:voters";
-export const CONFIG_LEARNERS_KEY = "raft:config:learners";
 
 export interface ConfigManagerInterface {
     applyConfigEntry(config: ClusterConfig): void;
@@ -27,7 +23,7 @@ export class ConfigManager implements ConfigManagerInterface {
     private initialized: boolean = false;
 
     constructor(
-        private readonly storage: Storage,
+        private readonly configStorage: ConfigStorage,
         initialConfig: ClusterConfig
     ) {
         this.activeConfig = initialConfig;
@@ -39,18 +35,14 @@ export class ConfigManager implements ConfigManagerInterface {
             return this.committedConfig;
         }
 
-        const votersBuffer = await this.storage.get(CONFIG_VOTERS_KEY);
-        const learnersBuffer = await this.storage.get(CONFIG_LEARNERS_KEY);
+        const data = await this.configStorage.read();
 
-        if (!votersBuffer || !learnersBuffer) {
+        if (!data) {
             this.initialized = true;
             return null;
         }
 
-        const voters = StorageCodec.decodeJSON<ClusterMember[]>(votersBuffer);
-        const learners = StorageCodec.decodeJSON<ClusterMember[]>(learnersBuffer);
-
-        const persistedConfig: ClusterConfig = { voters, learners };
+        const persistedConfig: ClusterConfig = { voters: data.voters, learners: data.learners };
         this.activeConfig = persistedConfig;
         this.committedConfig = persistedConfig;
         this.initialized = true;
@@ -66,18 +58,7 @@ export class ConfigManager implements ConfigManagerInterface {
     async commitConfig(config: ClusterConfig): Promise<void> {
         this.ensureInitialized();
 
-        await this.storage.batch([
-            {
-                type: "set",
-                key: CONFIG_VOTERS_KEY,
-                value: StorageCodec.encodeJSON(config.voters)
-            },
-            {
-                type: "set",
-                key: CONFIG_LEARNERS_KEY,
-                value: StorageCodec.encodeJSON(config.learners)
-            }
-        ]);
+        await this.configStorage.write(config.voters, config.learners);
 
         this.committedConfig = config;
     }

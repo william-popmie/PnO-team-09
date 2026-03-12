@@ -1,18 +1,7 @@
-import { Storage } from "../storage/legacy/Storage";
-import { StorageCodec } from "../storage/StorageUtil";
+import { SnapshotStorage, Snapshot, SnapshotMetaData } from "../storage/interfaces/SnapshotStorage";
 import { StorageError } from "../util/Error";
-import { ClusterConfig, ClusterMember } from "../config/ClusterConfig";
-import { NodeId } from "../core/Config";
 
-export interface SnapshotMetaData {
-    lastIncludedIndex: number;
-    lastIncludedTerm: number;
-}
-
-export interface Snapshot extends SnapshotMetaData {
-    data: Buffer;
-    config: ClusterConfig;
-}
+export type { SnapshotMetaData, Snapshot };
 
 export interface SnapshotManagerInterface {
     saveSnapshot(snapshot: Snapshot): Promise<void>;
@@ -21,12 +10,6 @@ export interface SnapshotManagerInterface {
     getSnapshotMetadata(): SnapshotMetaData | null;
 }
 
-export const SNAPSHOT_INDEX_KEY = "raft:log:snapshot:index";
-export const SNAPSHOT_TERM_KEY = "raft:log:snapshot:term";
-export const SNAPSHOT_DATA_KEY = "raft:log:snapshot:data";
-export const SNAPSHOT_VOTERS_KEY = "raft:log:snapshot:config:voters";
-export const SNAPSHOT_LEARNERS_KEY = "raft:log:snapshot:config:learners";
-
 export class SnapshotManager implements SnapshotManagerInterface {
 
     private cachedIndex: number = 0;
@@ -34,7 +17,7 @@ export class SnapshotManager implements SnapshotManagerInterface {
     private initialized: boolean = false;
 
     constructor(
-        private readonly storage: Storage
+        private readonly snapshotStorage: SnapshotStorage
     ) {}
 
     async initialize(): Promise<SnapshotMetaData | null> {
@@ -44,16 +27,15 @@ export class SnapshotManager implements SnapshotManagerInterface {
                 : null;
         }
 
-        const indexBuffer = await this.storage.get(SNAPSHOT_INDEX_KEY);
-        const termBuffer = await this.storage.get(SNAPSHOT_TERM_KEY);
+        const meta = await this.snapshotStorage.readMetadata();
 
-        if (!indexBuffer || !termBuffer) {
+        if (!meta) {
             this.initialized = true;
             return null;
         }
 
-        this.cachedIndex = StorageCodec.decodeNumber(indexBuffer);
-        this.cachedTerm = StorageCodec.decodeNumber(termBuffer);
+        this.cachedIndex = meta.lastIncludedIndex;
+        this.cachedTerm = meta.lastIncludedTerm;
         this.initialized = true;
 
         return { lastIncludedIndex: this.cachedIndex, lastIncludedTerm: this.cachedTerm };
@@ -62,33 +44,7 @@ export class SnapshotManager implements SnapshotManagerInterface {
     async saveSnapshot(snapshot: Snapshot): Promise<void> {
         this.ensureInitialized();
 
-        await this.storage.batch([
-            {
-                type: "set",
-                key: SNAPSHOT_INDEX_KEY,
-                value: StorageCodec.encodeNumber(snapshot.lastIncludedIndex)
-            },
-            {
-                type: "set",
-                key: SNAPSHOT_TERM_KEY,
-                value: StorageCodec.encodeNumber(snapshot.lastIncludedTerm)
-            },
-            {
-                type: "set",
-                key: SNAPSHOT_DATA_KEY,
-                value: snapshot.data
-            },
-            {
-                type: "set",
-                key: SNAPSHOT_VOTERS_KEY,
-                value: StorageCodec.encodeJSON(snapshot.config.voters)
-            },
-            {
-                type: "set",
-                key: SNAPSHOT_LEARNERS_KEY,
-                value: StorageCodec.encodeJSON(snapshot.config.learners)
-            }
-        ]);
+        await this.snapshotStorage.save(snapshot);
 
         this.cachedIndex = snapshot.lastIncludedIndex;
         this.cachedTerm = snapshot.lastIncludedTerm;
@@ -101,25 +57,7 @@ export class SnapshotManager implements SnapshotManagerInterface {
             return null;
         }
 
-        const dataBuffer = await this.storage.get(SNAPSHOT_DATA_KEY);
-        const votersBuffer = await this.storage.get(SNAPSHOT_VOTERS_KEY);
-        const learnersBuffer = await this.storage.get(SNAPSHOT_LEARNERS_KEY);
-
-        if (!dataBuffer || !votersBuffer || !learnersBuffer) {
-            return null;
-        }
-
-        const config: ClusterConfig = {
-            voters: StorageCodec.decodeJSON<ClusterMember[]>(votersBuffer),
-            learners: StorageCodec.decodeJSON<ClusterMember[]>(learnersBuffer)
-        };
-
-        return {
-            lastIncludedIndex: this.cachedIndex,
-            lastIncludedTerm: this.cachedTerm,
-            data: dataBuffer,
-            config: config
-        };
+        return await this.snapshotStorage.load();
     }
 
     hasSnapshot(): boolean {

@@ -8,4 +8,7 @@ export interface NodeStorage {
     config: ConfigStorage;
     log: LogStorage;
     snapshot: SnapshotStorage;
+    open(): Promise<void>;
+    close(): Promise<void>;
+    isOpen(): boolean;
 }

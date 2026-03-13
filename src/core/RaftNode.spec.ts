@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { RaftNode } from './RaftNode';
 import { RaftState } from './StateMachine';
 import { RaftError } from '../util/Error';
-import { InMemoryStorage } from '../storage/legacy/InMemoryStorage';
+import { InMemoryNodeStorage } from '../storage/inMemory/InMemoryNodeStorage';
 import { createConfig } from './Config';
 import { MockClock } from '../timing/Clock';
 import { SeededRandom } from '../util/Random';
@@ -15,7 +15,7 @@ describe('RaftNode.ts, RaftNode', () => {
     const nodeId = 'node1';
     const peers = ['node2', 'node3'];
 
-    let storage: InMemoryStorage;
+    let storage: InMemoryNodeStorage;
     let transport: {
         isStarted: ReturnType<typeof vi.fn>;
         start: ReturnType<typeof vi.fn>;
@@ -70,7 +70,7 @@ describe('RaftNode.ts, RaftNode', () => {
     };
 
     beforeEach(async () => {
-        storage = new InMemoryStorage();
+        storage = new InMemoryNodeStorage();
         await storage.open();
 
         transport = {
@@ -532,6 +532,23 @@ describe('RaftNode.ts, RaftNode', () => {
             expect(appStateMachine.apply).toHaveBeenNthCalledWith(2, { type: 'set', payload: { key: 'y', value: 20}});
             expect(appStateMachine.apply).toHaveBeenNthCalledWith(3, { type: 'set', payload: { key: 'z', value: 30}});
             expect(volatileState.getLastApplied()).toBe(3);
+        });
+    });
+
+    it('should skip NOOP entries while advancing lastApplied', async () => {
+        await node.start();
+
+        const logManager = (node as any)['logManager'];
+        const volatileState = (node as any)['volatileState'];
+
+        await logManager.appendNoOpEntry(1);
+        volatileState.setCommitIndex(1);
+
+        await tickApplyLoop();
+
+        await vi.waitFor(() => {
+            expect(appStateMachine.apply).not.toHaveBeenCalled();
+            expect(volatileState.getLastApplied()).toBe(1);
         });
     });
 

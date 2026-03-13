@@ -107,7 +107,7 @@ export class PersistentState implements PersistentStateInterface {
                 votedFor: this.votedFor,
             };
         } catch (error) {
-            throw new PersistentStateError('Failed to restore persistent state', error instanceof StorageError ? error : undefined);
+            throw new PersistentStateError('Failed to restore persistent state', error as StorageError);
         }
     }
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ClusterConfig } from './ClusterConfig';
-import { ConfigManager, CONFIG_VOTERS_KEY, CONFIG_LEARNERS_KEY } from './ConfigManager';
-import { InMemoryStorage } from '../storage/legacy/InMemoryStorage';
+import { ConfigManager } from './ConfigManager';
+import { InMemoryConfigStorage } from '../storage/inMemory/InMemoryConfigStorage';
 import { StorageError } from '../util/Error';
 
 describe('ConfigManager.ts, ConfigManager', () => {
@@ -18,18 +18,18 @@ describe('ConfigManager.ts, ConfigManager', () => {
         learners: []
     };
 
-    let storage: InMemoryStorage;
+    let configStorage: InMemoryConfigStorage;
     let configManager: ConfigManager;
 
     beforeEach(async () => {
-        storage = new InMemoryStorage();
-        await storage.open();
-        configManager = new ConfigManager(storage, initialConfig);
+        configStorage = new InMemoryConfigStorage();
+        await configStorage.open();
+        configManager = new ConfigManager(configStorage, initialConfig);
         await configManager.initialize();
     });
 
     it('should return null when no persisted config exists', async () => {
-        const fresh = new ConfigManager(storage, initialConfig);
+        const fresh = new ConfigManager(configStorage, initialConfig);
         const result = await fresh.initialize();
         expect(result).toBeNull();
     });
@@ -37,7 +37,7 @@ describe('ConfigManager.ts, ConfigManager', () => {
     it('should return persisted config on initialization', async () => {
         await configManager.commitConfig({ voters: [ { id: 'node1', address: 'address1' }, { id: 'node2', address: 'address2' } ], learners: [{ id: 'node3', address: 'address3' }] });
 
-        const fresh = new ConfigManager(storage, initialConfig);
+        const fresh = new ConfigManager(configStorage, initialConfig);
         const result = await fresh.initialize();
         expect(result).toEqual({ voters: [ { id: 'node1', address: 'address1' }, { id: 'node2', address: 'address2' } ], learners: [{ id: 'node3', address: 'address3' }] });
     });
@@ -46,7 +46,7 @@ describe('ConfigManager.ts, ConfigManager', () => {
         const savedConfig: ClusterConfig = { voters: [ { id: 'node1', address: 'address1' }, { id: 'node2', address: 'address2' } ], learners: [{ id: 'node3', address: 'address3' }] };
         await configManager.commitConfig(savedConfig);
 
-        const fresh = new ConfigManager(storage, initialConfig);
+        const fresh = new ConfigManager(configStorage, initialConfig);
         await fresh.initialize();
         expect(fresh.getActiveConfig()).toEqual(savedConfig);
     });
@@ -55,7 +55,7 @@ describe('ConfigManager.ts, ConfigManager', () => {
         const savedConfig: ClusterConfig = { voters: [ { id: 'node1', address: 'address1' }, { id: 'node2', address: 'address2' } ], learners: [{ id: 'node3', address: 'address3' }] };
         await configManager.commitConfig(savedConfig);
 
-        const fresh = new ConfigManager(storage, initialConfig);
+        const fresh = new ConfigManager(configStorage, initialConfig);
         await fresh.initialize();
         expect(fresh.getCommittedConfig()).toEqual(savedConfig);
     });
@@ -63,16 +63,6 @@ describe('ConfigManager.ts, ConfigManager', () => {
     it('should return existing commitedConfig if already initialized', async () => {
         const result = await configManager.initialize();
         expect(result).toEqual(initialConfig);
-    });
-
-    it('should return null if only voters key exists but not leadders', async () => {
-        const storageWithOnlyVoters = new InMemoryStorage();
-        await storageWithOnlyVoters.open();
-        await storageWithOnlyVoters.set(CONFIG_VOTERS_KEY, Buffer.from(JSON.stringify(allVoters)));
-
-        const fresh = new ConfigManager(storageWithOnlyVoters, initialConfig);
-        const result = await fresh.initialize();
-        expect(result).toBeNull();
     });
 
     it('should update activeConfig', () => {
@@ -88,7 +78,7 @@ describe('ConfigManager.ts, ConfigManager', () => {
     });
 
     it('should throw if not initialized when applying config entry', () => {
-        const fresh = new ConfigManager(storage, initialConfig);
+        const fresh = new ConfigManager(configStorage, initialConfig);
         expect(() => fresh.applyConfigEntry(initialConfig)).toThrow(StorageError);
     });
 
@@ -102,13 +92,13 @@ describe('ConfigManager.ts, ConfigManager', () => {
         const newConfig: ClusterConfig = { voters: [ { id: 'node1', address: 'address1' }, { id: 'node2', address: 'address2' } ], learners: [{ id: 'node4', address: 'address4' }] };
         await configManager.commitConfig(newConfig);
 
-        const fresh = new ConfigManager(storage, initialConfig);
+        const fresh = new ConfigManager(configStorage, initialConfig);
         const result = await fresh.initialize();
         expect(result).toEqual(newConfig);
     });
 
     it('should throw if not initialized when committing config', async () => {
-        const fresh = new ConfigManager(storage, initialConfig);
+        const fresh = new ConfigManager(configStorage, initialConfig);
         await expect(fresh.commitConfig(initialConfig)).rejects.toThrow(StorageError);
     });
 
@@ -117,12 +107,12 @@ describe('ConfigManager.ts, ConfigManager', () => {
     });
 
     it('should throw if not initialized when getting active config', () => {
-        const fresh = new ConfigManager(storage, initialConfig);
+        const fresh = new ConfigManager(configStorage, initialConfig);
         expect(() => fresh.getActiveConfig()).toThrow(StorageError);
     });
 
     it('should throw if not initialized when getting committed config', () => {
-        const fresh = new ConfigManager(storage, initialConfig);
+        const fresh = new ConfigManager(configStorage, initialConfig);
         expect(() => fresh.getCommittedConfig()).toThrow(StorageError);
     });
 
@@ -137,7 +127,7 @@ describe('ConfigManager.ts, ConfigManager', () => {
     });
 
     it('should throw if not initialized when getting voters', () => {
-        const fresh = new ConfigManager(storage, initialConfig);
+        const fresh = new ConfigManager(configStorage, initialConfig);
         expect(() => fresh.getVoters()).toThrow(StorageError);
     });
 
@@ -152,7 +142,7 @@ describe('ConfigManager.ts, ConfigManager', () => {
     });
 
     it('should throw if not initialized when getting learners', () => {
-        const fresh = new ConfigManager(storage, initialConfig);
+        const fresh = new ConfigManager(configStorage, initialConfig);
         expect(() => fresh.getLearners()).toThrow(StorageError);
     });
 
@@ -174,7 +164,7 @@ describe('ConfigManager.ts, ConfigManager', () => {
     });
 
     it('should throw if not initialized when getting all peers', () => {
-        const fresh = new ConfigManager(storage, initialConfig);
+        const fresh = new ConfigManager(configStorage, initialConfig);
         expect(() => fresh.getAllPeers('node1')).toThrow(StorageError);
     });
 
@@ -189,7 +179,7 @@ describe('ConfigManager.ts, ConfigManager', () => {
     });
 
     it('should throw if not initialized when getting quorum size', () => {
-        const fresh = new ConfigManager(storage, initialConfig);
+        const fresh = new ConfigManager(configStorage, initialConfig);
         expect(() => fresh.getQuorumSize()).toThrow(StorageError);
     });
 
@@ -202,7 +192,7 @@ describe('ConfigManager.ts, ConfigManager', () => {
     });
 
     it('should throw if not initialized when checking if node is voter', () => {
-        const fresh = new ConfigManager(storage, initialConfig);
+        const fresh = new ConfigManager(configStorage, initialConfig);
         expect(() => fresh.isVoter('node1')).toThrow(StorageError);
     });
 
@@ -217,7 +207,7 @@ describe('ConfigManager.ts, ConfigManager', () => {
     });
 
     it('should throw if not initialized when checking if node is learner', () => {
-        const fresh = new ConfigManager(storage, initialConfig);
+        const fresh = new ConfigManager(configStorage, initialConfig);
         expect(() => fresh.isLearner('node4')).toThrow(StorageError);
     });
 
@@ -239,7 +229,7 @@ describe('ConfigManager.ts, ConfigManager', () => {
     });
 
     it('should throw if not initialized when checking for pending changes', () => {
-        const fresh = new ConfigManager(storage, initialConfig);
+        const fresh = new ConfigManager(configStorage, initialConfig);
         expect(() => fresh.hasPendingChange()).toThrow(StorageError);
     });
 
@@ -258,7 +248,7 @@ describe('ConfigManager.ts, ConfigManager', () => {
     });
 
     it('should throw if not initialized when getting member address', () => {
-        const fresh = new ConfigManager(storage, initialConfig);
+        const fresh = new ConfigManager(configStorage, initialConfig);
         expect(() => fresh.getMemberAddress('node1')).toThrow(StorageError);
     });
 
@@ -291,7 +281,7 @@ describe('ConfigManager.ts, ConfigManager', () => {
     });
 
     it('should throw if not initialized when getting all members', () => {
-        const fresh = new ConfigManager(storage, initialConfig);
+        const fresh = new ConfigManager(configStorage, initialConfig);
         expect(() => fresh.getAllMembers()).toThrow(StorageError);
     });
 });

@@ -1,42 +1,43 @@
 import { describe, it, expect } from "vitest";
 import { PersistentState } from "./PersistentState";
-import { InMemoryStorage} from "../storage/legacy/InMemoryStorage";
-import { StorageCodec, StorageOperation } from "../storage/StorageUtil";
+import { InMemoryMetaStorage } from "../storage/inMemory/InMemoryMetaStorage";
 import { PersistentStateError, StorageError } from "../util/Error";
+import { MetaData } from "../storage/interfaces/MetaStorage";
+import { NodeId } from "../core/Config";
 
 describe('PersistentState.ts, PersistentState', () => {
 
-    class FailingStorage extends InMemoryStorage {
-        async batch(operations: StorageOperation[]): Promise<void> {
-            throw new StorageError('Storage batch error');
+    class FailingWriteStorage extends InMemoryMetaStorage {
+        async write(term: number, votedFor: NodeId | null): Promise<void> {
+            throw new StorageError('Storage write error');
         }
     }
 
-    class FailingStorage2 extends InMemoryStorage {
-        async batch(operations: StorageOperation[]): Promise<void> {
+    class FailingWriteStorage2 extends InMemoryMetaStorage {
+        async write(term: number, votedFor: NodeId | null): Promise<void> {
             throw new Error('Generic error');
         }
     }
 
-    class FailingStorage3 extends InMemoryStorage {
-        async get(key: string): Promise<Buffer | null> {
-            throw new StorageError('Storage get error');
+    class FailingReadStorage extends InMemoryMetaStorage {
+        async read(): Promise<MetaData | null> {
+            throw new StorageError('Storage read error');
         }
     }
 
     it('should initialize with empty storage', async () => {
-        const storage = new InMemoryStorage();
-        await storage.open();
-        const persistentState = new PersistentState(storage);
+        const meta = new InMemoryMetaStorage();
+        await meta.open();
+        const persistentState = new PersistentState(meta);
         const snapshot = await persistentState.initialize();
         expect(snapshot.currentTerm).toBe(0);
         expect(snapshot.votedFor).toBeNull();
     });
 
     it('should return early when already initialized', async () => {
-        const storage = new InMemoryStorage();
-        await storage.open();
-        const persistentState = new PersistentState(storage);
+        const meta = new InMemoryMetaStorage();
+        await meta.open();
+        const persistentState = new PersistentState(meta);
         await persistentState.initialize();
         const snapshot = await persistentState.initialize();
         expect(snapshot.currentTerm).toBe(0);
@@ -44,51 +45,51 @@ describe('PersistentState.ts, PersistentState', () => {
     });
 
     it('should throw when storage is not open', async () => {
-        const storage = new InMemoryStorage();
-        const persistentState = new PersistentState(storage);
+        const meta = new InMemoryMetaStorage();
+        const persistentState = new PersistentState(meta);
         await expect(persistentState.initialize()).rejects.toThrow(PersistentStateError);
     });
 
     it('should throw when calling a method before initialization', () => {
-        const storage = new InMemoryStorage();
-        const persistentState = new PersistentState(storage);
+        const meta = new InMemoryMetaStorage();
+        const persistentState = new PersistentState(meta);
         expect(() => persistentState.getCurrentTerm()).toThrow(PersistentStateError);
     });
 
     it('should throw PersistentStateError if restore fails with StorageError', async () => {
-        const storage = new FailingStorage3();
-        await storage.open();
-        const persistentState = new PersistentState(storage);
+        const meta = new FailingReadStorage();
+        await meta.open();
+        const persistentState = new PersistentState(meta);
         await expect(persistentState.initialize()).rejects.toThrow(PersistentStateError);
     });
 
     it('should restore existing term from storage', async () => {
-        const storage = new InMemoryStorage();
-        await storage.open();
+        const meta = new InMemoryMetaStorage();
+        await meta.open();
+        await meta.write(5, null);
 
-        await storage.set('raft:currentTerm', StorageCodec.encodeNumber(5));
-
-        const persistentState = new PersistentState(storage);
+        const persistentState = new PersistentState(meta);
         const snapshot = await persistentState.initialize();
         expect(snapshot.currentTerm).toBe(5);
         expect(persistentState.getCurrentTerm()).toBe(5);
         expect(persistentState.getVotedFor()).toBeNull();
     });
 
-    it('should throw if votedFor is set but currentTerm is missing', async () => {
-        const storage = new InMemoryStorage();
-        await storage.open();
+    it('should restore existing term and votedFor from storage', async () => {
+        const meta = new InMemoryMetaStorage();
+        await meta.open();
+        await meta.write(3, 'node2');
 
-        await storage.set('raft:votedFor', StorageCodec.encodeString('node1'));
-
-        const persistentState = new PersistentState(storage);
-        await expect(persistentState.initialize()).rejects.toThrow(PersistentStateError);
+        const persistentState = new PersistentState(meta);
+        const snapshot = await persistentState.initialize();
+        expect(snapshot.currentTerm).toBe(3);
+        expect(snapshot.votedFor).toBe('node2');
     });
 
     it('should get and set current term', async () => {
-        const storage = new InMemoryStorage();
-        await storage.open();
-        const persistentState = new PersistentState(storage);
+        const meta = new InMemoryMetaStorage();
+        await meta.open();
+        const persistentState = new PersistentState(meta);
         await persistentState.initialize();
         expect(persistentState.getCurrentTerm()).toBe(0);
         await persistentState.setCurrentTerm(5);
@@ -96,9 +97,9 @@ describe('PersistentState.ts, PersistentState', () => {
     });
 
     it('should get and set votedFor', async () => {
-        const storage = new InMemoryStorage();
-        await storage.open();
-        const persistentState = new PersistentState(storage);
+        const meta = new InMemoryMetaStorage();
+        await meta.open();
+        const persistentState = new PersistentState(meta);
         await persistentState.initialize();
         expect(persistentState.getVotedFor()).toBeNull();
         await persistentState.updateTermAndVote(1, 'node1');
@@ -106,34 +107,34 @@ describe('PersistentState.ts, PersistentState', () => {
     });
 
     it('updateTermandVote should throw for non-integer term', async () => {
-        const storage = new InMemoryStorage();
-        await storage.open();
-        const persistentState = new PersistentState(storage);
+        const meta = new InMemoryMetaStorage();
+        await meta.open();
+        const persistentState = new PersistentState(meta);
         await persistentState.initialize();
         await expect(persistentState.updateTermAndVote("not an integer" as any, 'node1')).rejects.toThrow(PersistentStateError);
     });
 
     it('updateTermandVote should throw for negative term', async () => {
-        const storage = new InMemoryStorage();
-        await storage.open();
-        const persistentState = new PersistentState(storage);
+        const meta = new InMemoryMetaStorage();
+        await meta.open();
+        const persistentState = new PersistentState(meta);
         await persistentState.initialize();
         await expect(persistentState.updateTermAndVote(-1, 'node1')).rejects.toThrow(PersistentStateError);
     });
 
     it('updateTermandVote should throw for new term less than current term', async () => {
-        const storage = new InMemoryStorage();
-        await storage.open();
-        const persistentState = new PersistentState(storage);
+        const meta = new InMemoryMetaStorage();
+        await meta.open();
+        const persistentState = new PersistentState(meta);
         await persistentState.initialize();
         await persistentState.setCurrentTerm(5);
         await expect(persistentState.updateTermAndVote(4, 'node1')).rejects.toThrow(PersistentStateError);
     });
 
     it('updateTermandVote should work for votedFor not null', async () => {
-        const storage = new InMemoryStorage();
-        await storage.open();
-        const persistentState = new PersistentState(storage);
+        const meta = new InMemoryMetaStorage();
+        await meta.open();
+        const persistentState = new PersistentState(meta);
         await persistentState.initialize();
         await persistentState.updateTermAndVote(1, 'node1');
         expect(persistentState.getCurrentTerm()).toBe(1);
@@ -141,9 +142,9 @@ describe('PersistentState.ts, PersistentState', () => {
     });
 
     it('updateTermandVote should work for votedFor null', async () => {
-        const storage = new InMemoryStorage();
-        await storage.open();
-        const persistentState = new PersistentState(storage);
+        const meta = new InMemoryMetaStorage();
+        await meta.open();
+        const persistentState = new PersistentState(meta);
         await persistentState.initialize();
         await persistentState.updateTermAndVote(1, 'node1');
         await persistentState.updateTermAndVote(2, null);
@@ -152,9 +153,9 @@ describe('PersistentState.ts, PersistentState', () => {
     });
 
     it('updateTermandVote should return early if term and votedFor are unchanged', async () => {
-        const storage = new InMemoryStorage();
-        await storage.open();
-        const persistentState = new PersistentState(storage);
+        const meta = new InMemoryMetaStorage();
+        await meta.open();
+        const persistentState = new PersistentState(meta);
         await persistentState.initialize();
         await persistentState.updateTermAndVote(1, 'node1');
         expect(persistentState.getCurrentTerm()).toBe(1);
@@ -165,25 +166,25 @@ describe('PersistentState.ts, PersistentState', () => {
     });
 
     it('updateTermandVote should throw PersistentStateError on StorageError', async () => {
-        const storage = new FailingStorage();
-        await storage.open();
-        const persistentState = new PersistentState(storage);
+        const meta = new FailingWriteStorage();
+        await meta.open();
+        const persistentState = new PersistentState(meta);
         await persistentState.initialize();
         await expect(persistentState.updateTermAndVote(1, 'node1')).rejects.toThrow(PersistentStateError);
     });
 
     it('updateTermandVote should throw PersistentStateError on generic error', async () => {
-        const storage = new FailingStorage2();
-        await storage.open();
-        const persistentState = new PersistentState(storage);
+        const meta = new FailingWriteStorage2();
+        await meta.open();
+        const persistentState = new PersistentState(meta);
         await persistentState.initialize();
         await expect(persistentState.updateTermAndVote(1, 'node1')).rejects.toThrow(PersistentStateError);
     });
 
     it('clear should reset the state', async () => {
-        const storage = new InMemoryStorage();
-        await storage.open();
-        const persistentState = new PersistentState(storage);
+        const meta = new InMemoryMetaStorage();
+        await meta.open();
+        const persistentState = new PersistentState(meta);
         await persistentState.initialize();
         await persistentState.updateTermAndVote(1, 'node1');
         await persistentState.clear();
@@ -192,17 +193,17 @@ describe('PersistentState.ts, PersistentState', () => {
     });
 
     it('clear should throw PersistentStateError on StorageError', async () => {
-        const storage = new FailingStorage();
-        await storage.open();
-        const persistentState = new PersistentState(storage);
+        const meta = new FailingWriteStorage();
+        await meta.open();
+        const persistentState = new PersistentState(meta);
         await persistentState.initialize();
         await expect(persistentState.clear()).rejects.toThrow(PersistentStateError);
     });
 
     it('clear should throw PersistentStateError on generic error', async () => {
-        const storage = new FailingStorage2();
-        await storage.open();
-        const persistentState = new PersistentState(storage);
+        const meta = new FailingWriteStorage2();
+        await meta.open();
+        const persistentState = new PersistentState(meta);
         await persistentState.initialize();
         await expect(persistentState.clear()).rejects.toThrow(PersistentStateError);
     });

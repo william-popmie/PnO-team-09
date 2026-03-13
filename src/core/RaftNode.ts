@@ -10,7 +10,7 @@ import { TimerManager } from "../timing/TimerManager";
 import { ConsoleLogger, Logger } from "../util/Logger";
 import { Random } from "../util/Random";
 import { Clock } from "../timing/Clock";
-import { Storage } from "../storage/Storage";
+import { NodeStorage } from "../storage/interfaces/NodeStorage";
 import { Transport } from "../transport/Transport";
 import { RaftError } from "../util/Error";
 import { AsyncLock } from "../lock/AsyncLock";
@@ -77,7 +77,7 @@ export class RaftNode implements RaftNodeInterface {
 
     constructor(
         private config: RaftConfig,
-        private storage: Storage,
+        private nodeStorage: NodeStorage,
         private transport: Transport,
         private applicationStateMachine: ApplicationStateMachine,
         private clock: Clock,
@@ -111,13 +111,13 @@ export class RaftNode implements RaftNodeInterface {
             timerConfig
         );
 
-        this.persistentState = new PersistentState(storage);
+        this.persistentState = new PersistentState(nodeStorage.meta);
 
         this.volatileState = new VolatileState();
 
-        this.logManager = new LogManager(storage, this.bus, config.nodeId);
+        this.logManager = new LogManager(nodeStorage.log, this.bus, config.nodeId);
 
-        this.snapshotManager = new SnapshotManager(storage);
+        this.snapshotManager = new SnapshotManager(nodeStorage.snapshot);
 
         const bootstrapConfig: ClusterConfig = {
             voters: [
@@ -127,7 +127,7 @@ export class RaftNode implements RaftNodeInterface {
             learners: []
         };
 
-        this.configManager = new ConfigManager(storage, bootstrapConfig);
+        this.configManager = new ConfigManager(nodeStorage.config, bootstrapConfig);
 
         this.stateMachine = new StateMachine(
             config.nodeId,
@@ -164,8 +164,8 @@ export class RaftNode implements RaftNodeInterface {
 
         try {
 
-            if (!this.storage.isOpen()) {
-                await this.storage.open();
+            if (!this.nodeStorage.isOpen()) {
+                await this.nodeStorage.open();
             }
 
             await this.persistentState.initialize();
@@ -275,8 +275,8 @@ export class RaftNode implements RaftNodeInterface {
                 await this.transport.stop();
             }
 
-            if (this.storage.isOpen()) {
-                await this.storage.close();
+            if (this.nodeStorage.isOpen()) {
+                await this.nodeStorage.close();
             }
 
             this.started = false;
@@ -465,6 +465,8 @@ export class RaftNode implements RaftNodeInterface {
                 try {
                     if (entry.type === LogEntryType.CONFIG) {
                         this.logger.info('skipping CONFIG entry');
+                    } else if (entry.type === LogEntryType.NOOP) 
+                        { this.logger.info('skipping NOOP entry');
                     } else {
                         const result = await this.applicationStateMachine.apply(entry.command!);
                         this.logger.info(`Applied log entry at index ${nextIndex} with command ${JSON.stringify(entry.command)}, result: ${JSON.stringify(result)}`);
@@ -818,4 +820,3 @@ export class RaftNode implements RaftNodeInterface {
         });
     }
 }
-

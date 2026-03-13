@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { LogManager, SNAPSHOT_INDEX_KEY, SNAPSHOT_TERM_KEY } from "./LogManager";
+import { LogManager } from "./LogManager";
 import { LogEntry, Command, LogEntryType } from "./LogEntry";
-import { InMemoryStorage } from "../storage/InMemoryStorage";
+import { InMemoryLogStorage } from "../storage/inMemory/InMemoryLogStorage";
 import { LogInconsistencyError, StorageError } from "../util/Error";
-import { StorageCodec } from "../storage/Storage";
+import { LogStorageMeta } from "../storage/interfaces/LogStorage";
 
 describe('LogManager.ts, LogManager', () => {
 
-    let storage: InMemoryStorage;
+    let logStorage: InMemoryLogStorage;
 
     let logManager: LogManager;
 
@@ -29,37 +29,32 @@ describe('LogManager.ts, LogManager', () => {
 
     const invalidEntries: LogEntry[] = [ validLogEntry, invalidLogEntry, validLogEntry3 ];
 
-    class FailingStorage extends InMemoryStorage {
-        async get(key: string): Promise<Buffer | null> {
-            throw new StorageError('Storage get error');
+    class FailingStorage extends InMemoryLogStorage {
+        async readMeta(): Promise<LogStorageMeta> {
+            throw new StorageError('Storage read error');
         }
     }
 
-    class FailingStorage2 extends InMemoryStorage {
-        async get(key: string): Promise<Buffer | null> {
+    class FailingStorage2 extends InMemoryLogStorage {
+        async readMeta(): Promise<LogStorageMeta> {
             throw new LogInconsistencyError('Log inconsistency error');
         }
     }
 
-    class FailingStorage3 extends InMemoryStorage {
-        async get(key: string): Promise<Buffer | null> {
+    class FailingStorage3 extends InMemoryLogStorage {
+        async readMeta(): Promise<LogStorageMeta> {
             throw new Error('Unexpected error');
         }
     }
 
-    beforeEach(() => {
-        storage = new InMemoryStorage();
-        storage.open();
-        logManager = new LogManager(storage);
+    beforeEach(async () => {
+        logStorage = new InMemoryLogStorage();
+        await logStorage.open();
+        logManager = new LogManager(logStorage);
     });
 
     it('should create a LogManager instance', () => {
         expect(logManager).toBeInstanceOf(LogManager);
-    });
-
-    it('should throw when creating a LogManager with non-open storage', () => {
-        const closedStorage = new InMemoryStorage();
-        expect(() => new LogManager(closedStorage)).toThrow('Storage must be open before creating LogManager');
     });
 
     it('should initialize correctly and have empty log', async () => {
@@ -72,18 +67,6 @@ describe('LogManager.ts, LogManager', () => {
         await logManager.initialize();
         const result = await logManager.initialize();
         expect(result).toBeUndefined();
-    });
-
-    it('should throw when initzializing but lastindex buff is null', async () => {
-        const key = `raft:log:lastIndex`;
-        await storage.set(key, Buffer.from('not a number'));
-        await expect(logManager.initialize()).rejects.toThrow("Buffer length must be 8 bytes to decode a number, got 12");
-    });
-
-    it('should throw when initzializing but lastterm buff is null', async () => {
-        const key = `raft:log:lastTerm`;
-        await storage.set(key, Buffer.from('not a number'));
-        await expect(logManager.initialize()).rejects.toThrow("Buffer length must be 8 bytes to decode a number, got 12");
     });
 
     it('should throw when appending entry before initialization', async () => {
@@ -176,23 +159,6 @@ describe('LogManager.ts, LogManager', () => {
         await logManager.initialize();
         await logManager.appendEntries(validEntries);
         await expect(logManager.getEntries(3, 2)).rejects.toThrow('Invalid index range: from 3 to 2');
-    });
-
-    it('should throw when an entry in the range is missing', async () => {
-        await logManager.initialize();
-
-        const entry1: LogEntry = { index: 1, term: 1, type: LogEntryType.COMMAND, command: validCommand };
-        const entry3: LogEntry = { index: 3, term: 1, type: LogEntryType.COMMAND, command: validCommand3 };
-
-        await logManager.appendEntry(entry1);
-
-        const key = `raft:log:0000000000000003`;
-        await logManager['storage'].set(key, Buffer.from(JSON.stringify(entry3)));
-
-        logManager['lastIndex'] = 3;
-        logManager['lastTerm'] = entry3.term;
-
-        await expect(logManager.getEntries(1, 3)).rejects.toThrow('Missing log entry at index 2');
     });
 
     it('should throw when getting first index when log is empty', async () => {
@@ -316,22 +282,6 @@ describe('LogManager.ts, LogManager', () => {
         expect(entry1).toBeNull();
     });
 
-    it('should delete entries from given index where there is a gap just before the index', async () => {
-        await logManager.initialize();
-        await logManager.appendEntry(validLogEntry);
-
-        const storage = logManager['storage'];
-        await storage.delete(`raft:log:0000000000000001`);
-
-        logManager['lastIndex'] = 2;
-        logManager['lastTerm'] = 2;
-
-        await logManager.deleteEntriesFrom(2);
-
-        expect(logManager.getLastIndex()).toBe(1);
-        expect(logManager.getLastTerm()).toBe(0);
-    });
-
     it("should clear an already empty log", async () => {
         await logManager.initialize();
         await logManager.clear();
@@ -349,23 +299,23 @@ describe('LogManager.ts, LogManager', () => {
         expect(entry1).toBeNull();
     });
 
-    it('should throw StorageError when underlying storage throws an StorageError', async () => {
+    it('should throw StorageError when underlying storage throws a StorageError', async () => {
         const failingStorage = new FailingStorage();
-        failingStorage.open();
+        await failingStorage.open();
         const logManagerWithFailingStorage = new LogManager(failingStorage);
-        await expect(logManagerWithFailingStorage.initialize()).rejects.toThrow('Storage get error');
+        await expect(logManagerWithFailingStorage.initialize()).rejects.toThrow('Storage read error');
     });
 
-    it('should throw an LogInconsistencyError when underlying storage throws an LogInconsistencyError', async () => {
+    it('should throw a LogInconsistencyError when underlying storage throws a LogInconsistencyError', async () => {
         const failingStorage = new FailingStorage2();
-        failingStorage.open();
+        await failingStorage.open();
         const logManagerWithFailingStorage = new LogManager(failingStorage);
         await expect(logManagerWithFailingStorage.initialize()).rejects.toThrow('Log inconsistency error');
     });
 
-    it('should throw an StorageError when underlying storage throws an unexpected error', async () => {
+    it('should throw a StorageError when underlying storage throws an unexpected error', async () => {
         const failingStorage = new FailingStorage3();
-        failingStorage.open();
+        await failingStorage.open();
         const logManagerWithFailingStorage = new LogManager(failingStorage);
         await expect(logManagerWithFailingStorage.initialize()).rejects.toThrow('Storage operation failed in context: initialize');
     });
@@ -563,14 +513,15 @@ describe('LogManager.ts, LogManager', () => {
     });
 
     it('should restore snapshotIndex from storage on initialize', async () => {
-        await storage.set(SNAPSHOT_INDEX_KEY, StorageCodec.encodeNumber(10));
+        await logStorage.reset(10, 0);
+        logManager = new LogManager(logStorage);
         await logManager.initialize();
         expect(logManager.getSnapshotIndex()).toBe(10);
     });
 
     it('should restore snapshotIndex and snapshotTerm from storage on initialize', async () => {
-        await storage.set(SNAPSHOT_INDEX_KEY, StorageCodec.encodeNumber(10));
-        await storage.set(SNAPSHOT_TERM_KEY, StorageCodec.encodeNumber(3));
+        await logStorage.reset(10, 3);
+        logManager = new LogManager(logStorage);
         await logManager.initialize();
         expect(logManager.getSnapshotIndex()).toBe(10);
         const term = await logManager.getTermAtIndex(10);
@@ -700,7 +651,7 @@ describe('LogManager.ts, LogManager', () => {
 
     it('should emit LogConflictResolved event when nodeId is set and conflict is detected', async () => {
         const eventBus = { emit: vi.fn() };
-        const logManagerWithNodeId = new LogManager(storage, eventBus as any, 'node1');
+        const logManagerWithNodeId = new LogManager(logStorage, eventBus as any, 'node1');
         await logManagerWithNodeId.initialize();
         await logManagerWithNodeId.appendEntries(validEntries);
 
@@ -715,12 +666,12 @@ describe('LogManager.ts, LogManager', () => {
     });
 
     it('should throw when not initialized for appendConfigEntry', async () => {
-        await expect(logManager.appendConfigEntry({ voters: ['node1', 'node2'], learners: [] }, 1 )).rejects.toThrow('LogManager is not initialized');
+        await expect(logManager.appendConfigEntry({ voters: [{ id: 'node1', address: 'address1' }, { id: 'node2', address: 'address2' }], learners: [] }, 1 )).rejects.toThrow('LogManager is not initialized');
     });
 
     it('should append a config entry and return the new index', async () => {
         await logManager.initialize();
-        const config = { voters: ['node1', 'node2'], learners: [] };
+        const config = { voters: [{ id: 'node1', address: 'address1' }, { id: 'node2', address: 'address2' }], learners: [] };
         const newIndex = await logManager.appendConfigEntry(config, 1);
         expect(newIndex).toBe(1);
         const entry = await logManager.getEntry(1);
@@ -740,7 +691,10 @@ describe('LogManager.ts, LogManager', () => {
 
     it('should return the last config entry for getLastConfigEntry', async () => {
         await logManager.initialize();
-        const config = { voters: ['node1', 'node2'], learners: []};
+        const config = { voters: [
+            { id: 'node1', address: 'address1' },
+            { id: 'node2', address: 'address2' }
+        ], learners: []};
         await logManager.appendCommand(validCommand, 1);
         await logManager.appendConfigEntry(config, 1);
         await logManager.appendCommand(validCommand2, 1);
@@ -748,9 +702,22 @@ describe('LogManager.ts, LogManager', () => {
         expect(result).toEqual(config);
     });
 
+    it('should throw when not initialized for appendNoOpEntry', async () => {
+        await expect(logManager.appendNoOpEntry(1)).rejects.toThrow('LogManager is not initialized');
+    });
+
+    it('should append a NOOP entry and return the new index', async () => {
+        await logManager.initialize();
+        const newIndex = await logManager.appendNoOpEntry(5);
+        expect(newIndex).toBe(1);
+
+        const entry = await logManager.getEntry(1);
+        expect(entry).toEqual({ index: 1, term: 5, type: LogEntryType.NOOP });
+    });
+
     it('should emit logAppended event when nodeId is set and entry is appended', async () => {
         const eventBus = { emit: vi.fn() };
-        const logManagerWithNodeId = new LogManager(storage, eventBus as any, 'node1');
+        const logManagerWithNodeId = new LogManager(logStorage, eventBus as any, 'node1');
         await logManagerWithNodeId.initialize();
         await logManagerWithNodeId.appendEntry(validLogEntry);
         expect(eventBus.emit).toHaveBeenCalledWith(expect.objectContaining({

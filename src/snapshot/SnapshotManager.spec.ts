@@ -1,139 +1,57 @@
-import { SnapshotManager, SNAPSHOT_DATA_KEY, SNAPSHOT_INDEX_KEY, SNAPSHOT_TERM_KEY, SNAPSHOT_LEARNERS_KEY, SNAPSHOT_VOTERS_KEY } from './SnapshotManager';
-import { Storage, StorageCodec } from '../storage/Storage';
+import { SnapshotManager } from './SnapshotManager';
+import { InMemorySnapshotStorage } from '../storage/inMemory/InMemorySnapshotStorage';
+import { Snapshot } from '../storage/interfaces/SnapshotStorage';
 import { StorageError } from '../util/Error';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 
 describe('SnapshotManager.ts, SnapshotManager', () => {
     let snapshotManager: SnapshotManager;
-    let storage: Storage;
+    let snapshotStorage: InMemorySnapshotStorage;
 
-    const snapshot = {
+    const snapshot: Snapshot = {
         lastIncludedIndex: 10,
         lastIncludedTerm: 3,
         data: Buffer.from("test data"),
-        config: { voters: ['node1', 'node2'], learners: []}
+        config: { voters: [{ id: 'node1', address: 'address1' }, { id: 'node2', address: 'address2' }], learners: [] }
     };
 
-    beforeEach(() => {
-        storage = {
-            get: vi.fn().mockResolvedValue(null),
-            set: vi.fn().mockResolvedValue(undefined),
-            batch: vi.fn().mockResolvedValue(undefined),
-            delete: vi.fn().mockResolvedValue(undefined)
-        } as any
-
-        snapshotManager = new SnapshotManager(storage);
+    beforeEach(async () => {
+        snapshotStorage = new InMemorySnapshotStorage();
+        await snapshotStorage.open();
+        snapshotManager = new SnapshotManager(snapshotStorage);
     });
 
-    it('returns null when neither index nor term exists in storage', async () => {
+    it('returns null when no snapshot exists in storage', async () => {
         const result = await snapshotManager.initialize();
         expect(result).toBeNull();
-        expect(storage.get).toHaveBeenCalledWith(SNAPSHOT_INDEX_KEY);
-        expect(storage.get).toHaveBeenCalledWith(SNAPSHOT_TERM_KEY);
     });
 
-    it('returns null when only the index key exists in storage', async () => {
-        vi.mocked(storage.get).mockImplementation(async (key) => {
-            if (key === SNAPSHOT_INDEX_KEY) {
-                return StorageCodec.encodeNumber(5);
-            }
-            return null;
-        });
-
-        expect(await snapshotManager.initialize()).toBeNull();
-    });
-
-    it('returns null when only the term key exists in storage', async () => {
-        vi.mocked(storage.get).mockImplementation(async (key) => {
-            if (key === SNAPSHOT_TERM_KEY) {
-                return StorageCodec.encodeNumber(2);
-            }
-            return null;
-        });
-
-        expect(await snapshotManager.initialize()).toBeNull();
-    });
-
-    it('returns snapshot metadata when both index and term exist in storage', async () => {
-        vi.mocked(storage.get).mockImplementation(async (key) => {
-            if (key === SNAPSHOT_INDEX_KEY) {
-                return StorageCodec.encodeNumber(10);
-            }
-            if (key === SNAPSHOT_TERM_KEY) {
-                return StorageCodec.encodeNumber(3);
-            }
-            return null;
-        });
-
+    it('returns snapshot metadata when a snapshot was previously saved', async () => {
+        await snapshotStorage.save(snapshot);
         const result = await snapshotManager.initialize();
         expect(result).toEqual({ lastIncludedIndex: 10, lastIncludedTerm: 3 });
     });
 
-    it('does not call storage again on a second initialize call', async () => {
-        vi.mocked(storage.get).mockImplementation(async (key) => {
-            if (key === SNAPSHOT_INDEX_KEY) {
-                return StorageCodec.encodeNumber(10);
-            }
-            if (key === SNAPSHOT_TERM_KEY) {
-                return StorageCodec.encodeNumber(3);
-            }
-            return null;
-        });
-
+    it('does not re-read storage on a second initialize call', async () => {
+        await snapshotStorage.save(snapshot);
         await snapshotManager.initialize();
         const result = await snapshotManager.initialize();
         expect(result).toEqual({ lastIncludedIndex: 10, lastIncludedTerm: 3 });
-        expect(storage.get).toHaveBeenCalledTimes(2);
     });
 
-    it('returns null on repeted initialize when no snapshot was found', async () => {
+    it('returns null on repeated initialize when no snapshot was found', async () => {
         await snapshotManager.initialize();
         const result = await snapshotManager.initialize();
         expect(result).toBeNull();
     });
 
-    it('throws StorageError if called before initialization', async () => {
+    it('throws StorageError if saveSnapshot is called before initialization', async () => {
         await expect(snapshotManager.saveSnapshot(snapshot)).rejects.toThrow(StorageError);
     });
 
-    it('writes index, term and data via a single batch operation', async () => {
+    it('saves a snapshot and updates cached metadata', async () => {
         await snapshotManager.initialize();
         await snapshotManager.saveSnapshot(snapshot);
-
-        expect(storage.batch).toHaveBeenCalledOnce();
-        expect(storage.batch).toHaveBeenCalledWith([
-            {
-                type: "set",
-                key: SNAPSHOT_INDEX_KEY,
-                value: StorageCodec.encodeNumber(snapshot.lastIncludedIndex)
-            },
-            {
-                type: "set",
-                key: SNAPSHOT_TERM_KEY,
-                value: StorageCodec.encodeNumber(snapshot.lastIncludedTerm)
-            },
-            {
-                type: "set",
-                key: SNAPSHOT_DATA_KEY,
-                value: snapshot.data
-            },
-            {
-                type: "set",
-                key: SNAPSHOT_VOTERS_KEY,
-                value: StorageCodec.encodeJSON(snapshot.config.voters)
-            },
-            {
-                type: "set",
-                key: SNAPSHOT_LEARNERS_KEY,
-                value: StorageCodec.encodeJSON(snapshot.config.learners)
-            }
-        ]);
-    });
-
-    it('updated the cached index and term after saving a snapshot', async () => {
-        await snapshotManager.initialize();
-        await snapshotManager.saveSnapshot(snapshot);
-
         expect(snapshotManager.hasSnapshot()).toBe(true);
         expect(snapshotManager.getSnapshotMetadata()).toEqual({ lastIncludedIndex: snapshot.lastIncludedIndex, lastIncludedTerm: snapshot.lastIncludedTerm });
     });
@@ -141,16 +59,13 @@ describe('SnapshotManager.ts, SnapshotManager', () => {
     it('overwrites a previous snapshot', async () => {
         await snapshotManager.initialize();
         await snapshotManager.saveSnapshot(snapshot);
-
-        const newSnapshot = {
+        const newSnapshot: Snapshot = {
             lastIncludedIndex: 20,
             lastIncludedTerm: 5,
             data: Buffer.from("new test data"),
-            config: { voters: ['node1', 'node2'], learners: []}
+            config: { voters: [{ id: 'node1', address: 'address1' }, { id: 'node2', address: 'address2' }], learners: [] }
         };
-
         await snapshotManager.saveSnapshot(newSnapshot);
-
         expect(snapshotManager.getSnapshotMetadata()).toEqual({ lastIncludedIndex: newSnapshot.lastIncludedIndex, lastIncludedTerm: newSnapshot.lastIncludedTerm });
     });
 
@@ -158,84 +73,28 @@ describe('SnapshotManager.ts, SnapshotManager', () => {
         await expect(snapshotManager.loadSnapshot()).rejects.toThrow(StorageError);
     });
 
-    it('returns null if no snapshot exists', async () => {
+    it('returns null from loadSnapshot if no snapshot exists', async () => {
         await snapshotManager.initialize();
         const result = await snapshotManager.loadSnapshot();
         expect(result).toBeNull();
     });
 
-    it('returns null when data key is missing in storage even with valid index', async () => {
-        vi.mocked(storage.get).mockImplementation(async (key) => {
-            if (key === SNAPSHOT_INDEX_KEY) {
-                return StorageCodec.encodeNumber(10);
-            }
-            if (key === SNAPSHOT_TERM_KEY) {
-                return StorageCodec.encodeNumber(3);
-            }
-            if (key === SNAPSHOT_DATA_KEY) {
-                return Buffer.from('test data');
-            }
-            return null;
-        });
-
+    it('returns the full snapshot after saving', async () => {
         await snapshotManager.initialize();
-        const result = await snapshotManager.loadSnapshot();
-        expect(result).toBeNull();
-    });
-
-    it('returns the full snapshot when data exists in storage', async () => {
-        vi.mocked(storage.get).mockImplementation(async (key) => {
-            if (key === SNAPSHOT_INDEX_KEY) {
-                return StorageCodec.encodeNumber(10);
-            }
-            if (key === SNAPSHOT_TERM_KEY) {
-                return StorageCodec.encodeNumber(3);
-            }
-            if (key === SNAPSHOT_DATA_KEY) {
-                return Buffer.from("test data");
-            }
-            if (key === SNAPSHOT_VOTERS_KEY) {
-                return StorageCodec.encodeJSON(['node1', 'node2']);
-            }
-            if (key === SNAPSHOT_LEARNERS_KEY) {
-                return StorageCodec.encodeJSON([]);
-            }
-            return null;
-        });
-
-        await snapshotManager.initialize();
-        const result = await snapshotManager.loadSnapshot();
-        expect(result).toEqual({
-            lastIncludedIndex: 10,
-            lastIncludedTerm: 3,
-            data: Buffer.from("test data"),
-            config: { voters: ['node1', 'node2'], learners: []}
-        });
-    });
-
-    it('returns a snapshot that was just saved in the same session', async () => {
-        const data = Buffer.from("in-memory");
-
-        await snapshotManager.initialize();
-
-        vi.mocked(storage.get).mockImplementation(async (key) => {
-            if (key === SNAPSHOT_DATA_KEY) return data;
-            if (key === SNAPSHOT_VOTERS_KEY) return StorageCodec.encodeJSON(snapshot.config.voters);
-            if (key === SNAPSHOT_LEARNERS_KEY) return StorageCodec.encodeJSON(snapshot.config.learners);
-            return null;
-        });
-
         await snapshotManager.saveSnapshot(snapshot);
         const result = await snapshotManager.loadSnapshot();
-        expect(result).toEqual({
-            lastIncludedIndex: snapshot.lastIncludedIndex,
-            lastIncludedTerm: snapshot.lastIncludedTerm,
-            data,
-            config: snapshot.config
-        });
+        expect(result).toEqual(snapshot);
     });
 
-    it('throws StorageError if called before initialization', async () => {
+    it('returns a snapshot that was persisted before initialization', async () => {
+        await snapshotStorage.save(snapshot);
+        const freshManager = new SnapshotManager(snapshotStorage);
+        await freshManager.initialize();
+        const result = await freshManager.loadSnapshot();
+        expect(result).toEqual(snapshot);
+    });
+
+    it('throws StorageError if hasSnapshot is called before initialization', async () => {
         expect(() => snapshotManager.hasSnapshot()).toThrow(StorageError);
     });
 
@@ -251,16 +110,7 @@ describe('SnapshotManager.ts, SnapshotManager', () => {
     });
 
     it('returns true when initialized with existing snapshot data from storage', async () => {
-        vi.mocked(storage.get).mockImplementation(async (key) => {
-            if (key === SNAPSHOT_INDEX_KEY) {
-                return StorageCodec.encodeNumber(10);
-            }
-            if (key === SNAPSHOT_TERM_KEY) {
-                return StorageCodec.encodeNumber(3);
-            }
-            return null;
-        });
-
+        await snapshotStorage.save(snapshot);
         await snapshotManager.initialize();
         expect(snapshotManager.hasSnapshot()).toBe(true);
     });
@@ -283,27 +133,23 @@ describe('SnapshotManager.ts, SnapshotManager', () => {
     it('returns the latest metadata when multiple snapshots have been saved', async () => {
         await snapshotManager.initialize();
         await snapshotManager.saveSnapshot(snapshot);
-        const newSnapshot = {
+        const newSnapshot: Snapshot = {
             lastIncludedIndex: 20,
             lastIncludedTerm: 5,
             data: Buffer.from("new test data"),
-            config: { voters: ['node1', 'node2'], learners: []}
+            config: { voters: [{ id: 'node1', address: 'address1' }, { id: 'node2', address: 'address2' }], learners: [] }
         };
         await snapshotManager.saveSnapshot(newSnapshot);
         expect(snapshotManager.getSnapshotMetadata()).toEqual({ lastIncludedIndex: newSnapshot.lastIncludedIndex, lastIncludedTerm: newSnapshot.lastIncludedTerm });
     });
 
     it('returns metadata from storage on initialization', async () => {
-        vi.mocked(storage.get).mockImplementation(async (key) => {
-            if (key === SNAPSHOT_INDEX_KEY) {
-                return StorageCodec.encodeNumber(15);
-            }
-            if (key === SNAPSHOT_TERM_KEY) {
-                return StorageCodec.encodeNumber(4);
-            }
-            return null;
+        await snapshotStorage.save({
+            lastIncludedIndex: 15,
+            lastIncludedTerm: 4,
+            data: Buffer.from("data"),
+            config: { voters: [], learners: [] }
         });
-
         await snapshotManager.initialize();
         expect(snapshotManager.getSnapshotMetadata()).toEqual({ lastIncludedIndex: 15, lastIncludedTerm: 4 });
     });

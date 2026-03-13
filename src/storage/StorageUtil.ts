@@ -1,5 +1,5 @@
-import { StorageError } from "../util/Error";
 import { LogEntry, LogEntryType } from "../log/LogEntry";
+import { StorageError } from "../util/Error";
 
 export interface StorageOperation {
     type: "set" | "delete";
@@ -7,14 +7,20 @@ export interface StorageOperation {
     value?: Buffer;
 }
 
-export interface Storage {
-    get(key: string): Promise<Buffer | null>;
-    set(key: string, value: Buffer): Promise<void>;
-    delete(key: string): Promise<void>;
-    batch(operations: StorageOperation[]): Promise<void>;
-    open(): Promise<void>;
-    close(): Promise<void>;
-    isOpen(): boolean;
+export class StorageNumberUtil {
+    static assertSafeInteger(value: number, field: string): void {
+        if (!Number.isSafeInteger(value)) {
+            throw new StorageError(`${field} must be a safe integer, got ${value}`);
+        }
+    }
+
+    static bigIntToSafeNumber(value: bigint, field: string): number {
+        const num = Number(value);
+        if (!Number.isSafeInteger(num)) {
+            throw new StorageError(`${field} is outside JS safe integer range: ${value.toString()}`);
+        }
+        return num;
+    }
 }
 
 export class StorageCodec {
@@ -92,6 +98,14 @@ export class StorageCodec {
             };
         }
 
+        if (entry.type === LogEntryType.NOOP) {
+            return {
+                term: entry.term,
+                index: entry.index,
+                type: entry.type
+            };
+        }
+
         return {
             term: entry.term,
             index: entry.index,
@@ -110,6 +124,14 @@ export class StorageCodec {
                 index: raw.index,
                 type: LogEntryType.CONFIG,
                 config: typeof raw.config === "string" ? JSON.parse(raw.config) : raw.config
+            };
+        }
+
+        if (raw.type === LogEntryType.NOOP) {
+            return {
+                term: raw.term,
+                index: raw.index,
+                type: LogEntryType.NOOP
             };
         }
 

@@ -1,6 +1,6 @@
 import { LogEntry, validateLogEntry, Command, LogEntryType } from './LogEntry';
 import { StorageError, LogInconsistencyError } from '../util/Error';
-import { Storage, StorageOperation, StorageCodec } from '../storage/Storage';
+import { LogStorage } from '../storage/interfaces/LogStorage';
 import { RaftEventBus } from '../events/RaftEvents';
 import { NoOpEventBus } from '../events/EventBus';
 import { NodeId } from '../core/Config';
@@ -23,12 +23,6 @@ export interface LogManagerInterface {
     discardEntriesUpTo(index: number, term: number): Promise<void>;
 }
 
-const LOG_ENTRY_PREFIX = "raft:log:";
-const LAST_INDEX_KEY = "raft:log:lastIndex";
-const LAST_TERM_KEY = "raft:log:lastTerm";
-export const SNAPSHOT_INDEX_KEY = "raft:log:snapshot:index";
-export const SNAPSHOT_TERM_KEY = "raft:log:snapshot:term";
-
 export class LogManager implements LogManagerInterface {
 
     private lastIndex: number = 0;
@@ -38,39 +32,27 @@ export class LogManager implements LogManagerInterface {
     private initialized: boolean = false;
 
     constructor(
-        private readonly storage: Storage,
+        private readonly logStorage: LogStorage,
         private readonly eventBus: RaftEventBus = new NoOpEventBus(),
         private readonly nodeId: NodeId | null = null
-
-    ) {
-        if (!storage.isOpen()) {
-            throw new StorageError('Storage must be open before creating LogManager');
-        }
-    }
+    ) {}
 
     async initialize(): Promise<void> {
         if (this.initialized) {
-            // throw new LogInconsistencyError('LogManager is already initialized');
             return;
         }
 
         await this.safeStorage(async () => {
-            const lastIndexBuf = await this.storage.get(LAST_INDEX_KEY);
-            const lastTermBuf = await this.storage.get(LAST_TERM_KEY);
-            this.lastIndex = lastIndexBuf ? StorageCodec.decodeNumber(lastIndexBuf) : 0;
-            this.lastTerm = lastTermBuf ? StorageCodec.decodeNumber(lastTermBuf) : 0;
-
-            const snapshotIndexBuf = await this.storage.get(SNAPSHOT_INDEX_KEY);
-            const snapshotTermBuf = await this.storage.get(SNAPSHOT_TERM_KEY);
-            this.snapshotIndex = snapshotIndexBuf ? StorageCodec.decodeNumber(snapshotIndexBuf) : 0;
-            this.snapshotTerm = snapshotTermBuf ? StorageCodec.decodeNumber(snapshotTermBuf) : 0;
-
+            const meta = await this.logStorage.readMeta();
+            this.lastIndex = meta.lastIndex;
+            this.lastTerm = meta.lastTerm;
+            this.snapshotIndex = meta.snapshotIndex;
+            this.snapshotTerm = meta.snapshotTerm;
             this.initialized = true;
         }, 'initialize');
     }
 
     async appendEntry(entry: LogEntry): Promise<number> {
-
         this.ensureInitialized();
 
         validateLogEntry(entry);
@@ -80,26 +62,7 @@ export class LogManager implements LogManagerInterface {
         }
 
         await this.safeStorage(async () => {
-            const operation: StorageOperation[] = [
-                {
-                    type: 'set',
-                    key: this.makeLogKey(entry.index),
-                    value: StorageCodec.encodeJSON(entry)
-                },
-                {
-                    type: 'set',
-                    key: LAST_INDEX_KEY,
-                    value: StorageCodec.encodeNumber(entry.index)
-                },
-                {
-                    type: 'set',
-                    key: LAST_TERM_KEY,
-                    value: StorageCodec.encodeNumber(entry.term)
-                }
-            ];
-
-            await this.storage.batch(operation);
-
+            await this.logStorage.append([entry]);
             this.lastIndex = entry.index;
             this.lastTerm = entry.term;
         }, `appendEntry (${entry.index})`);
@@ -133,39 +96,18 @@ export class LogManager implements LogManagerInterface {
             }
         }
 
+        for (const entry of entries) {
+            validateLogEntry(entry);
+        }
+
         const lastEntry = entries[entries.length - 1];
 
         await this.safeStorage(async () => {
-            const operation: StorageOperation[] = [];
-
-            for (const entry of entries) {
-                validateLogEntry(entry);
-
-                operation.push({
-                    type: 'set',
-                    key: this.makeLogKey(entry.index),
-                    value: StorageCodec.encodeJSON(entry)
-                });
-            }
-
-            operation.push({
-                type: 'set',
-                key: LAST_INDEX_KEY,
-                value: StorageCodec.encodeNumber(lastEntry.index)
-            });
-            operation.push({
-                type: 'set',
-                key: LAST_TERM_KEY,
-                value: StorageCodec.encodeNumber(lastEntry.term)
-            });
-
-            await this.storage.batch(operation);
-
+            await this.logStorage.append(entries);
             this.lastIndex = lastEntry.index;
             this.lastTerm = lastEntry.term;
         }, `appendEntries (${entries.length} entries)`);
 
-        
         if (this.nodeId) {
             this.eventBus.emit({
                 eventId: crypto.randomUUID(),
@@ -189,9 +131,7 @@ export class LogManager implements LogManagerInterface {
         }
 
         return await this.safeStorage(async () => {
-            const entryBuf = await this.storage.get(this.makeLogKey(index));
-            const entry = entryBuf ? StorageCodec.decodeJSON<LogEntry>(entryBuf) : null;
-            return entry;
+            return await this.logStorage.getEntry(index);
         }, `getEntry (${index})`);
     }
 
@@ -202,17 +142,9 @@ export class LogManager implements LogManagerInterface {
             throw new LogInconsistencyError(`Invalid index range: from ${fromIndex} to ${toIndex}`);
         }
 
-        const entries: LogEntry[] = [];
-
-        for (let i = fromIndex; i <= toIndex; i++) {
-            const entry = await this.getEntry(i);
-            if (!entry) {
-                throw new LogInconsistencyError(`Missing log entry at index ${i}`);
-            }
-            entries.push(entry);
-        }
-
-        return entries;
+        return await this.safeStorage(async () => {
+            return await this.logStorage.getEntries(fromIndex, toIndex);
+        }, `getEntries (${fromIndex} to ${toIndex})`);
     }
 
     getFirstIndex(): number {
@@ -289,54 +221,11 @@ export class LogManager implements LogManagerInterface {
         }
 
         await this.safeStorage(async () => {
-            const operation: StorageOperation[] = [];
+            await this.logStorage.truncateFrom(index);
 
-            for (let i = index; i <= this.lastIndex; i++) {
-                operation.push({
-                    type: 'delete',
-                    key: this.makeLogKey(i)
-                });
-            }
-
-            const newLastIndex = index - 1;
-
-            if (newLastIndex <= this.snapshotIndex) {
-                operation.push({
-                    type: 'set',
-                    key: LAST_INDEX_KEY,
-                    value: StorageCodec.encodeNumber(this.snapshotIndex)
-                });
-
-                operation.push({
-                    type: 'set',
-                    key: LAST_TERM_KEY,
-                    value: StorageCodec.encodeNumber(this.snapshotTerm)
-                });
-
-                this.lastTerm = this.snapshotTerm;
-
-            } else {
-                const prevEntry = await this.getEntry(newLastIndex);
-
-                this.lastTerm = prevEntry ? prevEntry.term : 0;
-
-                operation.push({
-                    type: 'set',
-                    key: LAST_INDEX_KEY,
-                    value: StorageCodec.encodeNumber(newLastIndex)
-                });
-                
-                operation.push({
-                    type: 'set',
-                    key: LAST_TERM_KEY,
-                    value: StorageCodec.encodeNumber(this.lastTerm)
-                });
-            }
-
-            await this.storage.batch(operation);
-
-            this.lastIndex = newLastIndex;
-
+            const meta = await this.logStorage.readMeta();
+            this.lastIndex = meta.lastIndex;
+            this.lastTerm = meta.lastTerm;
         }, `deleteEntriesFrom (${index})`);
     }
 
@@ -346,33 +235,6 @@ export class LogManager implements LogManagerInterface {
         if (this.lastIndex <= this.snapshotIndex) {
             return;
         }
-
-        /*
-        await this.safeStorage(async () => {
-            const operation: StorageOperation[] = [];
-            for (let i = 1; i <= this.lastIndex; i++) {
-                operation.push({
-                    type: 'delete',
-                    key: this.makeLogKey(i)
-                });
-            }
-
-            operation.push({
-                type: 'delete',
-                key: LAST_INDEX_KEY
-            });
-
-            operation.push({
-                type: 'delete',
-                key: LAST_TERM_KEY
-            });
-
-            await this.storage.batch(operation);
-
-            this.lastIndex = 0;
-            this.lastTerm = 0;
-        }, 'clear');
-        */
 
         await this.deleteEntriesFrom(this.snapshotIndex + 1);
     }
@@ -507,7 +369,6 @@ export class LogManager implements LogManagerInterface {
         this.ensureInitialized();
 
         if (index <= this.snapshotIndex) {
-            // throw new LogInconsistencyError(`Cannot discard up to index ${index} as it is less than or equal to snapshot index ${this.snapshotIndex}`);
             return;
         }
 
@@ -516,90 +377,27 @@ export class LogManager implements LogManagerInterface {
         }
 
         await this.safeStorage(async () => {
-            const operations: StorageOperation[] = [];
+            await this.logStorage.compact(index, term);
 
-            for (let i = this.snapshotIndex + 1; i <= index; i++) {
-                operations.push({
-                    type: 'delete',
-                    key: this.makeLogKey(i)
-                });
-            }
-
-            operations.push({
-                type: 'set',
-                key: SNAPSHOT_INDEX_KEY,
-                value: StorageCodec.encodeNumber(index)
-            });
-            operations.push({
-                type: 'set',
-                key: SNAPSHOT_TERM_KEY,
-                value: StorageCodec.encodeNumber(term)
-            });
-
-            if (index >= this.lastIndex) {
-                operations.push({
-                    type: 'set',
-                    key: LAST_INDEX_KEY,
-                    value: StorageCodec.encodeNumber(index)
-                });
-                operations.push({
-                    type: 'set',
-                    key: LAST_TERM_KEY,
-                    value: StorageCodec.encodeNumber(term)
-                });
-            }
-
-            await this.storage.batch(operations);
-
-            this.snapshotIndex = index;
-            this.snapshotTerm = term;
-
-            if (index >= this.lastIndex) {
-                this.lastIndex = index;
-                this.lastTerm = term;
-            }
+            const meta = await this.logStorage.readMeta();
+            this.snapshotIndex = meta.snapshotIndex;
+            this.snapshotTerm = meta.snapshotTerm;
+            this.lastIndex = meta.lastIndex;
+            this.lastTerm = meta.lastTerm;
         }, `discardEntriesUpTo (${index})`);
     }
 
     async resetToSnapshot(snapshotIndex: number, snapshotTerm: number): Promise<void> {
         this.ensureInitialized();
-        
-        const operations: StorageOperation[] = [];
 
-        for (let i = this.snapshotIndex + 1; i <= this.lastIndex; i++) {
-            operations.push({
-                type: 'delete',
-                key: this.makeLogKey(i)
-            });
-        }
+        await this.safeStorage(async () => {
+            await this.logStorage.reset(snapshotIndex, snapshotTerm);
 
-        operations.push({
-            type: 'set',
-            key: LAST_INDEX_KEY,
-            value: StorageCodec.encodeNumber(snapshotIndex)
-        });
-        operations.push({
-            type: 'set',
-            key: LAST_TERM_KEY,
-            value: StorageCodec.encodeNumber(snapshotTerm)
-        });
-        operations.push({
-            type: 'set',
-            key: SNAPSHOT_INDEX_KEY,
-            value: StorageCodec.encodeNumber(snapshotIndex)
-        });
-        operations.push({
-            type: 'set',
-            key: SNAPSHOT_TERM_KEY,
-            value: StorageCodec.encodeNumber(snapshotTerm)
-        });
-
-        await this.storage.batch(operations);
-
-        this.snapshotIndex = snapshotIndex;
-        this.snapshotTerm = snapshotTerm;
-        this.lastIndex = snapshotIndex;
-        this.lastTerm = snapshotTerm;
+            this.snapshotIndex = snapshotIndex;
+            this.snapshotTerm = snapshotTerm;
+            this.lastIndex = snapshotIndex;
+            this.lastTerm = snapshotTerm;
+        }, `resetToSnapshot (${snapshotIndex})`);
     }
 
     getSnapshotIndex(): number {
@@ -636,6 +434,21 @@ export class LogManager implements LogManagerInterface {
         return null;
     }
 
+    async appendNoOpEntry(term: number): Promise<number> {
+
+        const idx = this.lastIndex + 1;
+        
+        const entry: LogEntry = {
+            index: idx,
+            term: term,
+            type: LogEntryType.NOOP
+        };
+
+        await this.appendEntry(entry);
+
+        return idx;
+    }
+
     private async safeStorage<T>(fn : () => Promise<T>, context: string): Promise<T> {
         try {
             return await fn();
@@ -652,11 +465,6 @@ export class LogManager implements LogManagerInterface {
         if (!this.initialized) {
             throw new StorageError('LogManager is not initialized');
         }
-    }
-
-    
-    private makeLogKey(index: number): string {
-        return `${LOG_ENTRY_PREFIX}${index.toString().padStart(16, '0')}`;
     }
 
 }

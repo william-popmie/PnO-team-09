@@ -1,5 +1,5 @@
 import { NodeId } from '../core/Config';
-import { StorageCodec, Storage, StorageOperation } from '../storage/Storage';
+import { MetaStorage } from '../storage/interfaces/MetaStorage';
 import { PersistentStateError, StorageError } from '../util/Error';
 
 export interface PersistentStateSnapshot {
@@ -16,26 +16,22 @@ export interface PersistentStateInterface {
     clear(): Promise<void>;
 }
 
-const CURRENT_TERM_KEY = 'raft:currentTerm';
-const VOTED_FOR_KEY = 'raft:votedFor';
-
 export class PersistentState implements PersistentStateInterface {
     private currentTerm: number = 0;
     private votedFor: NodeId | null = null;
     private initialized: boolean = false;
 
-    constructor(private readonly storage: Storage) {}
+    constructor(private readonly meta: MetaStorage) {}
 
     async initialize(): Promise<PersistentStateSnapshot> {
         if (this.initialized) {
-            // throw new PersistentStateError('PersistentState is already initialized');
             return { 
                 currentTerm: this.currentTerm,
                 votedFor: this.votedFor,
             };
         }
 
-        if(!this.storage.isOpen()) {
+        if (!this.meta.isOpen()) {
             throw new PersistentStateError('Storage must be open before initializing PersistentState');
         }
 
@@ -57,8 +53,6 @@ export class PersistentState implements PersistentStateInterface {
     }
 
     async setCurrentTerm(term: number): Promise<void> {
-        // this.ensureInitialized();
-
         await this.updateTermAndVote(term, null);
     }
 
@@ -72,28 +66,7 @@ export class PersistentState implements PersistentStateInterface {
         }
 
         try {
-            const operations: StorageOperation[] = [
-                {
-                    type: 'set',
-                    key: CURRENT_TERM_KEY,
-                    value: StorageCodec.encodeNumber(term),
-                }];
-
-            if (votedFor === null) {
-                operations.push({
-                    type: 'delete',
-                    key: VOTED_FOR_KEY,
-                });
-            } else {
-                operations.push({
-                    type: 'set',
-                    key: VOTED_FOR_KEY,
-                    value: StorageCodec.encodeString(votedFor),
-                });
-            }
-
-            await this.storage.batch(operations);
-
+            await this.meta.write(term, votedFor);
             this.currentTerm = term;
             this.votedFor = votedFor;
         } catch (error) {
@@ -105,11 +78,7 @@ export class PersistentState implements PersistentStateInterface {
         this.ensureInitialized();
 
         try {
-            await this.storage.batch([
-                { type: 'delete', key: CURRENT_TERM_KEY },
-                { type: 'delete', key: VOTED_FOR_KEY },
-            ]);
-
+            await this.meta.write(0, null);
             this.currentTerm = 0;
             this.votedFor = null;
         } catch (error) {
@@ -125,26 +94,20 @@ export class PersistentState implements PersistentStateInterface {
 
     private async restore(): Promise<PersistentStateSnapshot> {
         try {
-            const termBuf = await this.storage.get(CURRENT_TERM_KEY);
+            const data = await this.meta.read();
 
-            if (termBuf !== null) {
-                this.currentTerm = StorageCodec.decodeNumber(termBuf);
-                this.validateTerm(this.currentTerm);
+            if (data) {
+                this.validateTerm(data.term);
+                this.currentTerm = data.term;
+                this.votedFor = data.votedFor;
             }
-
-            const votedForBuf = await this.storage.get(VOTED_FOR_KEY);
-            this.votedFor = votedForBuf !== null ? StorageCodec.decodeString(votedForBuf) : null;
-
-            if (votedForBuf !== null && termBuf === null) {
-                throw new PersistentStateError('Inconsistent state: votedFor is set but currentTerm is missing');
-            };
 
             return {
                 currentTerm: this.currentTerm,
                 votedFor: this.votedFor,
             };
         } catch (error) {
-            throw new PersistentStateError('Failed to restore persistent state', error instanceof StorageError ? error : undefined);
+            throw new PersistentStateError('Failed to restore persistent state', error as StorageError);
         }
     }
 

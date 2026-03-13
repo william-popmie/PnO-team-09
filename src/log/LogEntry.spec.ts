@@ -61,7 +61,7 @@ describe('LogEntry.ts, validateLogEntry', () => {
         term: 1,
         index: 1,
         type: LogEntryType.CONFIG,
-        config: { voters: ["node1", "node2"], learners: [] }
+        config: { voters: [{ id: "node1", address: "address1" }, { id: "node2", address: "address2" }], learners: [] }
     };
 
     const invalidEntry7: LogEntry = {
@@ -81,7 +81,7 @@ describe('LogEntry.ts, validateLogEntry', () => {
         term: 1,
         index: 1,
         type: LogEntryType.CONFIG,
-        config : { voters: ["node1", "node2"]} as any
+        config : { voters: [{ id: "node1", address: "address1" }, { id: "node2", address: "address2" }] } as any
     };
 
     const invalidEntry10: LogEntry = {
@@ -136,7 +136,7 @@ describe('LogEntry.ts, validateLogEntry', () => {
     });
 
     it('should throw error for unknown entry type', () => {
-        expect(() => validateLogEntry(invalidEntry10)).toThrow("Invalid log entry type: UNKNOWN_TYPE. Type must be either COMMAND or CONFIG");
+        expect(() => validateLogEntry(invalidEntry10)).toThrow("Invalid log entry type: UNKNOWN_TYPE. Type must be either COMMAND, CONFIG or NOOP");
     });
 });
 
@@ -185,7 +185,7 @@ describe('LogEntry.ts, validateLogSequence', () => {
         term: 2,
         index: 2,
         type: LogEntryType.CONFIG,
-        config: { voters: ["node1", "node2"], learners: [] }
+        config: { voters: [{ id: "node1", address: "address1" }, { id: "node2", address: "address2" }], learners: [] }
     };
 
     const emptyLog: LogEntry[] = [];
@@ -317,19 +317,29 @@ describe('LogEntry.ts, entriesEqual', () => {
         term: 1,
         index: 1,
         type: LogEntryType.CONFIG,
-        config: { voters: ["node1", "node2"], learners: [] }
+        config: { voters: [{ id: "node1", address: "address1" }, { id: "node2", address: "address2" }], learners: [] }
     };
     const entry7: LogEntry = {
         term: 1,
         index: 1,
         type: LogEntryType.CONFIG,
-        config: { voters: ["node1", "node2"], learners: [] }
+        config: { voters: [{ id: "node1", address: "address1" }, { id: "node2", address: "address2" }], learners: [] }
     };
     const entry8: LogEntry = {
         term: 1,
         index: 1,
         type: LogEntryType.CONFIG,
-        config: { voters: ["node1"], learners: [] }
+        config: { voters: [{ id: "node1", address: "address1" }], learners: [] }
+    };
+    const noopEntry1: LogEntry = {
+        term: 2,
+        index: 3,
+        type: LogEntryType.NOOP
+    };
+    const noopEntry2: LogEntry = {
+        term: 2,
+        index: 3,
+        type: LogEntryType.NOOP
     };
 
     it('should return false for different terms', () => {
@@ -358,6 +368,10 @@ describe('LogEntry.ts, entriesEqual', () => {
 
     it('should return false for different config entries', () => {
         expect(entriesEqual(entry6, entry8)).toBe(false);
+    });
+
+    it('should return true for identical NOOP entries', () => {
+        expect(entriesEqual(noopEntry1, noopEntry2)).toBe(true);
     });
 });
 
@@ -402,19 +416,19 @@ describe('LogEntry.ts, logsEqual', () => {
         term: 1,
         index: 1,
         type: LogEntryType.CONFIG,
-        config: { voters: ["node1", "node2"], learners: [] }
+        config: { voters: [{ id: "node1", address: "address1" }, { id: "node2", address: "address2" }], learners: [] }
     };
     const entry6: LogEntry = {
         term: 1,
         index: 1,
         type: LogEntryType.CONFIG,
-        config: { voters: ["node1", "node2"], learners: [] }
+        config: { voters: [{ id: "node1", address: "address1" }, { id: "node2", address: "address2" }], learners: [] }
     };
     const entry7: LogEntry = {
         term: 1,
         index: 1,
         type: LogEntryType.CONFIG,
-        config: { voters: ["node1"], learners: [] }
+        config: { voters: [{ id: "node1", address: "address1" }], learners: [] }
     };
     const log1: LogEntry[] = [entry1, entry3];
     const log2: LogEntry[] = [entry2, entry3];

@@ -54,6 +54,7 @@ describe('StateMachine.ts, StateMachine', () => {
         discardEntriesUpTo: ReturnType<typeof vi.fn>,
         resetToSnapshot: ReturnType<typeof vi.fn>,
         getEntry: ReturnType<typeof vi.fn>,
+        appendNoOpEntry: ReturnType<typeof vi.fn>,
     };
 
     let snapshotManager: {
@@ -148,6 +149,7 @@ describe('StateMachine.ts, StateMachine', () => {
             discardEntriesUpTo: vi.fn().mockResolvedValue(undefined),
             resetToSnapshot: vi.fn().mockResolvedValue(undefined),
             getEntry: vi.fn().mockReturnValue(null),
+            appendNoOpEntry: vi.fn().mockResolvedValue(1),
         };
 
         snapshotManager = {
@@ -347,6 +349,31 @@ describe('StateMachine.ts, StateMachine', () => {
         await vi.waitFor(() => {
             expect(rpcHandler.sendAppendEntries).toHaveBeenCalledTimes(peers.length);
         });
+    });
+
+    it('should append initial no-op entry and log success when becoming leader', async () => {
+        persistentState.getCurrentTerm.mockReturnValue(4);
+
+        await stateMachine.becomeLeader();
+
+        expect(logManager.appendNoOpEntry).toHaveBeenCalledWith(4);
+        expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('appended initial no-op entry for term 4'));
+    });
+
+    it('should log error when initial no-op append fails', async () => {
+        logManager.appendNoOpEntry.mockRejectedValue(new Error('append no-op failed'));
+
+        await stateMachine.becomeLeader();
+
+        expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('failed to append initial no-op entry as Leader: append no-op failed'));
+    });
+
+    it('should stringify non-Error values when initial no-op append fails', async () => {
+        logManager.appendNoOpEntry.mockRejectedValue('plain append no-op failure');
+
+        await stateMachine.becomeLeader();
+
+        expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('failed to append initial no-op entry as Leader: plain append no-op failure'));
     });
 
     it('should reject vote when request term is stale', async () => {

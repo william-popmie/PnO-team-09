@@ -2,16 +2,15 @@ import { createConfig, NodeId } from "../core/Config";
 import { RaftNode } from "../core/RaftNode";
 import { RaftEventBus } from "../events/RaftEvents";
 import { Command } from "../log/LogEntry";
-// import { InMemoryStorage } from "../storage/InMemoryStorage";
+import { ClusterRunnerInterface, CommittedConfig } from "./ClusterRunnerInterface";
 import { SystemClock } from "../timing/Clock";
 import { TimerConfig } from "../timing/TimerManager";
 import { GrpcTransport } from "../transport/GRPCTransport";
 import { SystemRandom } from "../util/Random";
-import { DiskStorage } from "../storage/DiskStorage";
-import path from "node:path";
+import { DiskNodeStorage } from "../storage/disk/DiskNodeStorage";
+import { DiskConfigStorage } from "../storage/disk/DiskConfigStorage";
 import { ClusterMember } from "../config/ClusterConfig";
-import { StorageCodec } from "../storage/Storage";
-import { CONFIG_LEARNERS_KEY, CONFIG_VOTERS_KEY } from "../config/ConfigManager";
+import path from "node:path";
 import fs from "fs/promises";
 
 export interface ClusterRunnerOptions {
@@ -26,22 +25,20 @@ class NoOpStateMachine {
     async installSnapshot(snapshot: Buffer): Promise<void> {}
 }
 
-export class ClusterRunnerGRPC {
+export class ClusterRunnerGRPC implements ClusterRunnerInterface {
     private nodes: Map<NodeId, RaftNode> = new Map();
     private nodeIds: NodeId[] = [];
-
-
-    private committedConfig: { voters: { id: NodeId, address: string }[], learners: { id: NodeId, address: string }[] } = { voters: [], learners: [] };
+    private committedConfig: CommittedConfig = { voters: [], learners: [] };
 
     constructor(
         private bus: RaftEventBus,
         private options: ClusterRunnerOptions
-    ){}
+    ) {}
 
     async start(): Promise<void> {
         const { nodeCount, timerConfig } = this.options;
 
-        const baseNodeIds: NodeId[] = Array.from({ length: nodeCount }, (_, i) => `node${i+1}`);
+        const baseNodeIds: NodeId[] = Array.from({ length: nodeCount }, (_, i) => `node${i + 1}`);
 
         const persistedMembers = await this.readPersistedConfig(baseNodeIds);
 
@@ -55,7 +52,6 @@ export class ClusterRunnerGRPC {
                 addressMap[m.id] = m.address;
             }
         }
-        
 
         const allNodeIds: NodeId[] = persistedMembers
             ? [
@@ -74,10 +70,17 @@ export class ClusterRunnerGRPC {
                 .filter(id => id !== nodeId)
                 .map(id => ({ id, address: addressMap[id] }));
 
-            const config = createConfig(nodeId, address, peerMembers, timerConfig.electionTimeoutMin, timerConfig.electionTimeoutMax, timerConfig.heartbeatInterval);
+            const config = createConfig(
+                nodeId,
+                address,
+                peerMembers,
+                timerConfig.electionTimeoutMin,
+                timerConfig.electionTimeoutMax,
+                timerConfig.heartbeatInterval
+            );
 
-            const storage = new DiskStorage(path.join(__dirname, "../../data", nodeId));
-            await storage.open();
+            const nodeStorage = new DiskNodeStorage(path.join(__dirname, "../../data", nodeId));
+            await nodeStorage.open();
 
             const peers = Object.fromEntries(
                 Object.entries(addressMap).filter(([id]) => id !== nodeId)
@@ -85,27 +88,24 @@ export class ClusterRunnerGRPC {
 
             const transport = new GrpcTransport(
                 nodeId,
-                port, 
-                peers, 
+                port,
+                peers,
                 {
                     caCert: path.join(__dirname, "../../certs/ca/ca.crt"),
                     nodeCert: path.join(__dirname, `../../certs/${nodeId}`, `${nodeId}.crt`),
                     nodeKey: path.join(__dirname, `../../certs/${nodeId}`, `${nodeId}.key`)
                 },
-                400, 
-                3000);
-
-            const clock = new SystemClock();
-
-            const random = new SystemRandom();
+                400,
+                3000
+            );
 
             const node = new RaftNode(
                 config,
-                storage,
+                nodeStorage,
                 transport,
                 new NoOpStateMachine(),
-                clock,
-                random,
+                new SystemClock(),
+                new SystemRandom(),
                 undefined,
                 this.bus
             );
@@ -153,18 +153,18 @@ export class ClusterRunnerGRPC {
 
     healPartition(): void {}
 
-    setDropRate(nodeId: NodeId, rate: number): void {    }
+    setDropRate(nodeId: NodeId, rate: number): void {}
 
     async submitCommand(command: Command, targetLeaderId?: NodeId): Promise<void> {
-        const canidates = targetLeaderId
-            ? [ this.nodes.get(targetLeaderId)!].filter(Boolean)
-            : Array.from(this.nodes.values()).filter(node => node.isStarted() && node.isLeader());
+        const candidates = targetLeaderId
+            ? [this.nodes.get(targetLeaderId)!].filter(Boolean)
+            : Array.from(this.nodes.values()).filter(n => n.isStarted() && n.isLeader());
 
-        if (canidates.length === 0) {
+        if (candidates.length === 0) {
             throw new Error('No leader available to submit command');
         }
 
-        const result = await canidates[0].submitCommand(command);
+        const result = await candidates[0].submitCommand(command);
         if (!result.success) {
             throw new Error(`Command submission failed: ${result.error}`);
         }
@@ -177,7 +177,6 @@ export class ClusterRunnerGRPC {
     healAllLinks(): void {}
 
     async addServer(nodeId: NodeId, address: string, asLearner: boolean): Promise<void> {
-
         if (this.nodes.has(nodeId)) {
             throw new Error(`Node ${nodeId} already exists in the cluster`);
         }
@@ -189,7 +188,7 @@ export class ClusterRunnerGRPC {
 
         const leader = Array.from(this.nodes.values()).find(n => n.isStarted() && n.isLeader());
         if (!leader) {
-            throw new Error('No leader available to add server')
+            throw new Error('No leader available to add server');
         }
 
         const allCurrentMembers = [
@@ -197,11 +196,8 @@ export class ClusterRunnerGRPC {
             ...this.committedConfig.learners
         ];
 
-        const peers = Object.fromEntries(
-            allCurrentMembers.map(m => [m.id, m.address])
-        );
-
-        const peerMembers = allCurrentMembers.map(m => ({id: m.id, address: m.address }));
+        const peers = Object.fromEntries(allCurrentMembers.map(m => [m.id, m.address]));
+        const peerMembers = allCurrentMembers.map(m => ({ id: m.id, address: m.address }));
 
         const config = createConfig(
             nodeId,
@@ -212,8 +208,8 @@ export class ClusterRunnerGRPC {
             this.options.timerConfig.heartbeatInterval
         );
 
-        const storage = new DiskStorage(path.join(__dirname, "../../data", nodeId));
-        await storage.open();
+        const nodeStorage = new DiskNodeStorage(path.join(__dirname, "../../data", nodeId));
+        await nodeStorage.open();
 
         const transport = new GrpcTransport(
             nodeId,
@@ -230,7 +226,7 @@ export class ClusterRunnerGRPC {
 
         const node = new RaftNode(
             config,
-            storage,
+            nodeStorage,
             transport,
             new NoOpStateMachine(),
             new SystemClock(),
@@ -260,17 +256,16 @@ export class ClusterRunnerGRPC {
         }
 
         const member = { id: nodeId, address };
-        
         if (asLearner) {
             this.committedConfig = {
                 voters: this.committedConfig.voters,
                 learners: [...this.committedConfig.learners, member]
-            }
+            };
         } else {
             this.committedConfig = {
                 voters: [...this.committedConfig.voters, member],
                 learners: this.committedConfig.learners
-            }
+            };
         }
     }
 
@@ -279,6 +274,7 @@ export class ClusterRunnerGRPC {
         if (!leader) {
             throw new Error('No leader available to remove server');
         }
+
         await leader.removeServer(nodeId);
 
         const node = this.nodes.get(nodeId);
@@ -299,8 +295,7 @@ export class ClusterRunnerGRPC {
             learners: this.committedConfig.learners.filter(m => m.id !== nodeId)
         };
 
-        const dataDir = path.join(__dirname, "../../data", nodeId);
-        await fs.rm(dataDir, { recursive: true, force: true });
+        await fs.rm(path.join(__dirname, "../../data", nodeId), { recursive: true, force: true });
     }
 
     async promoteServer(nodeId: NodeId): Promise<void> {
@@ -308,10 +303,10 @@ export class ClusterRunnerGRPC {
         if (!leader) {
             throw new Error('No leader available to promote server');
         }
+
         await leader.promoteServer(nodeId);
 
         const member = this.committedConfig.learners.find(m => m.id === nodeId);
-        
         if (member) {
             this.committedConfig = {
                 voters: [...this.committedConfig.voters, member],
@@ -320,30 +315,30 @@ export class ClusterRunnerGRPC {
         }
     }
 
-    getCommittedConfig() {
+    getCommittedConfig(): CommittedConfig {
         return this.committedConfig;
+    }
+
+    isLeader(nodeId: NodeId): boolean {
+        const node = this.nodes.get(nodeId);
+        return node !== undefined && node.isStarted() && node.isLeader();
     }
 
     private async readPersistedConfig(
         baseNodeIds: NodeId[]
     ): Promise<{ voters: ClusterMember[]; learners: ClusterMember[] } | null> {
         for (const seedNodeId of baseNodeIds) {
-            const storagePath = path.join(__dirname, "../../data", seedNodeId);
-            const storage = new DiskStorage(storagePath);
+            const configStorage = new DiskConfigStorage(path.join(__dirname, "../../data", seedNodeId));
             try {
-                await storage.open();
-                const votersBuf = await storage.get(CONFIG_VOTERS_KEY);
-                const learnersBuf = await storage.get(CONFIG_LEARNERS_KEY);
-                await storage.close();
-                if (!votersBuf || !learnersBuf) continue;
-                const voters = StorageCodec.decodeJSON<ClusterMember[]>(votersBuf);
-                const learners = StorageCodec.decodeJSON<ClusterMember[]>(learnersBuf);
-                return { voters, learners };
+                await configStorage.open();
+                const data = await configStorage.read();
+                await configStorage.close();
+                if (!data) continue;
+                return { voters: data.voters, learners: data.learners };
             } catch {
-                try { await storage.close(); } catch {}
+                try { await configStorage.close(); } catch {}
             }
         }
         return null;
     }
 }
-

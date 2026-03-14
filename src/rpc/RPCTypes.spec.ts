@@ -216,6 +216,8 @@ describe('RPCTypes.ts, isInstallSnapshotRequestMessage', () => {
             leaderId: "node1",
             lastIncludedIndex: 0,
             lastIncludedTerm: 0,
+            offset: 0,
+            done: true,
             data: Buffer.from("snapshot data"),
             config: { 
                 voters: [
@@ -235,6 +237,8 @@ describe('RPCTypes.ts, isInstallSnapshotRequestMessage', () => {
             leaderId: "node1",
             lastIncludedIndex: 0,
             lastIncludedTerm: 0,
+            offset: 0,
+            done: true,
             data: Buffer.from("snapshot data"),
             config: { voters: ['node1', 'node2'], learners: [] }
         }
@@ -248,6 +252,8 @@ describe('RPCTypes.ts, isInstallSnapshotRequestMessage', () => {
             leaderId: "node1",
             lastIncludedIndex: 0,
             lastIncludedTerm: 0,
+            offset: 0,
+            done: true,
             data: Buffer.from("snapshot data"),
             config: { voters: ['node1', 'node2'], learners: [] }
         }
@@ -736,6 +742,8 @@ describe('RPCTypes.ts, validateInstallSnapshotRequest', () => {
         leaderId: "node1",
         lastIncludedIndex: 0,
         lastIncludedTerm: 0,
+        offset: 0,
+        done: true,
         data: Buffer.from("snapshot data"),
         config: { 
             voters: [
@@ -750,6 +758,8 @@ describe('RPCTypes.ts, validateInstallSnapshotRequest', () => {
         leaderId: "node1",
         lastIncludedIndex: 0,
         lastIncludedTerm: 0,
+        offset: 0,
+        done: true,
         data: Buffer.from("snapshot data"),
         config: { voters: [
             {id: "node1", address: "localhost:9092"},
@@ -761,6 +771,8 @@ describe('RPCTypes.ts, validateInstallSnapshotRequest', () => {
         leaderId: "node1",
         lastIncludedIndex: 0,
         lastIncludedTerm: 0,
+        offset: 0,
+        done: true,
         data: Buffer.from("snapshot data"),
         config: { voters: [
             { id: 'node1', address: 'localhost:9092' },
@@ -772,6 +784,8 @@ describe('RPCTypes.ts, validateInstallSnapshotRequest', () => {
         leaderId: "",
         lastIncludedIndex: 0,
         lastIncludedTerm: 0,
+        offset: 0,
+        done: true,
         data: Buffer.from("snapshot data"),
         config: { voters: [
             {id: "node1", address: "localhost:9092"},
@@ -783,6 +797,8 @@ describe('RPCTypes.ts, validateInstallSnapshotRequest', () => {
         leaderId: 123 as any,
         lastIncludedIndex: 0,
         lastIncludedTerm: 0,
+        offset: 0,
+        done: true,
         data: Buffer.from("snapshot data"),
         config: { voters: [
             {id: "node1", address: "localhost:9092"},
@@ -794,6 +810,8 @@ describe('RPCTypes.ts, validateInstallSnapshotRequest', () => {
         leaderId: "node1",
         lastIncludedIndex: "not an integer" as any,
         lastIncludedTerm: 0,
+        offset: 0,
+        done: true,
         data: Buffer.from("snapshot data"),
         config: { voters: [
             {id: "node1", address: "localhost:9092"},
@@ -805,6 +823,8 @@ describe('RPCTypes.ts, validateInstallSnapshotRequest', () => {
         leaderId: "node1",
         lastIncludedIndex: -1,
         lastIncludedTerm: 0,
+        offset: 0,
+        done: true,
         data: Buffer.from("snapshot data"),
         config: { voters: [
             {id: "node1", address: "localhost:9092"},
@@ -816,6 +836,8 @@ describe('RPCTypes.ts, validateInstallSnapshotRequest', () => {
         leaderId: "node1",
         lastIncludedIndex: 0,
         lastIncludedTerm: "not an integer" as any,
+        offset: 0,
+        done: true,
         data: Buffer.from("snapshot data"),
         config: { voters: [
             {id: "node1", address: "localhost:9092"},
@@ -827,6 +849,8 @@ describe('RPCTypes.ts, validateInstallSnapshotRequest', () => {
         leaderId: "node1",
         lastIncludedIndex: 0,
         lastIncludedTerm: -1,
+        offset: 0,
+        done: true,
         data: Buffer.from("snapshot data"),
         config: { voters: [
             {id: "node1", address: "localhost:9092"},
@@ -838,6 +862,8 @@ describe('RPCTypes.ts, validateInstallSnapshotRequest', () => {
         leaderId: "node1",
         lastIncludedIndex: 0,
         lastIncludedTerm: 0,
+        offset: 0,
+        done: true,
         data: "not a buffer" as any,
         config: { voters: [
             {id: "node1", address: "localhost:9092"},
@@ -849,6 +875,8 @@ describe('RPCTypes.ts, validateInstallSnapshotRequest', () => {
         leaderId: "node1",
         lastIncludedIndex: 0,
         lastIncludedTerm: 0,
+        offset: 0,
+        done: true,
         data: Buffer.from("snapshot data"),
         config: null as any
     };
@@ -857,6 +885,8 @@ describe('RPCTypes.ts, validateInstallSnapshotRequest', () => {
         leaderId: "node1",
         lastIncludedIndex: 0,
         lastIncludedTerm: 0,
+        offset: 0,
+        done: true,
         data: Buffer.from("snapshot data"),
         config: { voters: "not an array" } as any
     };
@@ -865,6 +895,8 @@ describe('RPCTypes.ts, validateInstallSnapshotRequest', () => {
         leaderId: "node1",
         lastIncludedIndex: 0,
         lastIncludedTerm: 0,
+        offset: 0,
+        done: true,
         data: Buffer.from("snapshot data"),
         config: { voters: [{ id: 123, address: "localhost:9092" }], learners: [] } as any
     };
@@ -873,8 +905,40 @@ describe('RPCTypes.ts, validateInstallSnapshotRequest', () => {
         leaderId: "node1",
         lastIncludedIndex: 0,
         lastIncludedTerm: 0,
+        offset: 0,
+        done: true,
         data: Buffer.from("snapshot data"),
         config: { voters: [], learners: [{ id: "node1", address: 999 }] } as any
+    };
+    const invalidRequest14 = {
+        term: 1,
+        leaderId: "node1",
+        lastIncludedIndex: 0,
+        lastIncludedTerm: 0,
+        offset: -1,
+        done: true,
+        data: Buffer.from("snapshot data"),
+        config: { voters: [], learners: [] }
+    };
+    const invalidRequest15 = {
+        term: 1,
+        leaderId: "node1",
+        lastIncludedIndex: 0,
+        lastIncludedTerm: 0,
+        offset: "not an integer" as any,
+        done: true,
+        data: Buffer.from("snapshot data"),
+        config: { voters: [], learners: [] }
+    };
+    const invalidRequest16 = {
+        term: 1,
+        leaderId: "node1",
+        lastIncludedIndex: 0,
+        lastIncludedTerm: 0,
+        offset: 0,
+        done: "not a boolean" as any,
+        data: Buffer.from("snapshot data"),
+        config: { voters: [], learners: [] }
     };
 
     it('should not throw error for valid InstallSnapshotRequest', () => {
@@ -933,6 +997,24 @@ describe('RPCTypes.ts, validateInstallSnapshotRequest', () => {
     it('should throw error for learner missing id or address', () => {
         expect(() => validateInstallSnapshotRequest(invalidRequest13)).toThrow(
             "Invalid config: learners must be ClusterMember objects with id and address strings."
+        );
+    });
+
+    it('should throw error for negative offset', () => {
+        expect(() => validateInstallSnapshotRequest(invalidRequest14)).toThrow(
+            "Invalid offset: -1. offset must be a non-negative integer."
+        );
+    });
+
+    it('should throw error for non integer offset', () => {
+        expect(() => validateInstallSnapshotRequest(invalidRequest15)).toThrow(
+            "Invalid offset: not an integer. offset must be a non-negative integer."
+        );
+    });
+
+    it('should throw error when done is not boolean', () => {
+        expect(() => validateInstallSnapshotRequest(invalidRequest16)).toThrow(
+            "Invalid done: not a boolean. done must be a boolean."
         );
     });
 });
@@ -1022,6 +1104,8 @@ describe('RPCTypes.ts, validateRPCMessage', () => {
             leaderId: "node1",
             lastIncludedIndex: 0,
             lastIncludedTerm: 0,
+            offset: 0,
+            done: true,
             data: Buffer.from("snapshot data"),
             config: {
                 voters: [

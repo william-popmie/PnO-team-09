@@ -234,7 +234,7 @@ export class RaftNode implements RaftNodeInterface {
                 });
             });
 
-            this.stateMachine.start();
+            await this.stateMachine.start();
 
             this.startApplyLoop();
 

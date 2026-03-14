@@ -48,6 +48,8 @@ describe('RPCHandler.ts, RPCHandler', () => {
         leaderId: nodeId,
         lastIncludedIndex: 0,
         lastIncludedTerm: 0,
+        offset: 0,
+        done: true,
         data: Buffer.from('snapshot data'),
         config: { voters: [], learners: [] }
     };

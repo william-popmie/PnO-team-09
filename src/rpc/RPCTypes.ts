@@ -39,6 +39,8 @@ export interface InstallSnapshotRequest {
     lastIncludedTerm: number;
     data: Buffer;
     config: ClusterConfig;
+    offset: number;
+    done: boolean;
 }
 
 export interface InstallSnapshotResponse {
@@ -217,6 +219,14 @@ export function validateInstallSnapshotRequest(request: InstallSnapshotRequest):
 
     if (!Buffer.isBuffer(request.data)) {
         throw new Error(`Invalid data: ${request.data}. data must be a Buffer.`);
+    }
+
+    if (!Number.isInteger(request.offset) || request.offset < 0) {
+        throw new Error(`Invalid offset: ${request.offset}. offset must be a non-negative integer.`);
+    }
+
+    if (typeof request.done !== 'boolean') {
+        throw new Error(`Invalid done: ${request.done}. done must be a boolean.`);
     }
 
     if (!request.config || typeof request.config !== 'object') {

@@ -109,6 +109,7 @@ export class GrpcTransport implements Transport {
 
     private readonly callTimeoutMs: number;
     private readonly shutdownTimeoutMs: number;
+    private readonly maxGrpcMessageBytes: number;
 
     private cachedClientsCredentials: grpc.ChannelCredentials | null = null;
 
@@ -122,10 +123,12 @@ export class GrpcTransport implements Transport {
             nodeKey: string;
         },
         callTimeoutMs: number = 5000,
-        shutdownTimeoutMs: number = 5000
+        shutdownTimeoutMs: number = 5000,
+        maxGrpcMessageBytes: number = 16 * 1024 * 1024
     ) {
         this.callTimeoutMs = callTimeoutMs;
         this.shutdownTimeoutMs = shutdownTimeoutMs;
+        this.maxGrpcMessageBytes = maxGrpcMessageBytes;
     }
 
     async start(): Promise<void> {
@@ -133,7 +136,13 @@ export class GrpcTransport implements Transport {
             throw new NetworkError(`Transport for node ${this.nodeId} is already started.`);
         }
 
-        this.server = new grpc.Server();
+        const grpcOptions = {
+            'grpc.enable_retries': 0,
+            'grpc.max_receive_message_length': this.maxGrpcMessageBytes,
+            'grpc.max_send_message_length': this.maxGrpcMessageBytes,
+        };
+
+        this.server = new grpc.Server(grpcOptions);
         this.server.addService(proto.raft.RaftService.service, this.buildServiceImplementation());
 
         let serverCredentials: grpc.ServerCredentials;
@@ -177,7 +186,7 @@ export class GrpcTransport implements Transport {
                     for (const [peerId, address] of Object.entries(this.peers)) {
                         this.clients.set(
                             peerId,
-                            new proto.raft.RaftService(address, clientCredentials, { 'grpc.enable_retries': 0 })
+                            new proto.raft.RaftService(address, clientCredentials, grpcOptions)
                         );
                     }
 
@@ -267,7 +276,11 @@ export class GrpcTransport implements Transport {
 
         this.clients.set(
             peerId,
-            new proto.raft.RaftService(address, this.cachedClientsCredentials, { 'grpc.enable_retries': 0 })
+            new proto.raft.RaftService(address, this.cachedClientsCredentials, {
+                'grpc.enable_retries': 0,
+                'grpc.max_receive_message_length': this.maxGrpcMessageBytes,
+                'grpc.max_send_message_length': this.maxGrpcMessageBytes,
+            })
         );
     }
 

@@ -14,7 +14,8 @@ import { NoOpEventBus } from "../events/EventBus";
 import { SnapshotManager } from "../snapshot/SnapshotManager";
 import { ApplicationStateMachine } from "./RaftNode";
 import { ConfigManager } from "../config/ConfigManager";
-import { LogEntryType } from "../log/LogEntry";
+import { LogEntry, LogEntryType } from "../log/LogEntry";
+import { StorageCodec } from "../storage/StorageUtil";
 
 function baseEvent(nodeId: NodeId): BaseEvent {
     return {
@@ -46,6 +47,16 @@ export interface StateMachineInterface {
     handleInstallSnapshot(from: NodeId, request: InstallSnapshotRequest): Promise<InstallSnapshotResponse>;
 }
 
+interface SnapshotInstallSession {
+    leaderId: NodeId;
+    term: number;
+    lastIncludedIndex: number;
+    lastIncludedTerm: number;
+    config: InstallSnapshotRequest["config"];
+    chunks: Buffer[];
+    receivedBytes: number;
+}
+
 export class StateMachine implements StateMachineInterface {
     private currentState: RaftState = RaftState.Follower;
     private currentLeader: NodeId | null = null;
@@ -61,6 +72,10 @@ export class StateMachine implements StateMachineInterface {
     private preVoteInProgress: boolean = false;
     private preVoteTerm: number = 0;
     private preVotesReceived: Set<NodeId> = new Set();
+    private installSnapshotSession: SnapshotInstallSession | null = null;
+    private readonly snapshotChunkSizeBytes: number = 256 * 1024;
+    private readonly maxAppendEntriesBatchEntries: number = 128;
+    private readonly maxAppendEntriesBatchBytes: number = 512 * 1024;
 
     private onPeerDiscovered?: (peerId: NodeId, lastLogIndex: number) => void;
 
@@ -285,7 +300,9 @@ export class StateMachine implements StateMachineInterface {
                 };
             }
 
-            this.logger.info(`Node ${this.nodeId} received AppendEntries from ${from} with higher term ${request.term}, updating term and becoming Follower`);
+            if (request.term > currentTerm) {
+                this.logger.info(`Node ${this.nodeId} received AppendEntries from ${from} with higher term ${request.term}, updating term and becoming Follower`);
+            }
             this.lastLeaderContactAt = performance.now();
             await this.becomeFollowerUnlocked(request.term, request.leaderId);
 
@@ -364,14 +381,62 @@ export class StateMachine implements StateMachineInterface {
                 return { term: currentTerm, success: false };
             }
 
-            if (request.term > currentTerm) {
-                await this.persistentState.updateTermAndVote(request.term, null);
+            if (request.term > currentTerm || this.currentState !== RaftState.Follower) {
+                await this.becomeFollowerUnlocked(request.term, request.leaderId);
+            } else {
+                this.currentLeader = from;
+                this.timerManager.startElectionTimer(() => this.handleElectionTimeoutlocked());
             }
+
+            this.lastLeaderContactAt = performance.now();
+
+            const hasMatchingSession = this.installSnapshotSession !== null
+                && this.installSnapshotSession.leaderId === from
+                && this.installSnapshotSession.term === request.term
+                && this.installSnapshotSession.lastIncludedIndex === request.lastIncludedIndex
+                && this.installSnapshotSession.lastIncludedTerm === request.lastIncludedTerm;
+
+            if (request.offset === 0) {
+                this.installSnapshotSession = {
+                    leaderId: from,
+                    term: request.term,
+                    lastIncludedIndex: request.lastIncludedIndex,
+                    lastIncludedTerm: request.lastIncludedTerm,
+                    config: request.config,
+                    chunks: [],
+                    receivedBytes: 0,
+                };
+            } else if (!hasMatchingSession) {
+                this.logger.warn(`Node ${this.nodeId} received InstallSnapshot chunk with offset ${request.offset} but has no matching active snapshot session`);
+                return { term: this.persistentState.getCurrentTerm(), success: false };
+            }
+
+            const session = this.installSnapshotSession;
+            if (!session) {
+                return { term: this.persistentState.getCurrentTerm(), success: false };
+            }
+
+            if (request.offset !== session.receivedBytes) {
+                this.logger.warn(`Node ${this.nodeId} received InstallSnapshot chunk with unexpected offset ${request.offset}, expected ${session.receivedBytes}`);
+                return { term: this.persistentState.getCurrentTerm(), success: false };
+            }
+
+            if (request.data.length > 0) {
+                session.chunks.push(request.data);
+                session.receivedBytes += request.data.length;
+            }
+
+            if (!request.done) {
+                return { term: this.persistentState.getCurrentTerm(), success: true };
+            }
+
+            const snapshotData = Buffer.concat(session.chunks, session.receivedBytes);
+            this.installSnapshotSession = null;
 
             await this.snapshotManager.saveSnapshot({
                 lastIncludedIndex: request.lastIncludedIndex,
                 lastIncludedTerm: request.lastIncludedTerm,
-                data: request.data,
+                data: snapshotData,
                 config: request.config
             });
 
@@ -382,7 +447,7 @@ export class StateMachine implements StateMachineInterface {
                     await this.logManager.resetToSnapshot(request.lastIncludedIndex, request.lastIncludedTerm);
                 }
 
-                await this.applicationStateMachine.installSnapshot(request.data);
+                await this.applicationStateMachine.installSnapshot(snapshotData);
 
                 this.volatileState.setCommitIndex(request.lastIncludedIndex);
                 this.volatileState.setLastApplied(request.lastIncludedIndex);
@@ -393,8 +458,6 @@ export class StateMachine implements StateMachineInterface {
                 await this.configManager.commitConfig(request.config);
                 this.logger.info(`Node ${this.nodeId} applied new configuration from snapshot sent by ${from}, new config: ${JSON.stringify(request.config)}`);
             }
-
-            await this.becomeFollowerUnlocked(request.term, request.leaderId);
 
             this.logger.info(`Installed snapshot from leader ${from} with last included index ${request.lastIncludedIndex} and term ${request.lastIncludedTerm}`);
 
@@ -481,6 +544,7 @@ export class StateMachine implements StateMachineInterface {
         this.votesReceived.clear();
         this.preVoteInProgress = false;
         this.preVotesReceived.clear();
+        this.installSnapshotSession = null;
         this.currentLeader = leaderId;
 
         if (wasLeader) {
@@ -818,8 +882,12 @@ export class StateMachine implements StateMachineInterface {
                 const prevLogIndex = nextIndex - 1;
                 const prevLogTerm = await this.logManager.getTermAtIndex(prevLogIndex) ?? 0;
 
-                const entries = await this.logManager.getEntriesFromIndex(nextIndex);
-                // error: getentriesfromindex() -> getentries(): invalid index range: from 1 to 2
+                const lastIndex = this.logManager.getLastIndex();
+                const entries = nextIndex > lastIndex
+                    ? []
+                    : this.boundAppendEntriesBySize(
+                        await this.logManager.getEntries(nextIndex, Math.min(lastIndex, nextIndex + this.maxAppendEntriesBatchEntries - 1))
+                    );
 
                 request = {
                     term: currentTerm,
@@ -851,61 +919,115 @@ export class StateMachine implements StateMachineInterface {
             } else {
                 this.logger.error(`Node ${this.nodeId} error sending AppendEntries to ${peer}: ${String(err)}`);
             }
-
-            await this.stateLock.runExclusive(async () => {
-                if (this.leaderState) {
-                    this.leaderState.decrementNextIndex(peer);
-                    this.logger.debug(`Node ${this.nodeId} decremented nextIndex for ${peer} to ${this.leaderState.getNextIndex(peer)} after failed AppendEntries`);
-                }
-            });
         }
+    }
+
+    private boundAppendEntriesBySize(entries: LogEntry[]): LogEntry[] {
+        if (entries.length <= 1) {
+            return entries;
+        }
+
+        let usedBytes = 0;
+        const bounded: LogEntry[] = [];
+
+        for (const entry of entries) {
+            const encoded = StorageCodec.serializeLogEntry(entry);
+            const entryBytes = Buffer.byteLength(JSON.stringify(encoded));
+
+            if (bounded.length > 0 && usedBytes + entryBytes > this.maxAppendEntriesBatchBytes) {
+                break;
+            }
+
+            usedBytes += entryBytes;
+            bounded.push(entry);
+        }
+
+        return bounded;
     }
     
     private async sendSnapshot(peer: NodeId): Promise<void> {
-        let request : InstallSnapshotRequest | null = null;
-
-        await this.stateLock.runExclusive(async () => {
+        const snapshotToSend = await this.stateLock.runExclusive(async () => {
             const snapshot = await this.snapshotManager.loadSnapshot();
 
             if (!snapshot) {
                 this.logger.error(`Node ${this.nodeId} has no snapshot to send to ${peer}`);
-                return;
+                return null;
             }
 
-            request = {
+            return {
                 term: this.persistentState.getCurrentTerm(),
-                leaderId: this.nodeId,
                 lastIncludedIndex: snapshot.lastIncludedIndex,
                 lastIncludedTerm: snapshot.lastIncludedTerm,
                 data: snapshot.data,
-                config: snapshot.config
+                config: snapshot.config,
             };
         });
 
-        if (!request) {
+        if (!snapshotToSend) {
             return;
         }
 
+        const { term, lastIncludedIndex, lastIncludedTerm, data, config } = snapshotToSend;
+
         try {
-            const response = await this.rpcHandler.sendInstallSnapshot(peer, request);
+            const totalBytes = data.length;
+            let offset = 0;
 
-            await this.stateLock.runExclusive(async () => {
-                if (!this.leaderState) {
-                    this.logger.debug(`Node ${this.nodeId} received InstallSnapshotResponse from ${peer} but has no LeaderState`);
+            while (offset < totalBytes || (totalBytes === 0 && offset === 0)) {
+                const nextOffset = Math.min(offset + this.snapshotChunkSizeBytes, totalBytes);
+                const chunkData = data.subarray(offset, nextOffset);
+                const done = nextOffset >= totalBytes;
+
+                const request: InstallSnapshotRequest = {
+                    term,
+                    leaderId: this.nodeId,
+                    lastIncludedIndex,
+                    lastIncludedTerm,
+                    offset,
+                    done,
+                    data: chunkData,
+                    config,
+                };
+
+                const response = await this.rpcHandler.sendInstallSnapshot(peer, request);
+
+                let shouldAbort = false;
+                await this.stateLock.runExclusive(async () => {
+                    if (!this.leaderState) {
+                        this.logger.debug(`Node ${this.nodeId} received InstallSnapshotResponse from ${peer} but has no LeaderState`);
+                        shouldAbort = true;
+                        return;
+                    }
+
+                    if (response.term > this.persistentState.getCurrentTerm()) {
+                        this.logger.info(`Node ${this.nodeId} received higher term ${response.term} from ${peer} in InstallSnapshotResponse, becoming Follower`);
+                        await this.becomeFollowerUnlocked(response.term, null);
+                        shouldAbort = true;
+                        return;
+                    }
+
+                    if (!response.success) {
+                        this.logger.warn(`Node ${this.nodeId} received failed InstallSnapshotResponse from ${peer} for offset ${offset}`);
+                        shouldAbort = true;
+                        return;
+                    }
+
+                    if (done) {
+                        this.leaderState.updateMatchIndex(peer, lastIncludedIndex);
+                        this.logger.info(`Node ${this.nodeId} successfully sent snapshot to ${peer}, updated matchIndex to ${lastIncludedIndex}`);
+                    }
+                });
+
+                if (shouldAbort) {
                     return;
                 }
 
-                if (response.term > this.persistentState.getCurrentTerm()) {
-                    this.logger.info(`Node ${this.nodeId} received higher term ${response.term} from ${peer} in InstallSnapshotResponse, becoming Follower`);
-                    await this.becomeFollowerUnlocked(response.term, null);
-                    return;
+                if (done) {
+                    break;
                 }
 
-                if (response.success) {
-                    this.leaderState.updateMatchIndex(peer, request!.lastIncludedIndex);
-                    this.logger.info(`Node ${this.nodeId} successfully sent snapshot to ${peer}, updated matchIndex to ${request!.lastIncludedIndex}`);
-                }
-            });
+                offset = nextOffset;
+            }
         } catch (err) {
             if (err instanceof Error) {
                 this.logger.error(`Node ${this.nodeId} error sending snapshot to ${peer}: ${err.message}`);

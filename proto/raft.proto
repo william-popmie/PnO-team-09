@@ -61,6 +61,8 @@ message InstallSnapshotRequest {
     int32 lastIncludedTerm = 4;
     bytes data = 5;
     string config = 6;
+    int64 offset = 7;
+    bool done = 8;
 }
 
 message  InstallSnapshotResponse {

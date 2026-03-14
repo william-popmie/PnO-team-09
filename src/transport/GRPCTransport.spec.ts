@@ -69,6 +69,8 @@ const installSnapshotRequest: RPCMessage = {
         leaderId: "nodeA",
         lastIncludedIndex: 0,
         lastIncludedTerm: 0,
+        offset: 0,
+        done: true,
         data: Buffer.from("snapshot data"),
         config: { voters: [
             { id: "node1", address: "localhost:9090" },
@@ -1110,6 +1112,8 @@ describe('GRPCTransport.ts, GrpcTransport', () => {
                 leaderId: "nodeA",
                 lastIncludedIndex: 0,
                 lastIncludedTerm: 0,
+                offset: 0,
+                done: true,
                 data: new Uint8Array(Buffer.from("snapshot data")),
                 config: JSON.stringify({ voters: [], learners: [] })
             },
@@ -1141,6 +1145,8 @@ describe('GRPCTransport.ts, GrpcTransport', () => {
                 leaderId: "nodeA",
                 lastIncludedIndex: 0,
                 lastIncludedTerm: 0,
+                offset: 0,
+                done: true,
                 data: Buffer.from("snapshot data"),
                 config: ""
             },

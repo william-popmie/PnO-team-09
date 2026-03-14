@@ -46,6 +46,7 @@ describe('StateMachine.ts, StateMachine', () => {
         getLastIndex: ReturnType<typeof vi.fn>,
         getLastTerm: ReturnType<typeof vi.fn>,
         getTermAtIndex: ReturnType<typeof vi.fn>,
+        getEntries: ReturnType<typeof vi.fn>,
         getEntriesFromIndex: ReturnType<typeof vi.fn>,
         appendEntriesFrom: ReturnType<typeof vi.fn>,
         matchesPrevLog: ReturnType<typeof vi.fn>,
@@ -141,6 +142,7 @@ describe('StateMachine.ts, StateMachine', () => {
             getLastIndex: vi.fn().mockReturnValue(0),
             getLastTerm: vi.fn().mockReturnValue(0),
             getTermAtIndex: vi.fn().mockReturnValue(null),
+            getEntries: vi.fn().mockReturnValue([]),
             getEntriesFromIndex: vi.fn().mockReturnValue([]),
             appendEntriesFrom: vi.fn().mockResolvedValue(0),
             matchesPrevLog: vi.fn().mockReturnValue(true),
@@ -581,7 +583,7 @@ describe('StateMachine.ts, StateMachine', () => {
 
     it('should decrement nextIndex when failure has no conflict info', async () => {
         logManager.getLastIndex.mockReturnValue(5);
-        logManager.getEntriesFromIndex.mockReturnValue([]);
+        logManager.getEntries.mockReturnValue([]);
         rpcHandler.sendAppendEntries.mockResolvedValue({ term: 1, success: false });
         await stateMachine.becomeLeader();
         await vi.waitFor(() => {
@@ -621,6 +623,147 @@ describe('StateMachine.ts, StateMachine', () => {
         await vi.waitFor(() => {
             expect(rpcHandler.sendAppendEntries).toHaveBeenCalledTimes(peers.length);
         });
+    });
+
+    it('should cap append entries request by max batch entry count', async () => {
+        logManager.getLastIndex.mockReturnValue(200);
+        logManager.getTermAtIndex.mockResolvedValue(1);
+        logManager.getEntries.mockImplementation((from: number, to: number) => {
+            const result: LogEntry[] = [];
+            for (let i = from; i <= to; i++) {
+                result.push({
+                    index: i,
+                    term: 1,
+                    type: LogEntryType.COMMAND,
+                    command: { type: 'set', payload: { key: `k${i}`, value: i } }
+                });
+            }
+            return result;
+        });
+
+        await stateMachine.becomeLeader();
+
+        await vi.waitFor(() => {
+            expect(rpcHandler.sendAppendEntries).toHaveBeenCalledTimes(peers.length);
+        });
+
+        const leaderState = (stateMachine as any)['leaderState'];
+        leaderState.setNextIndex('node2', 1);
+
+        rpcHandler.sendAppendEntries.mockClear();
+        await stateMachine.triggerReplication();
+
+        await vi.waitFor(() => {
+            expect(rpcHandler.sendAppendEntries).toHaveBeenCalled();
+        });
+
+        const node2Call = rpcHandler.sendAppendEntries.mock.calls.find((call: any[]) => call[0] === 'node2');
+        expect(node2Call).toBeDefined();
+        const request = node2Call![1];
+        expect(request.entries.length).toBe(128);
+    });
+
+    it('should cap append entries request by max batch bytes', async () => {
+        logManager.getLastIndex.mockReturnValue(10);
+        logManager.getTermAtIndex.mockResolvedValue(1);
+
+        const hugeValue = 'x'.repeat(600 * 1024);
+        const entries: LogEntry[] = [
+            {
+                index: 1,
+                term: 1,
+                type: LogEntryType.COMMAND,
+                command: { type: 'set', payload: { key: 'a', value: hugeValue } }
+            },
+            {
+                index: 2,
+                term: 1,
+                type: LogEntryType.COMMAND,
+                command: { type: 'set', payload: { key: 'b', value: hugeValue } }
+            }
+        ];
+
+        logManager.getEntries.mockReturnValue(entries);
+
+        await stateMachine.becomeLeader();
+
+        await vi.waitFor(() => {
+            expect(rpcHandler.sendAppendEntries).toHaveBeenCalledTimes(peers.length);
+        });
+
+        const leaderState = (stateMachine as any)['leaderState'];
+        leaderState.setNextIndex('node2', 1);
+
+        rpcHandler.sendAppendEntries.mockClear();
+        await stateMachine.triggerReplication();
+
+        await vi.waitFor(() => {
+            expect(rpcHandler.sendAppendEntries).toHaveBeenCalled();
+        });
+
+        const node2Call = rpcHandler.sendAppendEntries.mock.calls.find((call: any[]) => call[0] === 'node2');
+        expect(node2Call).toBeDefined();
+        const request = node2Call![1];
+        expect(request.entries.length).toBe(1);
+        expect(request.entries[0].index).toBe(1);
+    });
+
+    it('should send empty entries when nextIndex exceeds last log index', async () => {
+        logManager.getLastIndex.mockReturnValue(5);
+        logManager.getTermAtIndex.mockResolvedValue(1);
+
+        await stateMachine.becomeLeader();
+
+        await vi.waitFor(() => {
+            expect(rpcHandler.sendAppendEntries).toHaveBeenCalledTimes(peers.length);
+        });
+
+        const leaderState = (stateMachine as any)['leaderState'];
+        leaderState.setNextIndex('node2', 6);
+
+        rpcHandler.sendAppendEntries.mockClear();
+        await stateMachine.triggerReplication();
+
+        await vi.waitFor(() => {
+            expect(rpcHandler.sendAppendEntries).toHaveBeenCalled();
+        });
+
+        const node2Call = rpcHandler.sendAppendEntries.mock.calls.find((call: any[]) => call[0] === 'node2');
+        expect(node2Call).toBeDefined();
+        const request = node2Call![1];
+        expect(request.entries.length).toBe(0);
+    });
+
+    it('should pass through a single entry without byte-size processing', async () => {
+        const singleEntry: LogEntry = {
+            index: 1,
+            term: 1,
+            type: LogEntryType.COMMAND,
+            command: { type: 'set', payload: { key: 'k', value: 'v' } }
+        };
+        logManager.getLastIndex.mockReturnValue(1);
+        logManager.getTermAtIndex.mockResolvedValue(1);
+        logManager.getEntries.mockReturnValue([singleEntry]);
+
+        await stateMachine.becomeLeader();
+
+        await vi.waitFor(() => {
+            expect(rpcHandler.sendAppendEntries).toHaveBeenCalledTimes(peers.length);
+        });
+
+        const leaderState = (stateMachine as any)['leaderState'];
+        leaderState.setNextIndex('node2', 1);
+
+        rpcHandler.sendAppendEntries.mockClear();
+        await stateMachine.triggerReplication();
+
+        await vi.waitFor(() => {
+            expect(rpcHandler.sendAppendEntries).toHaveBeenCalled();
+        });
+
+        const node2Call = rpcHandler.sendAppendEntries.mock.calls.find((call: any[]) => call[0] === 'node2');
+        expect(node2Call).toBeDefined();
+        expect(node2Call![1].entries).toEqual([singleEntry]);
     });
 
     it('should not send appendEntries when not leader', async () => {
@@ -957,6 +1100,8 @@ describe('StateMachine.ts, StateMachine', () => {
         await stateMachine.handleInstallSnapshot('node2', {
             term: 5, leaderId: 'node2',
             lastIncludedIndex: 5, lastIncludedTerm: 1,
+            offset: 0,
+            done: true,
             data: Buffer.from('snap'),
             config: { voters: [], learners: [] },
         });
@@ -976,6 +1121,8 @@ describe('StateMachine.ts, StateMachine', () => {
             leaderId: 'node2',
             lastIncludedIndex: 10,
             lastIncludedTerm: 1,
+            offset: 0,
+            done: true,
             data: Buffer.from('snapshot'),
             config: { voters: [], learners: [] },
         });
@@ -991,6 +1138,8 @@ describe('StateMachine.ts, StateMachine', () => {
             leaderId: 'node2',
             lastIncludedIndex: 3,
             lastIncludedTerm: 5,
+            offset: 0,
+            done: true,
             data: Buffer.from('snap'),
             config: { voters: [], learners: [] },
         });
@@ -1000,12 +1149,228 @@ describe('StateMachine.ts, StateMachine', () => {
         expect(snapshotManager.saveSnapshot).not.toHaveBeenCalled();
     });
 
+    it('should apply snapshot only when final chunk arrives and reassemble chunk data', async () => {
+        persistentState.getCurrentTerm.mockReturnValue(1);
+
+        const firstResponse = await stateMachine.handleInstallSnapshot('node2', {
+            term: 1,
+            leaderId: 'node2',
+            lastIncludedIndex: 7,
+            lastIncludedTerm: 2,
+            offset: 0,
+            done: false,
+            data: Buffer.from('snap-'),
+            config: { voters: [], learners: [] },
+        });
+
+        expect(firstResponse).toEqual({ term: 1, success: true });
+        expect(snapshotManager.saveSnapshot).not.toHaveBeenCalled();
+        expect(applicationStateMachine.installSnapshot).not.toHaveBeenCalled();
+
+        const finalResponse = await stateMachine.handleInstallSnapshot('node2', {
+            term: 1,
+            leaderId: 'node2',
+            lastIncludedIndex: 7,
+            lastIncludedTerm: 2,
+            offset: 5,
+            done: true,
+            data: Buffer.from('data'),
+            config: { voters: [], learners: [] },
+        });
+
+        expect(finalResponse).toEqual({ term: 1, success: true });
+        expect(snapshotManager.saveSnapshot).toHaveBeenCalledWith({
+            lastIncludedIndex: 7,
+            lastIncludedTerm: 2,
+            data: Buffer.from('snap-data'),
+            config: { voters: [], learners: [] },
+        });
+        expect(applicationStateMachine.installSnapshot).toHaveBeenCalledWith(Buffer.from('snap-data'));
+    });
+
+    it('should reject snapshot chunk when offset does not match received bytes', async () => {
+        persistentState.getCurrentTerm.mockReturnValue(1);
+
+        await stateMachine.handleInstallSnapshot('node2', {
+            term: 1,
+            leaderId: 'node2',
+            lastIncludedIndex: 8,
+            lastIncludedTerm: 3,
+            offset: 0,
+            done: false,
+            data: Buffer.from('abc'),
+            config: { voters: [], learners: [] },
+        });
+
+        const response = await stateMachine.handleInstallSnapshot('node2', {
+            term: 1,
+            leaderId: 'node2',
+            lastIncludedIndex: 8,
+            lastIncludedTerm: 3,
+            offset: 5,
+            done: true,
+            data: Buffer.from('x'),
+            config: { voters: [], learners: [] },
+        });
+
+        expect(response).toEqual({ term: 1, success: false });
+        expect(snapshotManager.saveSnapshot).not.toHaveBeenCalled();
+    });
+
+    it('should reject non-zero chunk when snapshot session metadata does not match', async () => {
+        persistentState.getCurrentTerm.mockReturnValue(1);
+
+        await stateMachine.handleInstallSnapshot('node2', {
+            term: 1,
+            leaderId: 'node2',
+            lastIncludedIndex: 9,
+            lastIncludedTerm: 4,
+            offset: 0,
+            done: false,
+            data: Buffer.from('aaa'),
+            config: { voters: [], learners: [] },
+        });
+
+        const response = await stateMachine.handleInstallSnapshot('node2', {
+            term: 1,
+            leaderId: 'node2',
+            lastIncludedIndex: 10,
+            lastIncludedTerm: 4,
+            offset: 3,
+            done: true,
+            data: Buffer.from('bbb'),
+            config: { voters: [], learners: [] },
+        });
+
+        expect(response).toEqual({ term: 1, success: false });
+        expect(snapshotManager.saveSnapshot).not.toHaveBeenCalled();
+    });
+
+    it('should return failure when active snapshot session becomes null before chunk validation', async () => {
+        persistentState.getCurrentTerm.mockReturnValue(1);
+
+        const session = {
+            leaderId: 'node2',
+            term: 1,
+            lastIncludedIndex: 9,
+            lastIncludedTerm: 4,
+            config: { voters: [], learners: [] },
+            chunks: [Buffer.from('a')],
+            receivedBytes: 1,
+        };
+
+        let reads = 0;
+        Object.defineProperty(stateMachine as any, 'installSnapshotSession', {
+            configurable: true,
+            get: () => {
+                reads += 1;
+                return reads <= 5 ? session : null;
+            },
+            set: vi.fn(),
+        });
+
+        const response = await stateMachine.handleInstallSnapshot('node2', {
+            term: 1,
+            leaderId: 'node2',
+            lastIncludedIndex: 9,
+            lastIncludedTerm: 4,
+            offset: 1,
+            done: false,
+            data: Buffer.from('b'),
+            config: { voters: [], learners: [] },
+        });
+
+        expect(response).toEqual({ term: 1, success: false });
+    });
+
+    it('should accept empty non-final chunk without appending data', async () => {
+        persistentState.getCurrentTerm.mockReturnValue(1);
+
+        const response = await stateMachine.handleInstallSnapshot('node2', {
+            term: 1,
+            leaderId: 'node2',
+            lastIncludedIndex: 9,
+            lastIncludedTerm: 4,
+            offset: 0,
+            done: false,
+            data: Buffer.alloc(0),
+            config: { voters: [], learners: [] },
+        });
+
+        expect(response).toEqual({ term: 1, success: true });
+        expect(snapshotManager.saveSnapshot).not.toHaveBeenCalled();
+        expect(applicationStateMachine.installSnapshot).not.toHaveBeenCalled();
+    });
+
+    it('should step down from candidate on same-term InstallSnapshot', async () => {
+        rpcHandler.sendRequestVote.mockResolvedValue({ term: 1, voteGranted: false });
+
+        await stateMachine.becomeCandidate();
+        expect(stateMachine.getCurrentState()).toBe(RaftState.Candidate);
+
+        const response = await stateMachine.handleInstallSnapshot('node2', {
+            term: 1,
+            leaderId: 'node2',
+            lastIncludedIndex: 4,
+            lastIncludedTerm: 1,
+            offset: 0,
+            done: true,
+            data: Buffer.from('snap'),
+            config: { voters: [], learners: [] },
+        });
+
+        expect(response).toEqual({ term: 1, success: true });
+        expect(stateMachine.getCurrentState()).toBe(RaftState.Follower);
+        expect(stateMachine.getCurrentLeader()).toBe('node2');
+    });
+
+    it('should invoke callback registered by same-term follower InstallSnapshot timer refresh', async () => {
+        const timeoutSpy = vi.spyOn(stateMachine as any, 'handleElectionTimeoutlocked').mockResolvedValue(undefined);
+
+        await stateMachine.handleInstallSnapshot('node2', {
+            term: 1,
+            leaderId: 'node2',
+            lastIncludedIndex: 4,
+            lastIncludedTerm: 1,
+            offset: 0,
+            done: false,
+            data: Buffer.from('snap'),
+            config: { voters: [], learners: [] },
+        });
+
+        const calls = timerManager.startElectionTimer.mock.calls;
+        const callback = (calls[calls.length - 1]?.[0]) as (() => Promise<void>) | undefined;
+        expect(callback).toBeDefined();
+
+        await callback!();
+
+        expect(timeoutSpy).toHaveBeenCalled();
+    });
+
+    it('should clear active snapshot session when becoming follower', async () => {
+        (stateMachine as any)['installSnapshotSession'] = {
+            leaderId: 'node2',
+            term: 1,
+            lastIncludedIndex: 5,
+            lastIncludedTerm: 1,
+            config: { voters: [], learners: [] },
+            chunks: [Buffer.from('abc')],
+            receivedBytes: 3,
+        };
+
+        await stateMachine.becomeFollower(2, 'node2');
+
+        expect((stateMachine as any)['installSnapshotSession']).toBeNull();
+    });
+
     it('should trigger sendSnapshot path when nextIndex <= snapshotIndex', async () => {
         snapshotManager.getSnapshotMetadata.mockReturnValue({ lastIncludedIndex: 5 });
 
         const fakeSnapshot = {
             lastIncludedIndex: 5,
             lastIncludedTerm: 1,
+            offset: 0,
+            done: true,
             data: Buffer.from('snapshot-data'),
             config: { voters: [], learners: [] },
         };
@@ -1023,6 +1388,65 @@ describe('StateMachine.ts, StateMachine', () => {
         });
 
         expect(rpcHandler.sendAppendEntries).not.toHaveBeenCalled();
+    });
+
+    it('should send snapshot in multiple chunks with increasing offsets', async () => {
+        configManager.getAllPeers.mockReturnValue(['node2']);
+        configManager.getVoters.mockReturnValue(['node1', 'node2']);
+        snapshotManager.getSnapshotMetadata.mockReturnValue({ lastIncludedIndex: 5 });
+        snapshotManager.loadSnapshot.mockResolvedValue({
+            lastIncludedIndex: 5,
+            lastIncludedTerm: 1,
+            data: Buffer.alloc(300000, 1),
+            config: { voters: [], learners: [] },
+        });
+
+        (rpcHandler as any).sendInstallSnapshot = vi.fn().mockResolvedValue({
+            term: 1,
+            success: true,
+        });
+
+        await stateMachine.becomeLeader();
+
+        await vi.waitFor(() => {
+            expect((rpcHandler as any).sendInstallSnapshot).toHaveBeenCalledTimes(2);
+        });
+
+        const firstRequest = (rpcHandler as any).sendInstallSnapshot.mock.calls[0][1];
+        const secondRequest = (rpcHandler as any).sendInstallSnapshot.mock.calls[1][1];
+
+        expect(firstRequest.offset).toBe(0);
+        expect(firstRequest.done).toBe(false);
+        expect(secondRequest.offset).toBe(firstRequest.data.length);
+        expect(secondRequest.done).toBe(true);
+    });
+
+    it('should send exactly one done chunk for empty snapshot data', async () => {
+        configManager.getAllPeers.mockReturnValue(['node2']);
+        configManager.getVoters.mockReturnValue(['node1', 'node2']);
+        snapshotManager.getSnapshotMetadata.mockReturnValue({ lastIncludedIndex: 5 });
+        snapshotManager.loadSnapshot.mockResolvedValue({
+            lastIncludedIndex: 5,
+            lastIncludedTerm: 1,
+            data: Buffer.alloc(0),
+            config: { voters: [], learners: [] },
+        });
+
+        (rpcHandler as any).sendInstallSnapshot = vi.fn().mockResolvedValue({
+            term: 1,
+            success: true,
+        });
+
+        await stateMachine.becomeLeader();
+
+        await vi.waitFor(() => {
+            expect((rpcHandler as any).sendInstallSnapshot).toHaveBeenCalledTimes(1);
+        });
+
+        const request = (rpcHandler as any).sendInstallSnapshot.mock.calls[0][1];
+        expect(request.offset).toBe(0);
+        expect(request.done).toBe(true);
+        expect(request.data).toEqual(Buffer.alloc(0));
     });
 
     it('should log error and return early from sendSnapshot when no snapshot is available', async () => {
@@ -1047,6 +1471,8 @@ describe('StateMachine.ts, StateMachine', () => {
         snapshotManager.loadSnapshot.mockResolvedValue({
             lastIncludedIndex: 5,
             lastIncludedTerm: 1,
+            offset: 0,
+            done: true,
             data: Buffer.from('snap'),
             config: { voters: [], learners: [] },
         });
@@ -1068,6 +1494,8 @@ describe('StateMachine.ts, StateMachine', () => {
         snapshotManager.loadSnapshot.mockResolvedValue({
             lastIncludedIndex: 5,
             lastIncludedTerm: 1,
+            offset: 0,
+            done: true,
             data: Buffer.from('snap'),
             config: { voters: [], learners: [] },
         });
@@ -1091,6 +1519,8 @@ describe('StateMachine.ts, StateMachine', () => {
         snapshotManager.loadSnapshot.mockResolvedValue({
             lastIncludedIndex: 5,
             lastIncludedTerm: 1,
+            offset: 0,
+            done: true,
             data: Buffer.from('snap'),
             config: { voters: [], learners: [] },
         });
@@ -1114,6 +1544,8 @@ describe('StateMachine.ts, StateMachine', () => {
         snapshotManager.loadSnapshot.mockResolvedValue({
             lastIncludedIndex: 5,
             lastIncludedTerm: 1,
+            offset: 0,
+            done: true,
             data: Buffer.from('snap'),
             config: { voters: [], learners: [] },
         });
@@ -1136,6 +1568,8 @@ describe('StateMachine.ts, StateMachine', () => {
         snapshotManager.loadSnapshot.mockResolvedValue({
             lastIncludedIndex: 5,
             lastIncludedTerm: 1,
+            offset: 0,
+            done: true,
             data: Buffer.from('snap'),
             config: { voters: [], learners: [] },
         });
@@ -1178,6 +1612,8 @@ describe('StateMachine.ts, StateMachine', () => {
         snapshotManager.loadSnapshot.mockResolvedValue({
             lastIncludedIndex: 5,
             lastIncludedTerm: 1,
+            offset: 0,
+            done: true,
             data: Buffer.from("snap"),
             config: { voters: [], learners: [] }
         });
@@ -1318,6 +1754,8 @@ describe('StateMachine.ts, StateMachine', () => {
             leaderId: 'node2',
             lastIncludedIndex: 5,
             lastIncludedTerm: 1,
+            offset: 0,
+            done: true,
             data: Buffer.from('snap'),
             config: defaultConfig
         });
@@ -1334,6 +1772,8 @@ describe('StateMachine.ts, StateMachine', () => {
             leaderId: 'node2',
             lastIncludedIndex: 5,
             lastIncludedTerm: 1,
+            offset: 0,
+            done: true,
             data: Buffer.from('snap'),
             config: { voters: [], learners: [] }
         });

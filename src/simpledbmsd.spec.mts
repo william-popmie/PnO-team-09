@@ -128,7 +128,7 @@ describe('SimpleDBMS Daemon API', () => {
       const res = await request(app).get(`/db/users${query}`);
 
       expect(res.status).toBe(200);
-      const docs = res.body as { name: string, score: number }[];
+      const docs = res.body as { name: string; score: number }[];
       expect(docs).toHaveLength(2);
       // Descending total: D(40), C(30), B(20), A(10). Skip 1 -> C, B.
       expect(docs[0].name).toBe('C');

@@ -192,10 +192,8 @@ export class Collection {
 
   // Indexes: field name -> B+ Tree
   // The 'id' index is guaranteed to exist and serves as the primary index
-  private indexes: Map<
-    string,
-    BPlusTree<string, number, FBLeafNode<string, number>, FBInternalNode<string, number>>
-  > = new Map();
+  private indexes: Map<string, BPlusTree<string, number, FBLeafNode<string, number>, FBInternalNode<string, number>>> =
+    new Map();
 
   private onChangeCallback?: () => Promise<void>;
   private createIndexStorage?: () => FBNodeStorage<string, number>;
@@ -927,8 +925,9 @@ export class Collection {
         const doc = JSON.parse(docBuffer.toString()) as Document;
         if (filter && !filter(doc)) continue;
 
-        const groupValue = (groupBy ? doc[groupBy] : '_all_');
-        const groupKey = typeof groupValue === 'object' && groupValue !== null ? JSON.stringify(groupValue) : String(groupValue);
+        const groupValue = groupBy ? doc[groupBy] : '_all_';
+        const groupKey =
+          typeof groupValue === 'object' && groupValue !== null ? JSON.stringify(groupValue) : String(groupValue);
 
         if (!groups.has(groupKey)) {
           groups.set(groupKey, []);
@@ -940,7 +939,9 @@ export class Collection {
     // Compute aggregations for each group
     const results: Document[] = [];
     for (const [groupKey, docs] of groups.entries()) {
-      const result: Document = groupBy ? { id: `group_${groupKey as string}`, [groupBy]: docs[0][groupBy] } : { id: `group_all` };
+      const result: Document = groupBy
+        ? { id: `group_${groupKey as string}`, [groupBy]: docs[0][groupBy] }
+        : { id: `group_all` };
 
       if (operations.count) {
         result[operations.count] = docs.length;
@@ -1302,10 +1303,7 @@ export class SimpleDBMS {
       this.fbFile,
       4096,
     );
-    const tree = new BPlusTree<string, number, FBLeafNode<string, number>, FBInternalNode<string, number>>(
-      storage,
-      50,
-    );
+    const tree = new BPlusTree<string, number, FBLeafNode<string, number>, FBInternalNode<string, number>>(storage, 50);
 
     this.dbHeader.collections[name] = {
       rootBlockId: 0,
@@ -1364,10 +1362,7 @@ export class SimpleDBMS {
       this.fbFile,
       4096,
     );
-    const tree = new BPlusTree<string, number, FBLeafNode<string, number>, FBInternalNode<string, number>>(
-      storage,
-      50,
-    );
+    const tree = new BPlusTree<string, number, FBLeafNode<string, number>, FBInternalNode<string, number>>(storage, 50);
 
     const rootNode = await storage.loadNode(rootBlockId);
     tree.load(rootNode);

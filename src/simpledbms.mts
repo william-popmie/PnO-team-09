@@ -342,7 +342,7 @@ export class Collection {
   //TODO: is the omit really needed? Can't you just get it form the Document input itself?
   async insert(doc: Omit<Document, 'id'> & { id?: string }): Promise<Document> {
     const id = doc.id || randomUUID();
-    const newDoc: Document = JSON.parse(JSON.stringify({ ...doc, id }));
+    const newDoc: Document = JSON.parse(JSON.stringify({ ...doc, id })) as Document;
     const docBuffer = Buffer.from(JSON.stringify(newDoc));
 
     // Allocate space and write document to the heap
@@ -911,7 +911,7 @@ export class Collection {
         const doc = JSON.parse(docBuffer.toString()) as Document;
         if (filter && !filter(doc)) continue;
 
-        const groupValue = doc[groupBy] as DocumentValue;
+        const groupValue = doc[groupBy];
         const groupKey = typeof groupValue === 'object' ? JSON.stringify(groupValue) : String(groupValue);
 
         if (!groups.has(groupKey)) {
@@ -927,7 +927,7 @@ export class Collection {
         const doc = JSON.parse(docBuffer.toString()) as Document;
         if (filter && !filter(doc)) continue;
 
-        const groupValue = (groupBy ? doc[groupBy] : '_all_') as DocumentValue;
+        const groupValue = (groupBy ? doc[groupBy] : '_all_');
         const groupKey = typeof groupValue === 'object' && groupValue !== null ? JSON.stringify(groupValue) : String(groupValue);
 
         if (!groups.has(groupKey)) {
@@ -940,7 +940,7 @@ export class Collection {
     // Compute aggregations for each group
     const results: Document[] = [];
     for (const [groupKey, docs] of groups.entries()) {
-      const result: Document = groupBy ? { id: `group_${groupKey}`, [groupBy]: docs[0][groupBy] } : { id: `group_all` };
+      const result: Document = groupBy ? { id: `group_${groupKey as string}`, [groupBy]: docs[0][groupBy] } : { id: `group_all` };
 
       if (operations.count) {
         result[operations.count] = docs.length;
@@ -1090,7 +1090,7 @@ export class Collection {
       await this.onChangeCallback();
     }
 
-    return JSON.parse(JSON.stringify(updated));
+    return JSON.parse(JSON.stringify(updated)) as Document;
   }
 
   /**
@@ -1459,7 +1459,7 @@ export class SimpleDBMS {
           const docBuffer = await right.getDocumentHeap().readBlob(startBlockId);
           if (docBuffer.length > 0) {
             const doc = JSON.parse(docBuffer.toString()) as Document;
-            const key = doc[rightOn] as DocumentValue;
+            const key = doc[rightOn];
             if (!rightMap.has(key)) {
               rightMap.set(key, []);
             }
@@ -1470,7 +1470,7 @@ export class SimpleDBMS {
     } else {
       const rightDocs = await right.find({});
       for (const doc of rightDocs) {
-        const key = doc[rightOn] as DocumentValue;
+        const key = doc[rightOn];
         if (!rightMap.has(key)) {
           rightMap.set(key, []);
         }
@@ -1481,7 +1481,7 @@ export class SimpleDBMS {
     const results: Document[] = [];
     const leftDocs = await left.find({});
     for (const leftDoc of leftDocs) {
-      const key = leftDoc[on] as DocumentValue;
+      const key = leftDoc[on];
       const rightDocs = rightMap.get(key);
 
       if (rightDocs && rightDocs.length > 0) {

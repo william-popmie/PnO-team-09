@@ -104,7 +104,7 @@ describe('SimpleDBMS Daemon API', () => {
       const filter = encodeURIComponent(JSON.stringify({ uniqueField123: { $eq: 200 } }));
       const findRes = await request(app).get(`/db/indexedCol?filter=${filter}`);
       expect(findRes.status).toBe(200);
-      expect((findRes.body as any[]).length).toBeGreaterThanOrEqual(1);
+      expect((findRes.body as unknown[]).length).toBeGreaterThanOrEqual(1);
     });
 
     it('should drop index', async () => {
@@ -128,7 +128,7 @@ describe('SimpleDBMS Daemon API', () => {
       const res = await request(app).get(`/db/users${query}`);
 
       expect(res.status).toBe(200);
-      const docs = res.body as any[];
+      const docs = res.body as { name: string, score: number }[];
       expect(docs).toHaveLength(2);
       // Descending total: D(40), C(30), B(20), A(10). Skip 1 -> C, B.
       expect(docs[0].name).toBe('C');

@@ -9,6 +9,7 @@ export interface RaftConfig {
     electionTimeoutMinMs: number;
     electionTimeoutMaxMs: number;
     heartbeatIntervalMs: number;
+    snapshotThreshold?: number;
 }
 
 export function validateConfig(config: RaftConfig): void {
@@ -51,16 +52,21 @@ export function validateConfig(config: RaftConfig): void {
     if (config.electionTimeoutMinMs < config.heartbeatIntervalMs * 3) {
         throw new Error(`Invalid electionTimeoutMinMs: ${config.electionTimeoutMinMs}. electionTimeoutMinMs must be at least three times the heartbeatIntervalMs: ${config.heartbeatIntervalMs}.`);
     }
+
+    if (config.snapshotThreshold !== undefined && (!Number.isInteger(config.snapshotThreshold) || config.snapshotThreshold <= 0)) {
+        throw new Error(`Invalid snapshotThreshold: ${config.snapshotThreshold}. snapshotThreshold must be a positive integer.`);
+    }
 }
 
-export function createConfig(nodeId: NodeId, address: string, peers: ClusterMember[], electionTimeoutMinMs: number, electionTimeoutMaxMs: number, heartbeatIntervalMs: number): RaftConfig {
+export function createConfig(nodeId: NodeId, address: string, peers: ClusterMember[], electionTimeoutMinMs: number, electionTimeoutMaxMs: number, heartbeatIntervalMs: number, snapshotThreshold?: number): RaftConfig {
     const config: RaftConfig = {
         nodeId,
         address,
         peers,
         electionTimeoutMinMs,
         electionTimeoutMaxMs,
-        heartbeatIntervalMs
+        heartbeatIntervalMs,
+        ...(snapshotThreshold !== undefined ? { snapshotThreshold } : {})
     };
     validateConfig(config);
     return config;

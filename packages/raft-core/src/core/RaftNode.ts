@@ -63,6 +63,8 @@ export interface RaftNodeOptions {
     _random?: Random;
 }
 
+const DEFAULT_SNAPSHOT_THRESHOLD = 200;
+
 export class RaftNode implements RaftNodeInterface {
     private config: RaftConfig;
     private nodeStorage: NodeStorage;
@@ -88,7 +90,7 @@ export class RaftNode implements RaftNodeInterface {
 
     private commitWaiters: Map<number, Array<(Commited: boolean) => void>> = new Map();
 
-    private snapshotThreshold: number = 5;
+    private snapshotThreshold: number;
     private snapshotManager: SnapshotManager;
 
     private configManager: ConfigManager;
@@ -114,6 +116,7 @@ export class RaftNode implements RaftNodeInterface {
         this.bus = eventBus;
 
         validateConfig(config);
+        this.snapshotThreshold = config.snapshotThreshold ?? DEFAULT_SNAPSHOT_THRESHOLD;
 
         this.logger = logger || new ConsoleLogger(config.nodeId, 'info');
 

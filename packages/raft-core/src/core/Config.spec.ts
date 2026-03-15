@@ -147,6 +147,26 @@ describe('Config.ts, validateConfig', () => {
         heartbeatIntervalMs: 50
      };
 
+      const invalidConfig16 = {
+          nodeId: "node1",
+          address: "address1",
+          peers: [{ id: "node2", address: "address2" }, { id: "node3", address: "address3" }],
+          electionTimeoutMinMs: 150,
+          electionTimeoutMaxMs: 300,
+          heartbeatIntervalMs: 50,
+          snapshotThreshold: "not an integer" as any
+      };
+
+      const invalidConfig17 = {
+          nodeId: "node1",
+          address: "address1",
+          peers: [{ id: "node2", address: "address2" }, { id: "node3", address: "address3" }],
+          electionTimeoutMinMs: 150,
+          electionTimeoutMaxMs: 300,
+          heartbeatIntervalMs: 50,
+          snapshotThreshold: 0
+      };
+
     it('should validate a correct config', () => {
         expect(() => validateConfig(validConfig)).not.toThrow();
     });
@@ -210,6 +230,14 @@ describe('Config.ts, validateConfig', () => {
     it('should throw error for non string address', () => {
         expect(() => validateConfig(invalidConfig15)).toThrow("Invalid address: 123. address must be a non-empty string.");
     });
+
+    it('should throw error for non integer snapshotThreshold', () => {
+        expect(() => validateConfig(invalidConfig16)).toThrow("Invalid snapshotThreshold: not an integer. snapshotThreshold must be a positive integer.");
+    });
+
+    it('should throw error for non positive snapshotThreshold', () => {
+        expect(() => validateConfig(invalidConfig17)).toThrow("Invalid snapshotThreshold: 0. snapshotThreshold must be a positive integer.");
+    });
 });
 
 describe('Config.ts, createConfig', () => {
@@ -243,5 +271,18 @@ describe('Config.ts, createConfig', () => {
             validConfigParams.electionTimeoutMaxMs,
             validConfigParams.heartbeatIntervalMs
         )).toThrow("Invalid nodeId: . nodeId must be a non-empty string.");
+    });
+
+    it('should create config with optional snapshotThreshold', () => {
+        const config = createConfig(
+            validConfigParams.nodeId,
+            validConfigParams.address,
+            validConfigParams.peers,
+            validConfigParams.electionTimeoutMinMs,
+            validConfigParams.electionTimeoutMaxMs,
+            validConfigParams.heartbeatIntervalMs,
+            42
+        );
+        expect(config.snapshotThreshold).toBe(42);
     });
 });

@@ -161,6 +161,37 @@ describe('RaftNode.ts, RaftNode', () => {
         expect((nodeWithoutLogger as any)['logger']).toBeInstanceOf(ConsoleLogger);
     });
 
+    it('should use default snapshot threshold when not configured', () => {
+        expect((node as any)['snapshotThreshold']).toBe(200);
+    });
+
+    it('should use snapshot threshold from config when provided', () => {
+        const customConfig = createConfig(
+            nodeId,
+            'localhost:52000',
+            [
+                { id: 'node2', address: 'localhost:52001' },
+                { id: 'node3', address: 'localhost:52002' }
+            ],
+            150,
+            300,
+            50,
+            12
+        );
+
+        const customNode = new RaftNode({
+            config: customConfig,
+            storage,
+            transport: transport as any,
+            stateMachine: appStateMachine as any,
+            _clock: clock,
+            _random: random,
+            logger: silentLogger as any,
+        });
+
+        expect((customNode as any)['snapshotThreshold']).toBe(12);
+    });
+
     it('should start succesfully', async () => {
         await node.start();
         expect(node.isStarted()).toBe(true);

@@ -22,7 +22,10 @@
   },
   "files": [
     "dist",
-    "proto"
+    "proto",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",

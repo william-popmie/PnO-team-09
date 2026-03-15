@@ -1,0 +1,127 @@
+import { NodeId } from '../core/Config';
+import { MetaStorage } from '../storage/interfaces/MetaStorage';
+import { PersistentStateError, StorageError } from '../util/Error';
+
+export interface PersistentStateSnapshot {
+    currentTerm: number;
+    votedFor: NodeId | null;
+}
+
+export interface PersistentStateInterface {
+    initialize(): Promise<PersistentStateSnapshot>;
+    getCurrentTerm(): number;
+    getVotedFor(): NodeId | null;
+    setCurrentTerm(term: number): Promise<void>;
+    updateTermAndVote(term: number, votedFor: NodeId | null): Promise<void>;
+    clear(): Promise<void>;
+}
+
+export class PersistentState implements PersistentStateInterface {
+    private currentTerm: number = 0;
+    private votedFor: NodeId | null = null;
+    private initialized: boolean = false;
+
+    constructor(private readonly meta: MetaStorage) {}
+
+    async initialize(): Promise<PersistentStateSnapshot> {
+        if (this.initialized) {
+            return { 
+                currentTerm: this.currentTerm,
+                votedFor: this.votedFor,
+            };
+        }
+
+        if (!this.meta.isOpen()) {
+            throw new PersistentStateError('Storage must be open before initializing PersistentState');
+        }
+
+        const snapshot = await this.restore();
+        this.currentTerm = snapshot.currentTerm;
+        this.votedFor = snapshot.votedFor;
+        this.initialized = true;
+        return snapshot;
+    }
+
+    getCurrentTerm(): number {
+        this.ensureInitialized();
+        return this.currentTerm;
+    }
+
+    getVotedFor(): NodeId | null {
+        this.ensureInitialized();
+        return this.votedFor;
+    }
+
+    async setCurrentTerm(term: number): Promise<void> {
+        await this.updateTermAndVote(term, null);
+    }
+
+    async updateTermAndVote(term: number, votedFor: NodeId | null): Promise<void> {
+        this.ensureInitialized();
+
+        this.assertValidNewTerm(term);
+
+        if (term === this.currentTerm && votedFor === this.votedFor) {
+            return;
+        }
+
+        try {
+            await this.meta.write(term, votedFor);
+            this.currentTerm = term;
+            this.votedFor = votedFor;
+        } catch (error) {
+            throw new PersistentStateError('Failed to update term and vote', error instanceof StorageError ? error : undefined);
+        }
+    }
+
+    async clear(): Promise<void> {
+        this.ensureInitialized();
+
+        try {
+            await this.meta.write(0, null);
+            this.currentTerm = 0;
+            this.votedFor = null;
+        } catch (error) {
+            throw new PersistentStateError('Failed to clear persistent state', error instanceof StorageError ? error : undefined);
+        }
+    }
+
+    private ensureInitialized(): void {
+        if (!this.initialized) {
+            throw new PersistentStateError('PersistentState must be initialized before use');
+        }
+    }
+
+    private async restore(): Promise<PersistentStateSnapshot> {
+        try {
+            const data = await this.meta.read();
+
+            if (data) {
+                this.validateTerm(data.term);
+                this.currentTerm = data.term;
+                this.votedFor = data.votedFor;
+            }
+
+            return {
+                currentTerm: this.currentTerm,
+                votedFor: this.votedFor,
+            };
+        } catch (error) {
+            throw new PersistentStateError('Failed to restore persistent state', error as StorageError);
+        }
+    }
+
+    private validateTerm(term: number): void {
+        if (!Number.isInteger(term) || term < 0) {
+            throw new PersistentStateError(`Invalid term value in storage: ${term}`);
+        }
+    }
+
+    private assertValidNewTerm(newTerm: number): void {
+        this.validateTerm(newTerm);
+
+        if (newTerm < this.currentTerm) {
+            throw new PersistentStateError(`New term ${newTerm} must be greater than or equal to current term ${this.currentTerm}`);
+        }
+    }
+}

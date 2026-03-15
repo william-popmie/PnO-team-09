@@ -1,0 +1,128 @@
+import { WebSocketServer, WebSocket } from "ws";
+import { EventStore } from "@maboke123/raft-core";
+import { ClientMessage, ServerMessage } from "./WsProtocol";
+import { ClusterRunnerInterface } from "./ClusterRunnerInterface";
+
+export class WsServer {
+    private wss: WebSocketServer | null = null;
+
+    constructor(
+        private eventStore: EventStore,
+        private cluster: ClusterRunnerInterface,
+        private port: number = 4001
+    ) {}
+
+    start(): void {
+        this.wss = new WebSocketServer({ port: this.port });
+
+        this.wss.on("listening", () => {
+            console.log(`WebSocket server started on port ${this.port}`);
+        });
+
+        this.wss.on("connection", (ws) => {
+            console.log("New client connected");
+            this.handleConnection(ws);
+        });
+    }
+
+    stop(): void {
+        if (this.wss) {
+            this.wss.close(() => {
+                console.log("WebSocket server stopped");
+            });
+        }
+    }
+
+    private handleConnection(ws: WebSocket): void {
+        const initial: ServerMessage = {
+            type: "InitialState",
+            events: this.eventStore.getAllEvents(),
+            nodeIds: this.cluster.getNodeIds(),
+            config: this.cluster.getCommittedConfig()
+        };
+
+        ws.send(JSON.stringify(initial));
+
+        const unsubscribe = this.eventStore.onLiveEvent((event) => {
+            if (ws.readyState !== WebSocket.OPEN) {
+                return;
+            }
+
+            setImmediate(() => {
+                const message: ServerMessage = {
+                    type: "LiveEvent",
+                    event,
+                };
+                ws.send(JSON.stringify(message));
+            });
+        });
+
+        ws.on("message", (data) => {
+            try {
+                const message = JSON.parse(data.toString());
+                this.handleMessage(message);
+            } catch (err) {
+                console.error("Failed to parse message from client:", err);
+            }
+        });
+
+        ws.on("close", () => {
+            console.log("Client disconnected");
+            unsubscribe();
+        });
+
+        ws.on("error", (err) => {
+            console.error("WebSocket error:", err);
+            unsubscribe();
+        });
+    }
+
+    private handleMessage(message: ClientMessage): void {
+        switch (message.type) {
+            case "SubmitCommand":
+                this.cluster.submitCommand(message.command)
+                    .catch(err => console.error("SubmitCommand failed:", err.message));
+                break;
+            case "CrashNode":
+                this.cluster.crashNode(message.nodeId)
+                    .catch(err => console.error("CrashNode failed:", err.message));
+                break;
+            case "RecoverNode":
+                this.cluster.recoverNode(message.nodeId)
+                    .catch(err => console.error("RecoverNode failed:", err.message));
+                break;
+            case "PartitionNodes":
+                this.cluster.partitionNodes(message.groups);
+                break;
+            case "HealPartition":
+                this.cluster.healPartition();
+                break;
+            case "SetDropRate":
+                this.cluster.setDropRate(message.nodeId, message.dropRate);
+                break;
+            case "CutLink":
+                this.cluster.cutLink(message.nodeA, message.nodeB);
+                break;
+            case "HealLink":
+                this.cluster.healLink(message.nodeA, message.nodeB);
+                break;
+            case "HealAllLinks":
+                this.cluster.healAllLinks();
+                break;
+            case "AddServer":
+                this.cluster.addServer(message.nodeId, message.address, message.asLearner)
+                    .catch(err => console.error("AddServer failed:", err.message));
+                break;
+            case "RemoveServer":
+                this.cluster.removeServer(message.nodeId)
+                    .catch(err => console.error("RemoveServer failed:", err.message));
+                break;
+            case "PromoteLearner":
+                this.cluster.promoteServer(message.nodeId)
+                    .catch(err => console.error("PromoteLearner failed:", err.message));
+                break;
+            default:
+                console.warn("Unknown message type from client:", message);
+        }
+    }
+}

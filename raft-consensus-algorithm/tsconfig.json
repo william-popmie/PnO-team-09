@@ -1,0 +1,9 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/raft-core" },
+    { "path": "./packages/raft-grpc" },
+    { "path": "./apps/example-cluster" },
+    { "path": "./apps/devtools" }
+  ]
+}

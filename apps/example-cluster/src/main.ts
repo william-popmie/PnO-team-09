@@ -1,5 +1,4 @@
-import { LocalEventBus } from "../events/EventBus";
-import { EventStore } from "../events/EventStore";
+import { EventStore, LocalEventBus } from "@maboke123/raft-core";
 import { ClusterRunner } from "./ClusterRunner";
 import { ClusterRunnerGRPC } from "./ClusterRunnerGRPC";
 import { ClusterRunnerInterface } from "./ClusterRunnerInterface";

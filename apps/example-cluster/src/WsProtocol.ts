@@ -1,7 +1,4 @@
-import { ClusterConfig } from "../config/ClusterConfig";
-import { NodeId } from "../core/Config";
-import { RaftEvent } from "../events/RaftEvents";
-import { Command } from "../log/LogEntry";
+import { ClusterConfig, Command, NodeId, RaftEvent } from "@maboke123/raft-core";
 
 export interface InitialStateMessage {
     type: "InitialState";

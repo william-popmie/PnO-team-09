@@ -1,14 +1,77 @@
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import * as path from "path";
-import { AppendEntriesResponse, RPCMessage } from "../rpc/RPCTypes";
-import { NetworkError } from "../util/Error";
-import { Transport, MessageHandler } from "./Transport";
-import { StorageCodec } from "../storage/StorageUtil";
-import { NodeId } from "../core/Config";
+import {
+    AppendEntriesResponse,
+    LogEntry,
+    LogEntryType,
+    MessageHandler,
+    NetworkError,
+    NodeId,
+    RPCMessage,
+    Transport,
+} from "@maboke123/raft-core";
 import fs from "fs/promises";
 
-const protoPath = path.resolve(__dirname, "../../proto/raft.proto");
+const protoPath = path.resolve(__dirname, "../proto/raft.proto");
+
+function serializeLogEntry(entry: LogEntry): object {
+    if (entry.type === LogEntryType.CONFIG) {
+        return {
+            term: entry.term,
+            index: entry.index,
+            type: entry.type,
+            config: JSON.stringify(entry.config)
+        };
+    }
+
+    if (entry.type === LogEntryType.NOOP) {
+        return {
+            term: entry.term,
+            index: entry.index,
+            type: entry.type
+        };
+    }
+
+    return {
+        term: entry.term,
+        index: entry.index,
+        type: entry.type,
+        command: {
+            type: entry.command!.type,
+            payload: Buffer.from(JSON.stringify(entry.command!.payload)),
+        },
+    };
+}
+
+function deserializeLogEntry(raw: any): LogEntry {
+    if (raw.type === LogEntryType.CONFIG) {
+        return {
+            term: raw.term,
+            index: raw.index,
+            type: LogEntryType.CONFIG,
+            config: typeof raw.config === "string" ? JSON.parse(raw.config) : raw.config
+        };
+    }
+
+    if (raw.type === LogEntryType.NOOP) {
+        return {
+            term: raw.term,
+            index: raw.index,
+            type: LogEntryType.NOOP
+        };
+    }
+
+    return {
+        term: raw.term,
+        index: raw.index,
+        type: LogEntryType.COMMAND,
+        command: {
+            type: raw.command.type,
+            payload: JSON.parse(raw.command.payload.toString()),
+        },
+    };
+}
 
 const packageDefinition = protoLoader.loadSync(protoPath, {
     keepCase: true,
@@ -31,7 +94,7 @@ export function rpcMessageToGrpc(message: RPCMessage): { method: string, payload
             method: "AppendEntries",
             payload: {
                 ...message.payload,
-                entries: message.payload.entries.map((entry: any) => StorageCodec.serializeLogEntry(entry))
+                entries: message.payload.entries.map((entry: any) => serializeLogEntry(entry))
             }
         };
     } else if ( message.type === "InstallSnapshot" && message.direction === "request") {
@@ -341,7 +404,7 @@ export class GrpcTransport implements Transport {
                         direction: "request",
                         payload: {
                             ...call.request,
-                            entries: (call.request.entries ?? []).map(StorageCodec.deserializeLogEntry)
+                            entries: (call.request.entries ?? []).map(deserializeLogEntry)
                         }
                     };
 

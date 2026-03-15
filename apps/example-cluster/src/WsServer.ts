@@ -1,5 +1,5 @@
 import { WebSocketServer, WebSocket } from "ws";
-import { EventStore } from "../events/EventStore";
+import { EventStore } from "@maboke123/raft-core";
 import { ClientMessage, ServerMessage } from "./WsProtocol";
 import { ClusterRunnerInterface } from "./ClusterRunnerInterface";
 

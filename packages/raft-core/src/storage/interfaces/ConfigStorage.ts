@@ -1,4 +1,4 @@
-import { ClusterMember } from "../config/ClusterConfig";
+import { ClusterMember } from "../../config/ClusterConfig";
 
 export interface ConfigStorageData {
     voters: ClusterMember[];

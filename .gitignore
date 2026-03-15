@@ -14,8 +14,6 @@
 !*.json
 !*.md
 !*.js
-!*.crt
-!*.srl
 !*.sh
 
 **/node_modules/
@@ -24,3 +22,4 @@
 *src/test-scripts/
 *notes.md
 *data/
+certs/

@@ -1,17 +1,22 @@
-import { createConfig, NodeId } from "../core/Config";
-import { RaftNode } from "../core/RaftNode";
-import { RaftEventBus } from "../events/RaftEvents";
-import { Command } from "../log/LogEntry";
+import {
+    ClusterMember,
+    Command,
+    createConfig,
+    DiskNodeStorage,
+    NodeId,
+    RaftEventBus,
+    RaftNode,
+} from "@maboke123/raft-core";
+import { GrpcTransport } from "@maboke123/raft-grpc";
 import { ClusterRunnerInterface, CommittedConfig } from "./ClusterRunnerInterface";
-import { SystemClock } from "../timing/Clock";
-import { TimerConfig } from "../timing/TimerManager";
-import { GrpcTransport } from "../transport/GRPCTransport";
-import { SystemRandom } from "../util/Random";
-import { DiskNodeStorage } from "../storage/disk/DiskNodeStorage";
-import { DiskConfigStorage } from "../storage/disk/DiskConfigStorage";
-import { ClusterMember } from "../config/ClusterConfig";
 import path from "node:path";
 import fs from "fs/promises";
+
+interface TimerConfig {
+    electionTimeoutMin: number;
+    electionTimeoutMax: number;
+    heartbeatInterval: number;
+}
 
 export interface ClusterRunnerOptions {
     nodeCount: number;
@@ -79,7 +84,7 @@ export class ClusterRunnerGRPC implements ClusterRunnerInterface {
                 timerConfig.heartbeatInterval
             );
 
-            const nodeStorage = new DiskNodeStorage(path.join(__dirname, "../../data", nodeId));
+            const nodeStorage = new DiskNodeStorage(path.join(__dirname, "../../../data", nodeId));
             await nodeStorage.open();
 
             const peers = Object.fromEntries(
@@ -91,9 +96,9 @@ export class ClusterRunnerGRPC implements ClusterRunnerInterface {
                 port,
                 peers,
                 {
-                    caCert: path.join(__dirname, "../../certs/ca/ca.crt"),
-                    nodeCert: path.join(__dirname, `../../certs/${nodeId}`, `${nodeId}.crt`),
-                    nodeKey: path.join(__dirname, `../../certs/${nodeId}`, `${nodeId}.key`)
+                    caCert: path.join(__dirname, "../../../certs/ca/ca.crt"),
+                    nodeCert: path.join(__dirname, `../../../certs/${nodeId}`, `${nodeId}.crt`),
+                    nodeKey: path.join(__dirname, `../../../certs/${nodeId}`, `${nodeId}.key`)
                 },
                 400,
                 3000
@@ -104,8 +109,6 @@ export class ClusterRunnerGRPC implements ClusterRunnerInterface {
                 storage: nodeStorage,
                 transport,
                 stateMachine: new NoOpStateMachine(),
-                _clock: new SystemClock(),
-                _random: new SystemRandom(),
                 eventBus: this.bus,
             });
 
@@ -207,7 +210,7 @@ export class ClusterRunnerGRPC implements ClusterRunnerInterface {
             this.options.timerConfig.heartbeatInterval
         );
 
-        const nodeStorage = new DiskNodeStorage(path.join(__dirname, "../../data", nodeId));
+        const nodeStorage = new DiskNodeStorage(path.join(__dirname, "../../../data", nodeId));
         await nodeStorage.open();
 
         const transport = new GrpcTransport(
@@ -215,9 +218,9 @@ export class ClusterRunnerGRPC implements ClusterRunnerInterface {
             port,
             peers,
             {
-                caCert: path.join(__dirname, "../../certs/ca/ca.crt"),
-                nodeCert: path.join(__dirname, `../../certs/${nodeId}`, `${nodeId}.crt`),
-                nodeKey: path.join(__dirname, `../../certs/${nodeId}`, `${nodeId}.key`)
+                caCert: path.join(__dirname, "../../../certs/ca/ca.crt"),
+                nodeCert: path.join(__dirname, `../../../certs/${nodeId}`, `${nodeId}.crt`),
+                nodeKey: path.join(__dirname, `../../../certs/${nodeId}`, `${nodeId}.key`)
             },
             400,
             3000
@@ -228,8 +231,6 @@ export class ClusterRunnerGRPC implements ClusterRunnerInterface {
             storage: nodeStorage,
             transport,
             stateMachine: new NoOpStateMachine(),
-            _clock: new SystemClock(),
-            _random: new SystemRandom(),
             eventBus: this.bus,
         });
 
@@ -293,7 +294,7 @@ export class ClusterRunnerGRPC implements ClusterRunnerInterface {
             learners: this.committedConfig.learners.filter(m => m.id !== nodeId)
         };
 
-        await fs.rm(path.join(__dirname, "../../data", nodeId), { recursive: true, force: true });
+        await fs.rm(path.join(__dirname, "../../../data", nodeId), { recursive: true, force: true });
     }
 
     async promoteServer(nodeId: NodeId): Promise<void> {
@@ -326,15 +327,15 @@ export class ClusterRunnerGRPC implements ClusterRunnerInterface {
         baseNodeIds: NodeId[]
     ): Promise<{ voters: ClusterMember[]; learners: ClusterMember[] } | null> {
         for (const seedNodeId of baseNodeIds) {
-            const configStorage = new DiskConfigStorage(path.join(__dirname, "../../data", seedNodeId));
+            const nodeStorage = new DiskNodeStorage(path.join(__dirname, "../../../data", seedNodeId));
             try {
-                await configStorage.open();
-                const data = await configStorage.read();
-                await configStorage.close();
+                await nodeStorage.open();
+                const data = await nodeStorage.config.read();
+                await nodeStorage.close();
                 if (!data) continue;
                 return { voters: data.voters, learners: data.learners };
             } catch {
-                try { await configStorage.close(); } catch {}
+                try { await nodeStorage.close(); } catch {}
             }
         }
         return null;

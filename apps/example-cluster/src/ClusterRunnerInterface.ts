@@ -1,5 +1,4 @@
-import { NodeId } from "../core/Config";
-import { Command } from "../log/LogEntry";
+import { Command, NodeId } from "@maboke123/raft-core";
 
 export interface CommittedConfig {
     voters: { id: NodeId; address: string }[];

@@ -1,8 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { RPCMessage } from "../rpc/RPCTypes";
 import { GrpcTransport, rpcMessageToGrpc, grpcToRpcMessage, serializeAppendEntriesResponse } from "./GRPCTransport";
-import { LogEntry, LogEntryType } from "../log/LogEntry";
-import { NetworkError } from "../util/Error";
+import { LogEntry, LogEntryType, NetworkError, RPCMessage } from "@maboke123/raft-core";
 import path from "path";
 
 let portCounter = 52000 + Math.floor(Math.random() * 5000);
@@ -970,7 +968,7 @@ describe('GRPCTransport.ts, GrpcTransport', () => {
         const portA = nextPort();
         const portB = nextPort();
 
-        const certBase = path.join(__dirname, '../../certs');
+        const certBase = path.join(__dirname, '../../../certs');
 
         const transportA = new GrpcTransport("node1", portA, { node2: `localhost:${portB}` }, {
             caCert: path.join(certBase, 'ca/ca.crt'),

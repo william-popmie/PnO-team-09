@@ -1,13 +1,19 @@
-import { createConfig, NodeId } from "../core/Config";
-import { RaftNode } from "../core/RaftNode";
-import { RaftEventBus } from "../events/RaftEvents";
-import { Command } from "../log/LogEntry";
+import {
+    Command,
+    createConfig,
+    InMemoryNodeStorage,
+    NodeId,
+    RaftEventBus,
+    RaftNode,
+} from "@maboke123/raft-core";
+import { MockTransport, SeededRandom } from "@maboke123/raft-core/dist/testing";
 import { ClusterRunnerInterface, CommittedConfig } from "./ClusterRunnerInterface";
-import { InMemoryNodeStorage } from "../storage/inMemory/InMemoryNodeStorage";
-import { SystemClock } from "../timing/Clock";
-import { TimerConfig } from "../timing/TimerManager";
-import { MockTransport } from "../transport/MockTransport";
-import { SystemRandom } from "../util/Random";
+
+interface TimerConfig {
+    electionTimeoutMin: number;
+    electionTimeoutMax: number;
+    heartbeatInterval: number;
+}
 
 export interface ClusterRunnerOptions {
     nodeCount: number;
@@ -274,10 +280,8 @@ export class ClusterRunner implements ClusterRunnerInterface {
         return new RaftNode({
             config,
             storage,
-            transport: new MockTransport(nodeId, new SystemRandom()),
+            transport: new MockTransport(nodeId, new SeededRandom(1)),
             stateMachine: new NoOpStateMachine(),
-            _clock: new SystemClock(),
-            _random: new SystemRandom(),
             eventBus: this.bus,
         });
     }

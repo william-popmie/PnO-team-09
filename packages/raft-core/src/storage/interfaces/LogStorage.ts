@@ -1,4 +1,4 @@
-import { LogEntry } from "../log/LogEntry";
+import { LogEntry } from "../../log/LogEntry";
 
 export interface LogStorageMeta {
     snapshotIndex: number;

@@ -1,4 +1,4 @@
-import { NodeId } from "../core/Config";
+import { NodeId } from "../../core/Config";
 
 export interface MetaData {
     term: number;

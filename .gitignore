@@ -14,6 +14,7 @@
 !*.json
 !*.md
 !*.js
+!LICENSE
 !*.sh
 
 **/node_modules/

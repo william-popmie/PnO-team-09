@@ -30,14 +30,7 @@ export { EventStore } from "./events/EventStore";
 export type { LogEntry, Command } from "./log/LogEntry";
 export { LogEntryType } from "./log/LogEntry";
 
-export type {
-    RPCMessage,
-    AppendEntriesResponse,
-    InstallSnapshotRequest,
-    InstallSnapshotResponse,
-    RequestVoteRequest,
-    RequestVoteResponse,
-} from "./rpc/RPCTypes";
+export type { RPCMessage } from "./rpc/RPCTypes";
 
 export {
     RaftError,

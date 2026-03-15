@@ -133,17 +133,56 @@ const node = new RaftNode({
     heartbeatIntervalMs: 50,
   },
   storage: new DiskNodeStorage("./data/node1"),
-  transport: new GrpcTransport({ port: 50051 }),
+  transport: new GrpcTransport("node1", 50051, {
+    node2: "localhost:50052",
+    node3: "localhost:50053",
+  }),
   stateMachine: new KeyValueStore(),
 });
 ```
 
+### gRPC TLS certificates
+
+`GrpcTransport` supports two modes:
+
+1. Insecure mode (no `certPaths`) for local development only.
+2. Mutual TLS mode (`certPaths` provided) for real deployments.
+
+When using TLS, each node needs:
+
+1. A shared CA certificate file (`caCert`).
+2. A node certificate file (`nodeCert`).
+3. A node private key file (`nodeKey`).
+
+Example:
+
+```ts
+const transport = new GrpcTransport(
+  "node1",
+  50051,
+  {
+    node2: "localhost:50052",
+    node3: "localhost:50053",
+  },
+  {
+    caCert: "./certs/ca/ca.crt",
+    nodeCert: "./certs/node1/node1.crt",
+    nodeKey: "./certs/node1/node1.key",
+  }
+);
+```
+
+For local demos, you can generate certificates with [scripts/GenerateCerts.sh](../../scripts/GenerateCerts.sh).
+Do not commit private keys in your repository.
+
 ## Observing the cluster with events
 
 ```ts
-import { LocalEventBus, RaftNode } from "@maboke123/raft-core";
+import { RaftNode, InMemoryNodeStorage, LocalEventBus } from "@maboke123/raft-core";
+import { MockTransport } from "@maboke123/raft-core/testing";
 
 const bus = new LocalEventBus();
+
 const node = new RaftNode({
   config: {
     nodeId: "node1",
@@ -153,9 +192,9 @@ const node = new RaftNode({
     electionTimeoutMaxMs: 300,
     heartbeatIntervalMs: 50,
   },
-  storage: {} as any,
-  transport: {} as any,
-  stateMachine: {} as any,
+  storage: new InMemoryNodeStorage(),
+  transport: new MockTransport("node1"),
+  stateMachine: new MyStateMachine(),
   eventBus: bus,
 });
 

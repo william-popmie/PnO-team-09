@@ -2,7 +2,6 @@ import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import * as path from "path";
 import {
-    AppendEntriesResponse,
     LogEntry,
     LogEntryType,
     MessageHandler,
@@ -12,6 +11,14 @@ import {
     Transport,
 } from "@maboke123/raft-core";
 import fs from "fs/promises";
+
+type AppendEntriesResponseLike = {
+    term: number;
+    success: boolean;
+    matchIndex?: number;
+    conflictIndex?: number;
+    conflictTerm?: number;
+};
 
 const protoPath = path.resolve(__dirname, "../proto/raft.proto");
 
@@ -123,7 +130,7 @@ export function grpcToRpcMessage(method: string, raw: any): RPCMessage {
         };
     } else if (method === "AppendEntries") {
 
-        const payload: AppendEntriesResponse = {
+        const payload: AppendEntriesResponseLike = {
             term: raw.term,
             success: raw.success,
             ...(raw.hasMatchIndex && { matchIndex: raw.matchIndex }),
@@ -151,7 +158,7 @@ export function grpcToRpcMessage(method: string, raw: any): RPCMessage {
     throw new NetworkError(`Unsupported gRPC method: ${method}`);
 }
 
-export function serializeAppendEntriesResponse(response: AppendEntriesResponse): object {
+export function serializeAppendEntriesResponse(response: AppendEntriesResponseLike): object {
     return {
         term: response.term,
         success: response.success,

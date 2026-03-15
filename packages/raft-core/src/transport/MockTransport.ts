@@ -1,7 +1,7 @@
 import { NodeId} from "../core/Config";
 import { RPCMessage } from "../rpc/RPCTypes";
 import { NetworkError } from "../util/Error";
-import { Random } from "../util/Random";
+import { Random, SystemRandom } from "../util/Random";
 import { Transport, MessageHandler } from "./Transport";
 
 export class MockTransport implements Transport {
@@ -13,7 +13,7 @@ export class MockTransport implements Transport {
     private static partitions: Set<NodeId>[] = [];
     private static blockedPairs: Set<string> = new Set();
 
-    constructor(private readonly nodeId: NodeId, private readonly random: Random) {}
+    constructor(private readonly nodeId: NodeId, private readonly random: Random = new SystemRandom()) {}
 
     async start(): Promise<void> {
         if (this.started) {

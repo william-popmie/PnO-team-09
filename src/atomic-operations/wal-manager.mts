@@ -1,5 +1,5 @@
 // @author Frederick Hillen, Arwin Gorissen
-// @date 2025-11-17
+// @date 2025-03-16
 
 import type { File } from '../file/file.mjs';
 
@@ -169,11 +169,14 @@ export class WALManagerImpl implements WALManager {
   }
 
   /**
-   * Writes all committed data in the WAL to the database.
+   * Writes all committed data in the WAL to the database and clears the WAL.
    */
   public async checkpoint(): Promise<void> {
     return this.mutex.runExclusive(async () => {
       await this.checkpointInternal();
+      await this.dbFile.sync();
+      await this.walFile.truncate(0);
+      await this.walFile.sync();
     });
   }
 
@@ -258,13 +261,16 @@ export class WALManagerImpl implements WALManager {
       if (committedData.writes.length === 0) {
         console.log('No committed changes detected. Flushing...');
         await this.walFile.truncate(0);
+        await this.walFile.sync();
         return;
       }
 
       console.log('Recovering committed WAL...');
       await this.checkpointInternal();
+      await this.dbFile.sync();
       console.log('Committed changes succesfully recovered.');
       await this.walFile.truncate(0);
+      await this.walFile.sync();
     });
   }
 

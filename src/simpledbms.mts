@@ -257,6 +257,7 @@ export class Collection {
 
     this.indexes.set(fieldName, indexTree);
 
+    // checking if this has the method onIndexCreated
     if (this.onIndexCreated) {
       const root = indexTree.getRoot();
       if (root.blockId === undefined || root.blockId === NO_BLOCK) {
@@ -269,6 +270,7 @@ export class Collection {
       await this.onIndexCreated(fieldName, root.blockId!);
     }
 
+    // checking if this had the method onChangeCallback
     if (this.onChangeCallback) {
       await this.onChangeCallback();
     }
@@ -288,6 +290,7 @@ export class Collection {
     }
     this.indexes.delete(fieldName);
 
+    // checking if this had the method onChangeCallback
     if (this.onChangeCallback) {
       await this.onChangeCallback();
     }
@@ -318,7 +321,6 @@ export class Collection {
 
   /**
    * Sets secondary indexes (used when loading from disk).
-   *TODO: is this function really neceseary?
    */
   setIndexes(
     indexes: Map<string, BPlusTree<string, number, FBLeafNode<string, number>, FBInternalNode<string, number>>>,
@@ -326,7 +328,7 @@ export class Collection {
     const primaryTree = this.indexes.get('id');
     this.indexes = indexes;
     // ensure 'id' is always preserved or updated
-    if (primaryTree && !this.indexes.has('id')) {
+    if (primaryTree !== undefined && !this.indexes.has('id')) {
       this.indexes.set('id', primaryTree);
     }
   }
@@ -337,7 +339,6 @@ export class Collection {
    * @param {Omit<Document, 'id'> & { id?: string }} doc The document to insert.
    * @returns {Promise<Document>} The inserted document.
    */
-  //TODO: is the omit really needed? Can't you just get it form the Document input itself?
   async insert(doc: Omit<Document, 'id'> & { id?: string }): Promise<Document> {
     const id = doc.id || randomUUID();
     const newDoc: Document = JSON.parse(JSON.stringify({ ...doc, id })) as Document;
@@ -352,6 +353,7 @@ export class Collection {
     for (const [key, value] of Object.entries(newDoc)) {
       if (value !== undefined && value !== null) {
         if (isIndexableField(key) && !this.indexes.has(key)) {
+          // checks if this has the createIndexStorage method
           if (this.createIndexStorage) {
             await this.createIndex(key, this.createIndexStorage());
             newlyCreatedIndexes.add(key);
@@ -374,6 +376,7 @@ export class Collection {
       }
     }
 
+    // checks if this has the method onChangeCallback
     if (this.onChangeCallback) {
       await this.onChangeCallback();
     }
@@ -384,6 +387,7 @@ export class Collection {
       this.cachedDocumentCount++;
     }
 
+    // checks if this has the method onDocumentCountChanged
     if (this.onDocumentCountChanged) {
       await this.onDocumentCountChanged(this.cachedDocumentCount);
     }
@@ -415,7 +419,7 @@ export class Collection {
     }
 
     if (indexedFields.length === 0) return null;
-    indexedFields.sort((a, b) => a.score - b.score);
+    indexedFields.sort((a, b) => a.score - b.score); // ASC
 
     const matchesOpsOnValue = (value: DocumentValue | undefined, ops: FilterOperators[string]): boolean => {
       if (ops.$eq !== undefined && value !== ops.$eq) return false;
@@ -479,7 +483,7 @@ export class Collection {
       if (ops.$in !== undefined) {
         const sortedValues = ops.$in
           .map((v) => ({ serialized: serializeFieldValue(v) }))
-          .sort((a, b) => (a.serialized < b.serialized ? -1 : a.serialized > b.serialized ? 1 : 0));
+          .sort((a, b) => (a.serialized < b.serialized ? -1 : a.serialized > b.serialized ? 1 : 0)); // ASC
 
         if (sortedValues.length === 0) return pointers;
 
@@ -537,7 +541,7 @@ export class Collection {
           docCache.set(startBlockId, doc);
         }
 
-        if (!doc) continue;
+        if (doc === null) continue;
         if (matchesOpsOnValue(doc[field], ops)) {
           nextSet.add(startBlockId);
         }
@@ -578,10 +582,10 @@ export class Collection {
     const primaryTree = this.indexes.get('id')!;
 
     // Step 1: Use filter operators with indexes if available
-    if (query.filterOps) {
+    if (query.filterOps !== undefined) {
       candidatePointers = await this.applyFilterOps(query.filterOps);
 
-      if (candidatePointers) {
+      if (candidatePointers !== null) {
         const estimatedTotalDocs = await this.getCachedDocumentCount();
         const totalDocs = Math.max(1, estimatedTotalDocs);
         const candidateRatio = candidatePointers.size / totalDocs;
@@ -712,17 +716,17 @@ export class Collection {
     // Step 2: if no index was used
     let iterator: AsyncGenerator<{ key: string; value: number }, void, unknown>;
 
-    if (query.idRange) {
+    if (query.idRange !== undefined) {
       const { min, max } = query.idRange;
 
-      if (min && max) {
+      if (min !== undefined && max !== undefined) {
         iterator = primaryTree.range(min, max, {
           inclusiveStart: true,
           inclusiveEnd: true,
         });
-      } else if (min) {
+      } else if (min !== undefined) {
         iterator = primaryTree.entriesFrom(min);
-      } else if (max) {
+      } else if (max !== undefined) {
         iterator = primaryTree.entries();
         for await (const { key, value: startBlockId } of iterator) {
           if (key > max) break;
@@ -742,7 +746,7 @@ export class Collection {
         iterator = primaryTree.entries();
       }
 
-      if (min || max) {
+      if (min !== undefined || max !== undefined) {
         for await (const { value: startBlockId } of iterator) {
           const docBuffer = await this.documentHeap.readBlob(startBlockId);
           if (docBuffer.length > 0) {
@@ -782,13 +786,12 @@ export class Collection {
 
     // Handle descending ID sort
     if (query.sort?.field === 'id' && query.sort.order === 'desc') {
-      //TODO: Implement reverse iteration in BPlusTree
       const all: Document[] = [];
       for await (const { value: startBlockId } of primaryTree.reverseEntries()) {
         const docBuffer = await this.documentHeap.readBlob(startBlockId);
         if (docBuffer.length > 0) {
           const doc = JSON.parse(docBuffer.toString()) as Document;
-          if (!query.filter || query.filter(doc)) {
+          if (query.filter === undefined || query.filter(doc)) {
             all.push(doc);
           }
         }
@@ -806,11 +809,11 @@ export class Collection {
       if (docBuffer.length === 0) continue;
       const doc = JSON.parse(docBuffer.toString()) as Document;
 
-      if (query.filter && !query.filter(doc)) {
+      if (query.filter !== undefined && !query.filter(doc)) {
         continue;
       }
 
-      if (query.filterOps) {
+      if (query.filterOps !== undefined) {
         let matches = true;
         for (const [field, ops] of Object.entries(query.filterOps)) {
           const docValue = doc[field] as number | string | boolean | null;
@@ -907,7 +910,7 @@ export class Collection {
         const docBuffer = await this.documentHeap.readBlob(startBlockId);
         if (docBuffer.length === 0) continue;
         const doc = JSON.parse(docBuffer.toString()) as Document;
-        if (filter && !filter(doc)) continue;
+        if (filter !== undefined && !filter(doc)) continue;
 
         const groupValue = doc[groupBy];
         const groupKey = typeof groupValue === 'object' ? JSON.stringify(groupValue) : String(groupValue);
@@ -923,7 +926,7 @@ export class Collection {
         const docBuffer = await this.documentHeap.readBlob(startBlockId);
         if (docBuffer.length === 0) continue;
         const doc = JSON.parse(docBuffer.toString()) as Document;
-        if (filter && !filter(doc)) continue;
+        if (filter !== undefined && !filter(doc)) continue;
 
         const groupValue = groupBy ? doc[groupBy] : '_all_';
         const groupKey =
@@ -943,11 +946,11 @@ export class Collection {
         ? { id: `group_${groupKey as string}`, [groupBy]: docs[0][groupBy] }
         : { id: `group_all` };
 
-      if (operations.count) {
+      if (operations.count !== undefined) {
         result[operations.count] = docs.length;
       }
 
-      if (operations.sum) {
+      if (operations.sum !== undefined) {
         for (const { field, as } of operations.sum) {
           result[as] = docs.reduce((sum, doc) => {
             const val = doc[field];
@@ -956,7 +959,7 @@ export class Collection {
         }
       }
 
-      if (operations.avg) {
+      if (operations.avg !== undefined) {
         for (const { field, as } of operations.avg) {
           const sum = docs.reduce((s, doc) => {
             const val = doc[field];
@@ -966,17 +969,18 @@ export class Collection {
         }
       }
 
-      if (operations.min) {
+      if (operations.min !== undefined) {
         for (const { field, as } of operations.min) {
           const values = docs.map((d) => d[field]).filter((v) => typeof v === 'number');
           result[as] = values.length > 0 ? Math.min(...values) : null;
         }
       }
 
-      if (operations.max) {
-        //for (const { field, as } of operations.max) {
-        //  const values = docs.map((d) => d[field]).filter((v) => typeof v === 'number');
-        //}
+      if (operations.max !== undefined) {
+        for (const { field, as } of operations.max) {
+          const values = docs.map((d) => d[field]).filter((v) => typeof v === 'number');
+          result[as] = values.length > 0 ? Math.max(...values) : null;
+        }
       }
 
       results.push(result);
@@ -989,7 +993,7 @@ export class Collection {
    * Applies projection to results (SELECT specific fields).
    */
   private applyProjection(docs: Document[], fields?: string[]): Document[] {
-    if (!fields || fields.length === 0) {
+    if (fields === undefined || fields.length === 0) {
       return docs;
     }
 
@@ -1126,10 +1130,12 @@ export class Collection {
       this.cachedDocumentCount--;
     }
 
+    // checks if this has the onDocumentCountChanged method
     if (this.onDocumentCountChanged && this.cachedDocumentCount !== null) {
       await this.onDocumentCountChanged(this.cachedDocumentCount);
     }
 
+    // checks if this has the onChangeCallback method
     if (this.onChangeCallback) {
       await this.onChangeCallback();
     }
@@ -1323,7 +1329,7 @@ export class SimpleDBMS {
       () =>
         new FBNodeStorage<string, number>(
           (a, b) => (a < b ? -1 : a > b ? 1 : 0),
-          () => 1024,
+          () => 1024, // Estimated index key size (required by API but unused in capacity calculations)
           this.fbFile,
           4096,
         ),
@@ -1391,7 +1397,7 @@ export class SimpleDBMS {
       collectionMeta.documentCount,
     );
 
-    if (collectionMeta?.indexes) {
+    if (collectionMeta?.indexes !== undefined) {
       const indexMap = new Map<
         string,
         BPlusTree<string, number, FBLeafNode<string, number>, FBInternalNode<string, number>>
@@ -1400,7 +1406,7 @@ export class SimpleDBMS {
       for (const [field, indexRootId] of Object.entries(collectionMeta.indexes)) {
         const indexStorage = new FBNodeStorage<string, number>(
           (a, b) => (a < b ? -1 : a > b ? 1 : 0),
-          () => 1024,
+          () => 1024, // Estimated index key size (required by API but unused in capacity calculations)
           this.fbFile,
           4096,
         );
@@ -1449,7 +1455,7 @@ export class SimpleDBMS {
 
     if (right.getIndexedFields().includes(rightOn)) {
       const indexTree = right.getIndex(rightOn);
-      if (indexTree) {
+      if (indexTree !== undefined) {
         for await (const { value: startBlockId } of indexTree.entries()) {
           const docBuffer = await right.getDocumentHeap().readBlob(startBlockId);
           if (docBuffer.length > 0) {
@@ -1479,7 +1485,7 @@ export class SimpleDBMS {
       const key = leftDoc[on];
       const rightDocs = rightMap.get(key);
 
-      if (rightDocs && rightDocs.length > 0) {
+      if (rightDocs !== undefined && rightDocs.length > 0) {
         for (const rightDoc of rightDocs) {
           const merged: Document = { ...leftDoc };
           for (const [field, value] of Object.entries(rightDoc)) {
@@ -1518,7 +1524,7 @@ export class SimpleDBMS {
       rootId = root.blockId!;
     }
 
-    if (!this.dbHeader.collections[name]) {
+    if (this.dbHeader.collections[name] === undefined) {
       this.dbHeader.collections[name] = { rootBlockId: rootId, indexes: {}, documentCount: 0 };
     } else {
       this.dbHeader.collections[name].rootBlockId = rootId;
@@ -1539,7 +1545,7 @@ export class SimpleDBMS {
    * @returns {Promise<void>} A promise that resolves when the metadata is saved.
    */
   async saveIndexMetadata(collectionName: string, field: string, rootBlockId: number): Promise<void> {
-    if (!this.dbHeader.collections[collectionName]) {
+    if (this.dbHeader.collections[collectionName] === undefined) {
       this.dbHeader.collections[collectionName] = { rootBlockId: 0, indexes: {}, documentCount: 0 };
     }
     this.dbHeader.collections[collectionName].indexes[field] = rootBlockId;
@@ -1547,7 +1553,7 @@ export class SimpleDBMS {
   }
 
   async saveDocumentCountMetadata(collectionName: string, documentCount: number): Promise<void> {
-    if (!this.dbHeader.collections[collectionName]) {
+    if (this.dbHeader.collections[collectionName] === undefined) {
       this.dbHeader.collections[collectionName] = { rootBlockId: 0, indexes: {}, documentCount: 0 };
     }
     this.dbHeader.collections[collectionName].documentCount = documentCount;
@@ -1561,7 +1567,7 @@ export class SimpleDBMS {
    * @returns {Promise<void>} A promise that resolves when the metadata is removed.
    */
   async removeIndexMetadata(collectionName: string, field: string): Promise<void> {
-    if (this.dbHeader.collections[collectionName]?.indexes) {
+    if (this.dbHeader.collections[collectionName]?.indexes !== undefined) {
       delete this.dbHeader.collections[collectionName].indexes[field];
       await this.saveCatalogRoot();
     }

@@ -2,7 +2,7 @@
 // date: 24/11/2025
 import assert from 'node:assert/strict';
 import { type File } from './file/file.mjs';
-import { EncryptionService } from './encryption-service.mjs';
+import { EncryptionService } from './encryption/encryption-service.mjs';
 
 export class Database {
   private constructor(

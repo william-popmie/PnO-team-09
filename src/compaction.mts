@@ -216,7 +216,7 @@ export async function compactDatabase(
           await newCollection.createIndex(field, indexStorage);
         }
       }
-    } catch (error) {
+    } catch {
       // Rebuild failed after destroying original files — recover with empty DB
       if (newDb) {
         try { await newDb.close(); } catch { /* best effort */ }

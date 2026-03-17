@@ -90,7 +90,7 @@ async function recoverCompactionSwap(dbPath: string): Promise<void> {
   let info: { tempDbPath: string; tempWalPath: string; targetDbPath: string; targetWalPath: string };
   try {
     const raw = await readFile(marker, 'utf-8');
-    info = JSON.parse(raw);
+    info = JSON.parse(raw) as typeof info;
   } catch {
     // Corrupt marker — delete it and let normal startup proceed
     await unlink(marker).catch(() => {});

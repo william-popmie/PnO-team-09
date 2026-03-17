@@ -88,7 +88,7 @@ describe('FBNodeStorage', () => {
     }
   });
 
-  it('loads legacy node-storage envelope (v0 without algorithm id)', async () => {
+  it('rejects legacy node-storage envelope (v0 without algorithm id)', async () => {
     const service = new CompressionService({ algorithm: 'zstd' });
     const legacyPayload = {
       type: 'leaf',
@@ -107,12 +107,7 @@ describe('FBNodeStorage', () => {
     const blockId = await fb.allocateAndWrite(legacyBuffer);
     await fb.commit();
 
-    const loaded = await storage.loadNode(blockId);
-    expect(loaded.isLeaf).toBe(true);
-    if (loaded.isLeaf) {
-      expect(loaded.keys).toEqual([42]);
-      expect(loaded.values).toEqual(['legacy']);
-    }
+    await expect(storage.loadNode(blockId)).rejects.toThrow();
   });
 
   it('creates an internal node referencing two leaves and loads it', async () => {

@@ -546,17 +546,17 @@ export class Collection {
   /**
    * Finds documents in the collection using keyset pagination by id.
    * @param {number} limit Maximum number of documents to return.
-   * @param {string} [afterId] Return documents strictly after this id.
+   * @param {string | null} [afterId] Return documents strictly after this id.
    * @returns {Promise<Document[]>} A page of documents.
    */
-  async findPagedAfter(limit: number, afterId?: string): Promise<Document[]> {
+  async findPagedAfter(limit: number, afterId: string | null = null): Promise<Document[]> {
     const safeLimit = Math.max(1, Math.floor(limit));
 
     const results: Document[] = [];
-    const iterator = afterId ? this.primaryTree.entriesFrom(afterId) : this.primaryTree.entries();
+    const iterator = afterId === null ? this.primaryTree.entries() : this.primaryTree.entriesFrom(afterId);
 
     for await (const { key, value } of iterator) {
-      if (afterId && key <= afterId) {
+      if (afterId !== null && key <= afterId) {
         continue;
       }
 

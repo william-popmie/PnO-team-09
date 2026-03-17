@@ -337,13 +337,12 @@ app.get('/db/:collection/paged', async (req, res) => {
     const rawSortOrder = req.query['sortOrder'];
     const rawProjection = req.query['projection'];
 
-    const limit = typeof rawLimit === 'string' && rawLimit.length > 0 ? Number.parseInt(rawLimit, 10) : undefined;
-    const after = typeof rawAfter === 'string' && rawAfter.length > 0 ? rawAfter : undefined;
+    const limit = typeof rawLimit === 'string' && rawLimit.length > 0 ? Number.parseInt(rawLimit, 10) : null;
+    const after = typeof rawAfter === 'string' && rawAfter.length > 0 ? rawAfter : null;
     const filterField =
-      typeof rawFilterField === 'string' && rawFilterField.trim().length > 0 ? rawFilterField.trim() : undefined;
-    const filterValue = typeof rawFilterValue === 'string' ? parseQueryValue(rawFilterValue) : undefined;
-    const sortField =
-      typeof rawSortField === 'string' && rawSortField.trim().length > 0 ? rawSortField.trim() : undefined;
+      typeof rawFilterField === 'string' && rawFilterField.trim().length > 0 ? rawFilterField.trim() : null;
+    const filterValue = typeof rawFilterValue === 'string' ? parseQueryValue(rawFilterValue) : null;
+    const sortField = typeof rawSortField === 'string' && rawSortField.trim().length > 0 ? rawSortField.trim() : null;
     const sortOrder: 'asc' | 'desc' = rawSortOrder === 'desc' ? 'desc' : 'asc';
     const projection =
       typeof rawProjection === 'string' && rawProjection.trim().length > 0
@@ -351,9 +350,9 @@ app.get('/db/:collection/paged', async (req, res) => {
             .split(',')
             .map((field) => field.trim())
             .filter((field) => field.length > 0)
-        : undefined;
+        : null;
 
-    if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+    if (limit !== null && (!Number.isInteger(limit) || limit < 1)) {
       res.status(400).json({ error: 'Invalid limit. Expected integer >= 1.' });
       return;
     }
@@ -363,12 +362,12 @@ app.get('/db/:collection/paged', async (req, res) => {
       return;
     }
 
-    if (filterField && rawFilterValue === undefined) {
+    if (filterField !== null && rawFilterValue === undefined) {
       res.status(400).json({ error: 'filterValue is required when filterField is provided.' });
       return;
     }
 
-    if (!filterField && rawFilterValue !== undefined) {
+    if (filterField === null && rawFilterValue !== undefined) {
       res.status(400).json({ error: 'filterField is required when filterValue is provided.' });
       return;
     }
@@ -382,20 +381,20 @@ app.get('/db/:collection/paged', async (req, res) => {
     } else {
       const query: import('./simpledbms.mjs').Query = {};
 
-      if (filterField && rawFilterValue !== undefined) {
+      if (filterField !== null && filterValue !== null) {
         query.filter = (doc) => doc[filterField] === filterValue;
       }
 
-      if (sortField) {
+      if (sortField !== null) {
         query.sort = { field: sortField, order: sortOrder };
       }
 
-      if (projection && projection.length > 0) {
+      if (projection !== null && projection.length > 0) {
         query.projection = projection;
       }
 
       const shapedDocs = await collection.find(query);
-      const startIndex = after ? Math.max(0, shapedDocs.findIndex((doc) => doc.id === after) + 1) : 0;
+      const startIndex = after !== null ? Math.max(0, shapedDocs.findIndex((doc) => doc.id === after) + 1) : 0;
       pagePlusOne = shapedDocs.slice(startIndex, startIndex + resolvedLimit + 1);
     }
 

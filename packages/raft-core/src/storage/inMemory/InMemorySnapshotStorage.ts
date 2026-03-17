@@ -1,24 +1,31 @@
 import { StorageError } from "../../util/Error";
 import { Snapshot, SnapshotMetaData, SnapshotStorage } from "../interfaces/SnapshotStorage";
 
+/**
+ * In-memory SnapshotStorage implementation for tests and ephemeral runs.
+ */
 export class InMemorySnapshotStorage implements SnapshotStorage {
     private snapshot: Snapshot | null = null;
     private isOpenFlag = false;
 
+    /** Opens storage handle. */
     async open(): Promise<void> {
         if (this.isOpenFlag) throw new StorageError("InMemorySnapshotStorage is already open");
         this.isOpenFlag = true;
     }
 
+    /** Closes storage handle. */
     async close(): Promise<void> {
         this.ensureOpen();
         this.isOpenFlag = false;
     }
 
+    /** Returns true when storage is open. */
     isOpen(): boolean {
         return this.isOpenFlag;
     }
 
+    /** Reads snapshot metadata only. */
     async readMetadata(): Promise<SnapshotMetaData | null> {
         this.ensureOpen();
         if (!this.snapshot) return null;
@@ -28,6 +35,7 @@ export class InMemorySnapshotStorage implements SnapshotStorage {
         };
     }
 
+    /** Saves deep-copied snapshot payload in memory. */
     async save(snapshot: Snapshot): Promise<void> {
         this.ensureOpen();
         this.snapshot = {
@@ -41,6 +49,7 @@ export class InMemorySnapshotStorage implements SnapshotStorage {
         };
     }
 
+    /** Loads deep-copied snapshot payload from memory. */
     async load(): Promise<Snapshot | null> {
         this.ensureOpen();
         if (!this.snapshot) return null;
@@ -55,6 +64,7 @@ export class InMemorySnapshotStorage implements SnapshotStorage {
         };
     }
 
+    /** Throws when storage handle is not open. */
     private ensureOpen(): void {
         if (!this.isOpenFlag) throw new StorageError("InMemorySnapshotStorage is not open");
     }

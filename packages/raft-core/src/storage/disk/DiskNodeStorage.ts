@@ -4,6 +4,9 @@ import { DiskConfigStorage } from "./DiskConfigStorage";
 import { DiskLogStorage } from "./DiskLogStorage";
 import { DiskSnapshotStorage } from "./DiskSnapshotStorage";
 
+/**
+ * NodeStorage implementation backed by disk-based sub-storages.
+ */
 export class DiskNodeStorage implements NodeStorage {
     meta: DiskMetaStorage;
     config: DiskConfigStorage;
@@ -17,6 +20,7 @@ export class DiskNodeStorage implements NodeStorage {
         this.snapshot = new DiskSnapshotStorage(dirPath);
     }
 
+    /** Opens all disk sub-storages if not already open. */
     async open(): Promise<void> {
         if (!this.meta.isOpen()) await this.meta.open();
         if (!this.config.isOpen()) await this.config.open();
@@ -24,6 +28,7 @@ export class DiskNodeStorage implements NodeStorage {
         if (!this.snapshot.isOpen()) await this.snapshot.open();
     }
 
+    /** Closes all disk sub-storages that are open. */
     async close(): Promise<void> {
         if (this.meta.isOpen()) await this.meta.close();
         if (this.config.isOpen()) await this.config.close();
@@ -31,6 +36,7 @@ export class DiskNodeStorage implements NodeStorage {
         if (this.snapshot.isOpen()) await this.snapshot.close();
     }
 
+    /** Returns true when all disk sub-storages are open. */
     isOpen(): boolean {
         return this.meta.isOpen() && this.config.isOpen() && this.log.isOpen() && this.snapshot.isOpen();
     }

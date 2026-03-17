@@ -11,6 +11,9 @@ import {
 import { RaftState } from "../core/StateMachine";
 import { ClusterConfig, ClusterMember } from "../config/ClusterConfig";
 
+/**
+ * Common fields present in node-scoped Raft runtime events.
+ */
 export interface BaseEvent {
     eventId: string;
     timestamp: number;
@@ -109,6 +112,9 @@ export interface NextIndexDecrementedEvent extends BaseEvent {
     term: number;
 }
 
+/**
+ * Supported wire-level message event categories used by transport instrumentation.
+ */
 export type MessageType = 
     | "RequestVote"
     | "RequestVoteResponse"
@@ -163,7 +169,9 @@ export interface InstallSnapshotResponseEvent extends BaseMessageEvent {
     latencyMs: number;
 }
 
+/** Message-sent event variants. */
 export type MessageSentEvent = RequestVoteSentEvent | AppendEntriesSentEvent | InstallSnapshotRequestEvent;
+/** Message-received event variants. */
 export type MessageReceivedEvent = RequestVoteReceivedEvent | AppendEntriesReceivedEvent | InstallSnapshotResponseEvent;
 
 export interface MessageDroppedEvent extends BaseMessageEvent {
@@ -265,6 +273,9 @@ export interface FatalErrorEvent extends BaseEvent {
     error: string;
 }
 
+/**
+ * Union of all observability events emitted by raft-core.
+ */
 export type RaftEvent =
     | NodeStateChangedEvent
     | TermChangedEvent
@@ -296,6 +307,9 @@ export type RaftEvent =
     | ConfigChangeRejectedEvent
     | FatalErrorEvent;
 
+/**
+ * Event bus abstraction for publishing and subscribing to Raft runtime events.
+ */
 export interface RaftEventBus {
     emit(event: RaftEvent): void;
     subscribe(handler: (event: RaftEvent) => void): () => void;

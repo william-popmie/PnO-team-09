@@ -1,17 +1,34 @@
 import { ClusterMember } from "../config/ClusterConfig";
 
+/** Logical node identifier used across raft-core. */
 export type NodeId = string;
 
+/**
+ * Static node bootstrap/runtime configuration.
+ */
 export interface RaftConfig {
+    /** Local node id. */
     nodeId: NodeId;
+    /** Local transport address. */
     address: string;
+    /** Other cluster members (excluding self). */
     peers: ClusterMember[];
+    /** Minimum election timeout in milliseconds. */
     electionTimeoutMinMs: number;
+    /** Maximum election timeout in milliseconds. */
     electionTimeoutMaxMs: number;
+    /** Heartbeat interval in milliseconds. */
     heartbeatIntervalMs: number;
+    /** Optional committed-entry threshold for triggering snapshots. */
     snapshotThreshold?: number;
 }
 
+/**
+ * Validates Raft node configuration invariants.
+ *
+ * @param config Configuration object to validate.
+ * @throws Error When any required field is invalid.
+ */
 export function validateConfig(config: RaftConfig): void {
     if(!config.nodeId || typeof config.nodeId !== 'string') {
         throw new Error(`Invalid nodeId: ${config.nodeId}. nodeId must be a non-empty string.`);
@@ -58,6 +75,12 @@ export function validateConfig(config: RaftConfig): void {
     }
 }
 
+/**
+ * Creates and validates a Raft configuration object.
+ *
+ * @returns Validated RaftConfig instance.
+ * @throws Error When provided values violate config invariants.
+ */
 export function createConfig(nodeId: NodeId, address: string, peers: ClusterMember[], electionTimeoutMinMs: number, electionTimeoutMaxMs: number, heartbeatIntervalMs: number, snapshotThreshold?: number): RaftConfig {
     const config: RaftConfig = {
         nodeId,

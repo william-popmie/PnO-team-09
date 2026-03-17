@@ -12,6 +12,9 @@ import {
 } from "@maboke123/raft-core";
 import fs from "fs/promises";
 
+/**
+ * Normalized AppendEntries response shape used for protobuf conversion helpers.
+ */
 type AppendEntriesResponseLike = {
     term: number;
     success: boolean;
@@ -22,6 +25,12 @@ type AppendEntriesResponseLike = {
 
 const protoPath = path.resolve(__dirname, "../proto/raft.proto");
 
+/**
+ * Converts raft-core log entries to protobuf-compatible plain objects.
+ *
+ * @param entry Log entry to serialize.
+ * @returns Serializable object for gRPC payload encoding.
+ */
 function serializeLogEntry(entry: LogEntry): object {
     if (entry.type === LogEntryType.CONFIG) {
         return {
@@ -51,6 +60,12 @@ function serializeLogEntry(entry: LogEntry): object {
     };
 }
 
+/**
+ * Converts protobuf log entry objects to raft-core log entries.
+ *
+ * @param raw Raw protobuf entry payload.
+ * @returns Deserialized raft-core log entry.
+ */
 function deserializeLogEntry(raw: any): LogEntry {
     if (raw.type === LogEntryType.CONFIG) {
         return {
@@ -90,6 +105,13 @@ const packageDefinition = protoLoader.loadSync(protoPath, {
 
 const proto = grpc.loadPackageDefinition(packageDefinition) as any;
 
+/**
+ * Maps an outbound raft-core RPC request message to gRPC method and payload.
+ *
+ * @param message Outbound raft-core request envelope.
+ * @returns Target gRPC method and payload object.
+ * @throws NetworkError When message type/direction is not supported.
+ */
 export function rpcMessageToGrpc(message: RPCMessage): { method: string, payload: object} {
     if (message.type === "RequestVote" && message.direction === "request") {
         return {
@@ -118,6 +140,14 @@ export function rpcMessageToGrpc(message: RPCMessage): { method: string, payload
     throw new NetworkError(`Unsupported message type or direction: ${message.type} ${message.direction}`);
 }
 
+/**
+ * Maps a gRPC method response payload to raft-core RPC response message.
+ *
+ * @param method gRPC method name.
+ * @param raw Raw response payload.
+ * @returns raft-core RPC response envelope.
+ * @throws NetworkError When method is not supported.
+ */
 export function grpcToRpcMessage(method: string, raw: any): RPCMessage {
     if (method === "RequestVote") {
         return {
@@ -158,6 +188,12 @@ export function grpcToRpcMessage(method: string, raw: any): RPCMessage {
     throw new NetworkError(`Unsupported gRPC method: ${method}`);
 }
 
+/**
+ * Serializes optional AppendEntries conflict/match fields for protobuf transport.
+ *
+ * @param response AppendEntries response payload.
+ * @returns Protobuf-friendly response object with explicit presence flags.
+ */
 export function serializeAppendEntriesResponse(response: AppendEntriesResponseLike): object {
     return {
         term: response.term,
@@ -171,6 +207,13 @@ export function serializeAppendEntriesResponse(response: AppendEntriesResponseLi
     };
 }
 
+/**
+ * gRPC transport implementation for raft-core `Transport` interface.
+ *
+ * @remarks
+ * Handles client/server lifecycle, request/response conversion between protobuf
+ * payloads and raft-core RPC messages, peer management, and timeout/deadline wiring.
+ */
 export class GrpcTransport implements Transport {
     private handler: MessageHandler | null = null;
     private started: boolean = false;
@@ -201,6 +244,11 @@ export class GrpcTransport implements Transport {
         this.maxGrpcMessageBytes = maxGrpcMessageBytes;
     }
 
+    /**
+     * Starts gRPC server, loads TLS credentials when configured, and initializes peer clients.
+     *
+     * @throws NetworkError When transport is already started or bind fails.
+     */
     async start(): Promise<void> {
         if (this.started) {
             throw new NetworkError(`Transport for node ${this.nodeId} is already started.`);
@@ -267,6 +315,11 @@ export class GrpcTransport implements Transport {
         });
     }
 
+    /**
+     * Stops server and closes all clients with graceful shutdown fallback.
+     *
+     * @throws NetworkError When transport is not started.
+     */
     async stop(): Promise<void> {
 
         if (!this.started) {
@@ -296,10 +349,19 @@ export class GrpcTransport implements Transport {
         });
     }
 
+    /** Returns true when transport has been started and not yet stopped. */
     isStarted(): boolean {
         return this.started;
     }
 
+    /**
+     * Sends one request RPC to a peer and resolves with mapped raft-core response.
+     *
+     * @param peerId Target peer node id.
+     * @param message Outbound raft-core request envelope.
+     * @returns Response envelope converted from gRPC payload.
+     * @throws NetworkError When transport/peer is unavailable or RPC call fails.
+     */
     async send(peerId: NodeId, message: RPCMessage): Promise<RPCMessage> {
         if (!this.started) {
             throw new NetworkError(`Transport for node ${this.nodeId} is not started.`);
@@ -328,10 +390,18 @@ export class GrpcTransport implements Transport {
         });
     }
 
+    /** Registers the inbound message handler used by gRPC service methods. */
     onMessage(handler: MessageHandler): void {
         this.handler = handler;
     }
 
+    /**
+     * Adds or replaces a gRPC client for a peer.
+     *
+     * @param peerId Peer node id.
+     * @param address Peer gRPC endpoint address.
+     * @throws NetworkError When transport is not initialized.
+     */
     async addPeer(peerId: NodeId, address: string): Promise<void> {
 
         if (!this.cachedClientsCredentials) {
@@ -354,6 +424,11 @@ export class GrpcTransport implements Transport {
         );
     }
 
+    /**
+     * Removes and closes an existing peer client when present.
+     *
+     * @param peerId Peer node id.
+     */
     removePeer(peerId: NodeId): void {
         const client = this.clients.get(peerId);
         if (client) {
@@ -362,6 +437,7 @@ export class GrpcTransport implements Transport {
         }
     }
 
+    /** Resets in-memory lifecycle state after shutdown. */
     private finishStop() {
         this.started = false;
         this.handler = null;
@@ -369,6 +445,9 @@ export class GrpcTransport implements Transport {
         this.cachedClientsCredentials = null;
     }
 
+    /**
+     * Builds gRPC service handlers that adapt protobuf payloads to raft-core RPC messages.
+     */
     private buildServiceImplementation() {
         return {
             RequestVote: async (call: any, callback: any) => {
@@ -465,6 +544,7 @@ export class GrpcTransport implements Transport {
         };
     }
 
+    /** Extracts sender node id from inbound gRPC metadata. */
     private extractSender(call: any): NodeId {
         const values = call.metadata?.get('from-node');
         return ( values && values.length > 0) ? (values[0] as NodeId) : ("unknown" as NodeId);

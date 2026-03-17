@@ -2,6 +2,7 @@ import { NodeId } from "../core/Config";
 import { LogEntry } from "../log/LogEntry";
 import { ClusterConfig } from "../config/ClusterConfig";
 
+/** RequestVote request payload. */
 export interface RequestVoteRequest {
     term: number;
     candidateId: NodeId;
@@ -10,11 +11,13 @@ export interface RequestVoteRequest {
     preVote?: boolean;
 }
 
+/** RequestVote response payload. */
 export interface RequestVoteResponse {
     term: number;
     voteGranted: boolean;
 }
 
+/** AppendEntries request payload. */
 export interface AppendEntriesRequest {
     term: number;
     leaderId: NodeId;
@@ -24,6 +27,7 @@ export interface AppendEntriesRequest {
     leaderCommit: number;
 }
 
+/** AppendEntries response payload with optional conflict hints. */
 export interface AppendEntriesResponse {
     term: number;
     success: boolean;
@@ -32,6 +36,7 @@ export interface AppendEntriesResponse {
     conflictTerm?: number;
 }
 
+/** InstallSnapshot request payload. */
 export interface InstallSnapshotRequest {
     term: number;
     leaderId: NodeId;
@@ -43,13 +48,16 @@ export interface InstallSnapshotRequest {
     done: boolean;
 }
 
+/** InstallSnapshot response payload. */
 export interface InstallSnapshotResponse {
     term: number;
     success: boolean;
 }
 
+/** Union of all RPC request payloads. */
 export type RPCRequest = RequestVoteRequest | AppendEntriesRequest | InstallSnapshotRequest;
 
+/** Union of all RPC response payloads. */
 export type RPCResponse = RequestVoteResponse | AppendEntriesResponse | InstallSnapshotResponse;
 
 export interface RequestVoteRequestMessage {
@@ -88,6 +96,7 @@ export interface InstallSnapshotResponseMessage {
     payload: InstallSnapshotResponse;
 }
 
+/** Discriminated union of all raft RPC wire message envelopes. */
 export type RPCMessage = 
     | RequestVoteRequestMessage
     | RequestVoteResponseMessage
@@ -96,30 +105,41 @@ export type RPCMessage =
     | InstallSnapshotRequestMessage
     | InstallSnapshotResponseMessage;
 
+/** Type guard for RequestVote request message envelope. */
 export function isRequestVoteRequestMessage(message: RPCMessage): message is RequestVoteRequestMessage {
     return message.type === "RequestVote" && message.direction === "request";
 }
 
+/** Type guard for RequestVote response message envelope. */
 export function isRequestVoteResponseMessage(message: RPCMessage): message is RequestVoteResponseMessage {
     return message.type === "RequestVote" && message.direction === "response";
 }
 
+/** Type guard for AppendEntries request message envelope. */
 export function isAppendEntriesRequestMessage(message: RPCMessage): message is AppendEntriesRequestMessage {
     return message.type === "AppendEntries" && message.direction === "request";
 }
 
+/** Type guard for AppendEntries response message envelope. */
 export function isAppendEntriesResponseMessage(message: RPCMessage): message is AppendEntriesResponseMessage {
     return message.type === "AppendEntries" && message.direction === "response";
 }
 
+/** Type guard for InstallSnapshot request message envelope. */
 export function isInstallSnapshotRequestMessage(message: RPCMessage): message is InstallSnapshotRequestMessage {
     return message.type === "InstallSnapshot" && message.direction === "request";
 }
 
+/** Type guard for InstallSnapshot response message envelope. */
 export function isInstallSnapshotResponseMessage(message: RPCMessage): message is InstallSnapshotResponseMessage {
     return message.type === "InstallSnapshot" && message.direction === "response";
 }
 
+/**
+ * Validates RequestVote request payload.
+ *
+ * @throws Error When payload shape or values are invalid.
+ */
 export function validateRequestVoteRequest(request: RequestVoteRequest): void {
     if (!Number.isInteger(request.term) || request.term < 0) {
         throw new Error(`Invalid term: ${request.term}. term must be a non-negative integer.`);
@@ -142,6 +162,7 @@ export function validateRequestVoteRequest(request: RequestVoteRequest): void {
     }
 }
 
+/** Validates RequestVote response payload. */
 export function validateRequestVoteResponse(response: RequestVoteResponse): void {
     if (!Number.isInteger(response.term) || response.term < 0) {
         throw new Error(`Invalid term: ${response.term}. term must be a non-negative integer.`);
@@ -152,6 +173,7 @@ export function validateRequestVoteResponse(response: RequestVoteResponse): void
     }
 }
 
+/** Validates AppendEntries request payload. */
 export function validateAppendEntriesRequest(request: AppendEntriesRequest): void {
     if (!Number.isInteger(request.term) || request.term < 0) {
         throw new Error(`Invalid term: ${request.term}. term must be a non-negative integer.`);
@@ -178,6 +200,7 @@ export function validateAppendEntriesRequest(request: AppendEntriesRequest): voi
     }
 }
 
+/** Validates AppendEntries response payload. */
 export function validateAppendEntriesResponse(response: AppendEntriesResponse): void {
     if (!Number.isInteger(response.term) || response.term < 0) {
         throw new Error(`Invalid term: ${response.term}. term must be a non-negative integer.`);
@@ -200,6 +223,7 @@ export function validateAppendEntriesResponse(response: AppendEntriesResponse): 
     }
 }
 
+/** Validates InstallSnapshot request payload. */
 export function validateInstallSnapshotRequest(request: InstallSnapshotRequest): void {
     if (!Number.isInteger(request.term) || request.term < 0) {
         throw new Error(`Invalid term: ${request.term}. term must be a non-negative integer.`);
@@ -246,6 +270,7 @@ export function validateInstallSnapshotRequest(request: InstallSnapshotRequest):
     }
 }
 
+/** Validates InstallSnapshot response payload. */
 export function validateInstallSnapshotResponse(response: InstallSnapshotResponse): void {
     if (!Number.isInteger(response.term) || response.term < 0) {
         throw new Error(`Invalid term: ${response.term}. term must be a non-negative integer.`);
@@ -256,6 +281,11 @@ export function validateInstallSnapshotResponse(response: InstallSnapshotRespons
     }
 }
 
+/**
+ * Validates any RPC message envelope and its typed payload.
+ *
+ * @throws Error When message type, direction, or payload is invalid.
+ */
 export function validateRPCMessage(message: RPCMessage): void {
     switch (message.type) {
         case "RequestVote":

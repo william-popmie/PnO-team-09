@@ -2,6 +2,9 @@ import { StorageError } from "../../util/Error";
 import { LogEntry } from "../../log/LogEntry";
 import { LogStorage, LogStorageMeta } from "../interfaces/LogStorage";
 
+/**
+ * In-memory LogStorage implementation for tests and ephemeral runs.
+ */
 export class InMemoryLogStorage implements LogStorage {
     private entries: Map<number, LogEntry> = new Map();
     private snapshotIndex = 0;
@@ -10,20 +13,24 @@ export class InMemoryLogStorage implements LogStorage {
     private lastTerm = 0;
     private isOpenFlag = false;
 
+    /** Opens storage handle. */
     async open(): Promise<void> {
         if (this.isOpenFlag) throw new StorageError("InMemoryLogStorage is already open");
         this.isOpenFlag = true;
     }
 
+    /** Closes storage handle. */
     async close(): Promise<void> {
         this.ensureOpen();
         this.isOpenFlag = false;
     }
 
+    /** Returns true when storage is open. */
     isOpen(): boolean {
         return this.isOpenFlag;
     }
 
+    /** Reads cached metadata for snapshot boundary and log tail. */
     async readMeta(): Promise<LogStorageMeta> {
         this.ensureOpen();
         return {
@@ -34,6 +41,7 @@ export class InMemoryLogStorage implements LogStorage {
         };
     }
 
+    /** Appends entries and updates tail metadata. */
     async append(entries: LogEntry[]): Promise<void> {
         this.ensureOpen();
         if (entries.length === 0) return;
@@ -47,12 +55,14 @@ export class InMemoryLogStorage implements LogStorage {
         this.lastTerm = last.term;
     }
 
+    /** Reads single entry by index, excluding compacted region. */
     async getEntry(index: number): Promise<LogEntry | null> {
         this.ensureOpen();
         if (index <= this.snapshotIndex || index > this.lastIndex) return null;
         return this.entries.get(index) ?? null;
     }
 
+    /** Reads inclusive range of entries, throwing on missing indices. */
     async getEntries(from: number, to: number): Promise<LogEntry[]> {
         this.ensureOpen();
         const result: LogEntry[] = [];
@@ -66,6 +76,7 @@ export class InMemoryLogStorage implements LogStorage {
         return result;
     }
 
+    /** Truncates entries starting at provided index. */
     async truncateFrom(index: number): Promise<void> {
         this.ensureOpen();
 
@@ -85,6 +96,7 @@ export class InMemoryLogStorage implements LogStorage {
         }
     }
 
+    /** Compacts entries up to index and updates snapshot boundary metadata. */
     async compact(upToIndex: number, term: number): Promise<void> {
         this.ensureOpen();
 
@@ -101,6 +113,7 @@ export class InMemoryLogStorage implements LogStorage {
         }
     }
 
+    /** Resets storage to provided snapshot boundary and clears retained entries. */
     async reset(snapshotIndex: number, snapshotTerm: number): Promise<void> {
         this.ensureOpen();
         this.entries.clear();
@@ -110,6 +123,7 @@ export class InMemoryLogStorage implements LogStorage {
         this.lastTerm = snapshotTerm;
     }
 
+    /** Throws when storage handle is not open. */
     private ensureOpen(): void {
         if (!this.isOpenFlag) throw new StorageError("InMemoryLogStorage is not open");
     }

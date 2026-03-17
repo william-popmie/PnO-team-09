@@ -9,6 +9,9 @@ import { MetaData, MetaStorage } from "../interfaces/MetaStorage";
 const VERSION = 0x01;
 const FIXED_SIZE = 14;
 
+/**
+ * Disk-backed persistent term/vote storage.
+ */
 export class DiskMetaStorage implements MetaStorage {
     private readonly filePath: string;
     private readonly tmpPath: string;
@@ -21,6 +24,7 @@ export class DiskMetaStorage implements MetaStorage {
         this.tmpPath = path.join(dirPath, "term.tmp");
     }
 
+    /** Opens storage directory and performs temp-file recovery. */
     async open(): Promise<void> {
         if (this.isOpenFlag) throw new StorageError("DiskMetaStorage is already open");
         await fs.mkdir(this.dirPath, { recursive: true });
@@ -28,15 +32,18 @@ export class DiskMetaStorage implements MetaStorage {
         this.isOpenFlag = true;
     }
 
+    /** Closes this storage handle. */
     async close(): Promise<void> {
         this.ensureOpen();
         this.isOpenFlag = false;
     }
 
+    /** Returns true when storage is open. */
     isOpen(): boolean {
         return this.isOpenFlag;
     }
 
+    /** Reads persisted term and vote, or null when absent. */
     async read(): Promise<MetaData | null> {
         this.ensureOpen();
 
@@ -47,6 +54,7 @@ export class DiskMetaStorage implements MetaStorage {
         return this.decode(buf);
     }
 
+    /** Atomically writes term and vote to disk. */
     async write(term: number, votedFor: NodeId | null): Promise<void> {
         this.ensureOpen();
 
@@ -65,6 +73,7 @@ export class DiskMetaStorage implements MetaStorage {
         await this.fsyncDir();
     }
 
+    /** Encodes term/vote payload with versioned header and CRC. */
     private encode(term: number, votedFor: NodeId | null): Buffer {
         StorageNumberUtil.assertSafeInteger(term, "term");
 
@@ -90,6 +99,7 @@ export class DiskMetaStorage implements MetaStorage {
         return buf;
     }
 
+    /** Decodes and validates term/vote payload from binary format. */
     private decode(buf: Buffer): MetaData {
         if (buf.length < FIXED_SIZE) {
             throw new StorageError(`term.bin too small: ${buf.length} bytes`);
@@ -130,6 +140,7 @@ export class DiskMetaStorage implements MetaStorage {
         return { term, votedFor };
     }
 
+    /** Resolves leftover temp files after interrupted writes. */
     private async recover(): Promise<void> {
         const tmpExists = await this.fileExists(this.tmpPath);
         const fileExists = await this.fileExists(this.filePath);
@@ -142,6 +153,7 @@ export class DiskMetaStorage implements MetaStorage {
         }
     }
 
+    /** Best-effort directory fsync for rename durability. */
     private async fsyncDir(): Promise<void> {
         try {
             const fh = await fs.open(this.dirPath, "r");
@@ -151,10 +163,12 @@ export class DiskMetaStorage implements MetaStorage {
          }
     }
 
+    /** Returns true when path exists. */
     private async fileExists(p: string): Promise<boolean> {
         try { await fs.access(p); return true; } catch { return false; }
     }
 
+    /** Throws when storage handle is not open. */
     private ensureOpen(): void {
         if (!this.isOpenFlag) throw new StorageError("DiskMetaStorage is not open");
     }

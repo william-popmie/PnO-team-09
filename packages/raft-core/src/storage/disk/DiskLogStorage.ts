@@ -12,6 +12,9 @@ const WAL_VERSION = 0x01;
 const WAL_HEADER_SIZE = 21;
 const RECORD_HEADER_SIZE = 25;
 
+/**
+ * Disk-backed write-ahead log storage with CRC-protected records.
+ */
 export class DiskLogStorage implements LogStorage {
     private readonly walPath: string;
     private readonly tmpWalPath: string;
@@ -33,6 +36,7 @@ export class DiskLogStorage implements LogStorage {
         this.tmpWalPath = path.join(dirPath, "wal.tmp");
     }
 
+    /** Opens storage directory, recovers temp files, and scans WAL. */
     async open(): Promise<void> {
         if (this.isOpenFlag) throw new StorageError("DiskLogStorage is already open");
         await fs.mkdir(this.dirPath, { recursive: true });
@@ -41,16 +45,19 @@ export class DiskLogStorage implements LogStorage {
         this.isOpenFlag = true;
     }
 
+    /** Closes this storage handle and clears in-memory offset index. */
     async close(): Promise<void> {
         this.ensureOpen();
         this.isOpenFlag = false;
         this.offsetIndex.clear();
     }
 
+    /** Returns true when storage is open. */
     isOpen(): boolean {
         return this.isOpenFlag;
     }
 
+    /** Reads cached metadata for snapshot boundary and log tail. */
     async readMeta(): Promise<LogStorageMeta> {
         this.ensureOpen();
         return {
@@ -61,6 +68,7 @@ export class DiskLogStorage implements LogStorage {
         };
     }
 
+    /** Appends one or more entries to WAL atomically under lock. */
     async append(entries: LogEntry[]): Promise<void> {
         this.ensureOpen();
         if (entries.length === 0) return;
@@ -106,6 +114,7 @@ export class DiskLogStorage implements LogStorage {
         });
     }
 
+    /** Reads one log entry by index from WAL offset index. */
     async getEntry(index: number): Promise<LogEntry | null> {
         this.ensureOpen();
 
@@ -115,6 +124,7 @@ export class DiskLogStorage implements LogStorage {
         return this.readRecord(slot.offset);
     }
 
+    /** Reads inclusive range of entries, throwing if any index is missing. */
     async getEntries(from: number, to: number): Promise<LogEntry[]> {
         this.ensureOpen();
         const result: LogEntry[] = [];
@@ -126,6 +136,7 @@ export class DiskLogStorage implements LogStorage {
         return result;
     }
 
+    /** Truncates WAL from index onward and updates cached tail metadata. */
     async truncateFrom(index: number): Promise<void> {
         this.ensureOpen();
 
@@ -157,6 +168,7 @@ export class DiskLogStorage implements LogStorage {
         });
     }
 
+    /** Compacts WAL up to index by rewriting WAL with new snapshot header. */
     async compact(upToIndex: number, term: number): Promise<void> {
         this.ensureOpen();
 
@@ -192,6 +204,7 @@ export class DiskLogStorage implements LogStorage {
         });
     }
 
+    /** Resets WAL to snapshot boundary without retained entries. */
     async reset(snapshotIndex: number, snapshotTerm: number): Promise<void> {
         this.ensureOpen();
 
@@ -212,6 +225,7 @@ export class DiskLogStorage implements LogStorage {
         });
     }
 
+    /** Builds WAL file header. */
     private buildHeader(snapshotIndex: number, snapshotTerm: number): Buffer {
         StorageNumberUtil.assertSafeInteger(snapshotIndex, "snapshotIndex");
         StorageNumberUtil.assertSafeInteger(snapshotTerm, "snapshotTerm");
@@ -224,6 +238,7 @@ export class DiskLogStorage implements LogStorage {
         return buf;
     }
 
+    /** Parses and validates WAL file header. */
     private parseHeader(buf: Buffer): { snapshotIndex: number; snapshotTerm: number } {
         if (buf.length < WAL_HEADER_SIZE) {
             throw new StorageError(`wal.bin too small: ${buf.length} bytes`);
@@ -244,6 +259,7 @@ export class DiskLogStorage implements LogStorage {
         };
     }
 
+    /** Serializes one log entry into CRC-protected WAL record format. */
     private serializeRecord(entry: LogEntry): Buffer {
         StorageNumberUtil.assertSafeInteger(entry.index, "entry.index");
         StorageNumberUtil.assertSafeInteger(entry.term, "entry.term");
@@ -266,6 +282,7 @@ export class DiskLogStorage implements LogStorage {
         return record;
     }
 
+    /** Reads, validates, and deserializes one record at the given WAL offset. */
     private async readRecord(offset: number): Promise<LogEntry> {
         const fh = await fs.open(this.walPath, "r");
         try {
@@ -295,6 +312,7 @@ export class DiskLogStorage implements LogStorage {
         }
     }
 
+    /** Loads WAL metadata/index and truncates any torn trailing record. */
     private async loadAndScan(): Promise<void> {
         const exists = await this.fileExists(this.walPath);
         if (!exists) {
@@ -368,6 +386,7 @@ export class DiskLogStorage implements LogStorage {
         }
     }
 
+    /** Resolves leftover temp WAL files after interrupted writes. */
     private async recover(): Promise<void> {
         const tmpExists = await this.fileExists(this.tmpWalPath);
         const walExists = await this.fileExists(this.walPath);
@@ -380,6 +399,7 @@ export class DiskLogStorage implements LogStorage {
         }
     }
 
+    /** Best-effort directory fsync for rename durability. */
     private async fsyncDir(): Promise<void> {
         try {
             const fh = await fs.open(this.dirPath, "r");
@@ -389,10 +409,12 @@ export class DiskLogStorage implements LogStorage {
          }
     }
 
+    /** Returns true when path exists. */
     private async fileExists(p: string): Promise<boolean> {
         try { await fs.access(p); return true; } catch { return false; }
     }
 
+    /** Throws when storage handle is not open. */
     private ensureOpen(): void {
         if (!this.isOpenFlag) throw new StorageError("DiskLogStorage is not open");
     }

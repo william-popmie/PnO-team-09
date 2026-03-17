@@ -8,6 +8,9 @@ import { ConfigStorage, ConfigStorageData } from "../interfaces/ConfigStorage";
 const VERSION = 0x01;
 const HEADER_SIZE = 9;
 
+/**
+ * Disk-backed committed cluster configuration storage.
+ */
 export class DiskConfigStorage implements ConfigStorage {
     private readonly filePath: string;
     private readonly tmpPath: string;
@@ -20,6 +23,7 @@ export class DiskConfigStorage implements ConfigStorage {
         this.tmpPath = path.join(dirPath, "config.tmp");
     }
 
+    /** Opens storage directory and performs temp-file recovery. */
     async open(): Promise<void> {
         if (this.isOpenFlag) throw new StorageError("DiskConfigStorage is already open");
         await fs.mkdir(this.dirPath, { recursive: true });
@@ -27,15 +31,18 @@ export class DiskConfigStorage implements ConfigStorage {
         this.isOpenFlag = true;
     }
 
+    /** Closes this storage handle. */
     async close(): Promise<void> {
         this.ensureOpen();
         this.isOpenFlag = false;
     }
 
+    /** Returns true when storage is open. */
     isOpen(): boolean {
         return this.isOpenFlag;
     }
 
+    /** Reads commmitted configuration from disk, or returns null when not present. */
     async read(): Promise<ConfigStorageData | null> {
         this.ensureOpen();
 
@@ -46,6 +53,7 @@ export class DiskConfigStorage implements ConfigStorage {
         return this.decode(buf);
     }
 
+    /** Atomically writes committed configuration payload. */
     async write(voters: ClusterMember[], learners: ClusterMember[]): Promise<void> {
         this.ensureOpen();
 
@@ -63,6 +71,7 @@ export class DiskConfigStorage implements ConfigStorage {
         await this.fsyncDir();
     }
 
+    /** Encodes config payload with versioned header and CRC. */
     private encode(data: ConfigStorageData): Buffer {
         const json = Buffer.from(JSON.stringify(data), "utf-8");
         const buf = Buffer.allocUnsafe(HEADER_SIZE + json.length);
@@ -77,6 +86,7 @@ export class DiskConfigStorage implements ConfigStorage {
         return buf;
     }
 
+    /** Decodes and validates config payload from binary format. */
     private decode(buf: Buffer): ConfigStorageData {
         if (buf.length < HEADER_SIZE) {
             throw new StorageError(`config.bin too small: ${buf.length} bytes`);
@@ -108,6 +118,7 @@ export class DiskConfigStorage implements ConfigStorage {
         }
     }
 
+    /** Resolves leftover temp files after interrupted writes. */
     private async recover(): Promise<void> {
         const tmpExists = await this.fileExists(this.tmpPath);
         const fileExists = await this.fileExists(this.filePath);
@@ -120,6 +131,7 @@ export class DiskConfigStorage implements ConfigStorage {
         }
     }
 
+    /** Best-effort directory fsync for rename durability. */
     private async fsyncDir(): Promise<void> {
         try {
             const fh = await fs.open(this.dirPath, "r");
@@ -129,10 +141,12 @@ export class DiskConfigStorage implements ConfigStorage {
          }
     }
 
+    /** Returns true when path exists. */
     private async fileExists(p: string): Promise<boolean> {
         try { await fs.access(p); return true; } catch { return false; }
     }
 
+    /** Throws when storage handle is not open. */
     private ensureOpen(): void {
         if (!this.isOpenFlag) throw new StorageError("DiskConfigStorage is not open");
     }

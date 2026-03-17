@@ -1,3 +1,6 @@
+/**
+ * Base typed error for raft-core with stable machine-readable error code.
+ */
 export class RaftError extends Error {
     constructor(
         message: string,
@@ -9,6 +12,7 @@ export class RaftError extends Error {
     }
 }
 
+/** Raised when an operation requires leadership but node is not leader. */
 export class NotLeaderError extends RaftError {
     constructor(
         public readonly leaderId: string | null
@@ -24,6 +28,7 @@ export class NotLeaderError extends RaftError {
     }
 }
 
+/** Raised on replicated log invariant violations. */
 export class LogInconsistencyError extends RaftError {
     constructor(
         message: string
@@ -34,6 +39,7 @@ export class LogInconsistencyError extends RaftError {
     }
 }
 
+/** Raised for storage operation failures. */
 export class StorageError extends RaftError {
     constructor(
         message: string, public readonly cause?: Error
@@ -44,6 +50,7 @@ export class StorageError extends RaftError {
     }
 }
 
+/** Raised for transport/network failures. */
 export class NetworkError extends RaftError {
     constructor(
         message: string, public readonly cause?: Error
@@ -54,6 +61,7 @@ export class NetworkError extends RaftError {
     }
 }
 
+/** Raised when observed term differs from expected term. */
 export class TermMismatchError extends RaftError {
     constructor(
         public readonly expectedTerm: number,
@@ -65,6 +73,7 @@ export class TermMismatchError extends RaftError {
     }
 }
 
+/** Raised when an operation exceeds allotted time budget. */
 export class TimeoutError extends RaftError {
     constructor(
         message: string, public readonly cause?: Error
@@ -75,6 +84,7 @@ export class TimeoutError extends RaftError {
     }
 }
 
+/** Raised for invalid role/state transitions. */
 export class InvalidStateError extends RaftError {
     constructor(
         public readonly fromState: string,
@@ -86,6 +96,7 @@ export class InvalidStateError extends RaftError {
     }
 }
 
+/** Raised for failures in persistent-state management. */
 export class PersistentStateError extends RaftError {
     constructor(
         message: string, public readonly cause?: Error
@@ -96,6 +107,7 @@ export class PersistentStateError extends RaftError {
     }
 }
 
+/** Raised for invalid volatile-state transitions. */
 export class VolatileStateError extends RaftError {
     constructor(
         message: string, public readonly cause?: Error
@@ -106,6 +118,7 @@ export class VolatileStateError extends RaftError {
     }
 }
 
+/** Raised for leader replication-state handling failures. */
 export class LeaderStateError extends RaftError {
     constructor(
         message: string, public readonly cause?: Error
@@ -116,6 +129,7 @@ export class LeaderStateError extends RaftError {
     }
 }
 
+/** Raised for timer manager configuration/runtime failures. */
 export class TimerManagerError extends RaftError {
     constructor(
         message: string, public readonly cause?: Error
@@ -126,6 +140,7 @@ export class TimerManagerError extends RaftError {
     }
 }
 
+/** Raised for RPC handler timeout/validation failures. */
 export class RPCHandlerError extends RaftError {
     constructor(
         message: string, public readonly cause?: Error

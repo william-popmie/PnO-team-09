@@ -4,6 +4,9 @@ import { InMemoryConfigStorage } from "./InMemoryConfigStorage";
 import { InMemoryLogStorage } from "./InMemoryLogStorage";
 import { InMemorySnapshotStorage } from "./InMemorySnapshotStorage";
 
+/**
+ * NodeStorage implementation backed by in-memory sub-storages.
+ */
 export class InMemoryNodeStorage implements NodeStorage {
     meta: InMemoryMetaStorage;
     config: InMemoryConfigStorage;
@@ -17,6 +20,7 @@ export class InMemoryNodeStorage implements NodeStorage {
         this.snapshot = new InMemorySnapshotStorage();
     }
 
+    /** Opens all in-memory sub-storages if not already open. */
     async open(): Promise<void> {
         if (!this.meta.isOpen()) await this.meta.open();
         if (!this.config.isOpen()) await this.config.open();
@@ -24,6 +28,7 @@ export class InMemoryNodeStorage implements NodeStorage {
         if (!this.snapshot.isOpen()) await this.snapshot.open();
     }
 
+    /** Closes all in-memory sub-storages that are open. */
     async close(): Promise<void> {
         if (this.meta.isOpen()) await this.meta.close();
         if (this.config.isOpen()) await this.config.close();
@@ -31,6 +36,7 @@ export class InMemoryNodeStorage implements NodeStorage {
         if (this.snapshot.isOpen()) await this.snapshot.close();
     }
 
+    /** Returns true when all in-memory sub-storages are open. */
     isOpen(): boolean {
         return this.meta.isOpen() && this.config.isOpen() && this.log.isOpen() && this.snapshot.isOpen();
     }

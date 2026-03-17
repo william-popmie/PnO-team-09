@@ -8,6 +8,9 @@ import { Snapshot, SnapshotMetaData, SnapshotStorage } from "../interfaces/Snaps
 const VERSION = 0x01;
 const FIXED_HEADER_SIZE = 25;
 
+/**
+ * Disk-backed snapshot storage with CRC-protected binary format.
+ */
 export class DiskSnapshotStorage implements SnapshotStorage {
     private readonly filePath: string;
     private readonly tmpPath: string;
@@ -20,6 +23,7 @@ export class DiskSnapshotStorage implements SnapshotStorage {
         this.tmpPath = path.join(dirPath, "snapshot.tmp");
     }
 
+    /** Opens storage directory and performs temp-file recovery. */
     async open(): Promise<void> {
         if (this.isOpenFlag) throw new StorageError("DiskSnapshotStorage is already open");
         await fs.mkdir(this.dirPath, { recursive: true });
@@ -27,15 +31,18 @@ export class DiskSnapshotStorage implements SnapshotStorage {
         this.isOpenFlag = true;
     }
 
+    /** Closes this storage handle. */
     async close(): Promise<void> {
         this.ensureOpen();
         this.isOpenFlag = false;
     }
 
+    /** Returns true when storage is open. */
     isOpen(): boolean {
         return this.isOpenFlag;
     }
 
+    /** Reads snapshot metadata only, or null when snapshot is absent. */
     async readMetadata(): Promise<SnapshotMetaData | null> {
         this.ensureOpen();
 
@@ -48,6 +55,7 @@ export class DiskSnapshotStorage implements SnapshotStorage {
         };
     }
 
+    /** Atomically saves full snapshot payload to disk. */
     async save(snapshot: Snapshot): Promise<void> {
         this.ensureOpen();
 
@@ -65,6 +73,7 @@ export class DiskSnapshotStorage implements SnapshotStorage {
         await this.fsyncDir();
     }
 
+    /** Loads full snapshot payload from disk. */
     async load(): Promise<Snapshot | null> {
         this.ensureOpen();
 
@@ -75,6 +84,7 @@ export class DiskSnapshotStorage implements SnapshotStorage {
         return this.decode(buf);
     }
 
+    /** Encodes snapshot payload to binary format with CRC. */
     private encode(snapshot: Snapshot): Buffer {
         StorageNumberUtil.assertSafeInteger(snapshot.lastIncludedIndex, "snapshot.lastIncludedIndex");
         StorageNumberUtil.assertSafeInteger(snapshot.lastIncludedTerm, "snapshot.lastIncludedTerm");
@@ -100,6 +110,7 @@ export class DiskSnapshotStorage implements SnapshotStorage {
         return buf;
     }
 
+    /** Decodes snapshot payload from binary format and validates integrity. */
     private decode(buf: Buffer): Snapshot {
         if (buf.length < FIXED_HEADER_SIZE) {
             throw new StorageError(`snapshot.bin too small: ${buf.length} bytes`);
@@ -146,6 +157,7 @@ export class DiskSnapshotStorage implements SnapshotStorage {
         return { lastIncludedIndex, lastIncludedTerm, data, config };
     }
 
+    /** Resolves leftover temp files after interrupted writes. */
     private async recover(): Promise<void> {
         const tmpExists = await this.fileExists(this.tmpPath);
         const fileExists = await this.fileExists(this.filePath);
@@ -158,6 +170,7 @@ export class DiskSnapshotStorage implements SnapshotStorage {
         }
     }
 
+    /** Best-effort directory fsync for rename durability. */
     private async fsyncDir(): Promise<void> {
         try {
             const fh = await fs.open(this.dirPath, "r");
@@ -167,10 +180,12 @@ export class DiskSnapshotStorage implements SnapshotStorage {
         }
     }
 
+    /** Returns true when path exists. */
     private async fileExists(p: string): Promise<boolean> {
         try { await fs.access(p); return true; } catch { return false; }
     }
 
+    /** Throws when storage handle is not open. */
     private ensureOpen(): void {
         if (!this.isOpenFlag) throw new StorageError("DiskSnapshotStorage is not open");
     }

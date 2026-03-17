@@ -1,3 +1,6 @@
+/**
+ * Public raft-core package exports.
+ */
 export { RaftNode } from "./core/RaftNode";
 export type {
     RaftNodeOptions,

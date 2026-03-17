@@ -1,24 +1,46 @@
 import { ClusterConfig } from "../config/ClusterConfig";
 
+/**
+ * Application command payload replicated through Raft log.
+ */
 export interface Command {
+    /** Command discriminator used by application state machine. */
   type: string;
+    /** Command payload consumed by application state machine. */
   payload: any;
 }
 
+/**
+ * Supported replicated log entry categories.
+ */
 export enum LogEntryType {
     COMMAND = 'COMMAND',
     CONFIG = 'CONFIG',
     NOOP = 'NOOP'
 }
 
+/**
+ * Replicated Raft log record.
+ */
 export interface LogEntry {
+    /** Raft term when this entry was created. */
   term: number;
+    /** Monotonic log index. */
   index: number;
+    /** Entry semantic type. */
   type: LogEntryType;
+    /** Command payload for COMMAND entries. */
   command?: Command;
+    /** Cluster config payload for CONFIG entries. */
   config?: ClusterConfig
 }
 
+/**
+ * Validates a single log entry shape and type-specific payload fields.
+ *
+ * @param entry Entry to validate.
+ * @throws Error When entry shape is invalid.
+ */
 export function validateLogEntry(entry: LogEntry): void {
     if (!Number.isInteger(entry.term) || entry.term < 0) {
         throw new Error(`Invalid term: ${entry.term}. Term must be a non-negative integer.`);
@@ -51,6 +73,12 @@ export function validateLogEntry(entry: LogEntry): void {
     }
 }
 
+/**
+ * Validates a complete log sequence for per-entry validity and monotonic ordering.
+ *
+ * @param log Log entries in index order.
+ * @throws Error When sequence invariants are violated.
+ */
 export function validateLogSequence(log: LogEntry[]): void {
     if (log.length === 0) {
         return;
@@ -74,6 +102,9 @@ export function validateLogSequence(log: LogEntry[]): void {
     }
 }
 
+/**
+ * Deep-compares two command payloads for deterministic test assertions.
+ */
 export function commandsEqual(cmd1: Command, cmd2: Command): boolean {
     if (cmd1.type !== cmd2.type) {
         return false;
@@ -84,6 +115,9 @@ export function commandsEqual(cmd1: Command, cmd2: Command): boolean {
     return payload1 === payload2;
 }
 
+/**
+ * Compares two log entries by metadata and type-specific payload.
+ */
 export function entriesEqual(entry1: LogEntry, entry2: LogEntry): boolean {
     if (entry1.term !== entry2.term || entry1.index !== entry2.index) {
         return false;
@@ -106,6 +140,9 @@ export function entriesEqual(entry1: LogEntry, entry2: LogEntry): boolean {
     return commandsEqual(entry1.command!, entry2.command!);
 }
 
+/**
+ * Compares two logs entry-by-entry.
+ */
 export function logsEqual(log1: LogEntry[], log2: LogEntry[]): boolean {
     if (log1.length !== log2.length) {
         return false;

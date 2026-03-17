@@ -1,26 +1,36 @@
+/** Opaque timer handle type returned by clock implementations. */
 export type TimerHandle = number | NodeJS.Timeout;
 
+/**
+ * Clock abstraction for time reads and timer scheduling.
+ */
 export interface Clock {
     now(): number;
     setTimeout(callback: () => void, delayMs: number): TimerHandle;
     clearTimeout(handle: TimerHandle): void;
 }
 
+/** Internal timer record used by MockClock scheduler. */
 export interface MockTimer {
     id: number;
     fireTime: number;
     callback: () => void;
 }
 
+/**
+ * Deterministic test clock with controllable time progression.
+ */
 export class MockClock implements Clock {
     private currentTime: number = 0;
     private timers: Map<number, MockTimer> = new Map();
     private nextTimerId: number = 1;
 
+    /** Returns current mock time in milliseconds. */
     now(): number {
         return this.currentTime;
     }
 
+    /** Schedules a callback at currentTime + delayMs. */
     setTimeout(callback: () => void, delayMs: number): number {
         const id = this.nextTimerId++;
         const fireTime = this.currentTime + delayMs;
@@ -28,6 +38,7 @@ export class MockClock implements Clock {
         return id;
     }
 
+    /** Clears a timer previously scheduled by MockClock. */
     clearTimeout(handle: number): void {
         if (typeof handle !== 'number') {
             throw new Error("Invalid timer handle type");
@@ -36,6 +47,7 @@ export class MockClock implements Clock {
         this.timers.delete(handle);
     }
 
+    /** Advances time by ms and fires due timers. */
     advanceMs(ms: number): void {
         if (ms < 0) {
             throw new Error("Cannot advance time by a negative amount");
@@ -45,11 +57,13 @@ export class MockClock implements Clock {
         this.fireTimers();
     }
 
+    /** Asynchronously advances time by ms and yields to microtasks. */
     async advanceAsyncMs(ms: number): Promise<void> {
         this.advanceMs(ms);
         await this.tick();
     }
 
+    /** Advances time to next scheduled timer and returns amount advanced. */
     advanceToNextTimer(): number {
         const nextTimer = this.getNextTimer();
         if (!nextTimer) {
@@ -65,12 +79,14 @@ export class MockClock implements Clock {
         return timeToAdvance;
     }
 
+    /** Async variant of advanceToNextTimer with microtask yield. */
     async advanceToNextTimerAsync(): Promise<number> {
         const advanced = this.advanceToNextTimer();
         await this.tick();
         return advanced;
     }
 
+    /** Advances through all pending timers until queue is empty. */
     advanceToEnd(): void {
         let iterations = 0;
         const maxIterations = 1000;
@@ -85,6 +101,7 @@ export class MockClock implements Clock {
         }
     }
 
+    /** Async variant of advanceToEnd with microtask yields. */
     async advanceToEndAsync(): Promise<void> {
         let iterations = 0;
         const maxIterations = 1000;
@@ -100,16 +117,21 @@ export class MockClock implements Clock {
         }
     }
 
+    /** Yields to event loop microtasks once. */
     async tick(): Promise<void> {
         await new Promise(resolve => setImmediate(resolve));
     }
 
+    /** Yields to microtasks multiple times. */
     async tickMultiple(times: number): Promise<void> {
         for (let i = 0; i < times; i++) {
             await this.tick();
         }
     }
 
+    /**
+     * Repeatedly fires due timers and yields until idle or max iterations.
+     */
     async runUntilIdle(maxIterations: number = 100): Promise<void> {
         let iterations = 0;
 
@@ -131,6 +153,7 @@ export class MockClock implements Clock {
         }
     }
 
+    /** Fires all timers due at currentTime in deterministic order. */
     private fireTimers(): void {
         const timersToFire = Array.from(this.timers.values())
             .filter(timer => timer.fireTime <= this.currentTime)
@@ -142,6 +165,7 @@ export class MockClock implements Clock {
         }    
     }
 
+    /** Returns next timer due, or null when no timers are scheduled. */
     private getNextTimer(): MockTimer | null {
         if (this.timers.size === 0) {
             return null;
@@ -156,15 +180,18 @@ export class MockClock implements Clock {
         return nextTimer;
     }
 
+    /** Returns number of currently scheduled timers. */
     getPendingTimersCount(): number {
         return this.timers.size;
     }
 
+    /** Returns scheduled timers ordered by fire time. */
     getPendingTimers(): MockTimer[] {
         return Array.from(this.timers.values())
             .sort((a, b) => a.fireTime - b.fireTime);
     }
 
+    /** Clears all timers and resets mock time state. */
     reset(): void {
         this.currentTime = 0;
         this.timers.clear();
@@ -172,15 +199,21 @@ export class MockClock implements Clock {
     }
 }
 
+/**
+ * Production clock backed by system Date and timers.
+ */
 export class SystemClock implements Clock {
+    /** Returns current system wall clock time in milliseconds. */
     now(): number {
         return Date.now();
     }
 
+    /** Schedules callback using global setTimeout. */
     setTimeout(callback: () => void, delayMs: number): TimerHandle {
         return global.setTimeout(callback, delayMs);
     }
 
+    /** Clears NodeJS timeout handle returned by setTimeout. */
     clearTimeout(handle: TimerHandle): void {
         if (typeof handle === 'number') {
             throw new Error("Invalid timer handle type");

@@ -3,11 +3,15 @@ import { LogManager } from "../log/LogManager";
 import { LeaderStateError } from "../util/Error";
 
 
+/** Per-peer replication progress snapshot. */
 export interface LeaderStateSnapshot {
     nextIndex: number;
     matchIndex: number;
 }
 
+/**
+ * Leader-side replication tracking contract.
+ */
 export interface LeaderStateInterface {
     initialize(lastLogIndex: number): void;
     getNextIndex(peerId: NodeId): number;
@@ -25,6 +29,9 @@ export interface LeaderStateInterface {
     getPeers(): NodeId[];
 }
 
+/**
+ * Tracks per-follower nextIndex/matchIndex during leader replication.
+ */
 export class LeaderState implements LeaderStateInterface {
     private readonly nextIndex: Map<NodeId, number> = new Map();
     private readonly matchIndex: Map<NodeId, number> = new Map();
@@ -36,6 +43,7 @@ export class LeaderState implements LeaderStateInterface {
         this.initialize(lastLogIndex);
     }
 
+    /** Initializes replication state for all peers from leader last log index. */
     initialize(lastLogIndex: number): void {
         this.nextIndex.clear();
         this.matchIndex.clear();
@@ -46,12 +54,14 @@ export class LeaderState implements LeaderStateInterface {
         }
     }
 
+    /** Returns nextIndex value for a peer. */
     getNextIndex(peerId: NodeId): number {
         this.ensureValidPeer(peerId);
 
         return this.nextIndex.get(peerId)!;
     }
 
+    /** Sets peer nextIndex while preserving nextIndex > matchIndex invariant. */
     setNextIndex(peerId: NodeId, index: number): void {
         this.ensureValidPeer(peerId);
 
@@ -69,6 +79,7 @@ export class LeaderState implements LeaderStateInterface {
         this.nextIndex.set(peerId, index);
     }
 
+    /** Decrements nextIndex for a peer with lower bound at matchIndex + 1. */
     decrementNextIndex(peerId: NodeId): void {
         this.ensureValidPeer(peerId);
 
@@ -79,12 +90,14 @@ export class LeaderState implements LeaderStateInterface {
         this.nextIndex.set(peerId, newNextIdx);
     }
 
+    /** Returns current matchIndex for a peer. */
     getMatchIndex(peerId: NodeId): number {
         this.ensureValidPeer(peerId);
 
         return this.matchIndex.get(peerId)!;
     }
 
+    /** Advances peer matchIndex and aligns nextIndex to matchIndex + 1. */
     updateMatchIndex(peerId: NodeId, index: number): void {
         this.ensureValidPeer(peerId);
 
@@ -103,6 +116,9 @@ export class LeaderState implements LeaderStateInterface {
         this.nextIndex.set(peerId, index + 1);
     }
 
+    /**
+     * Computes highest commit index replicated on majority in current term.
+     */
     async calculateCommitIndex(currentTerm: number, logManager: LogManager, voters: NodeId[]): Promise<number> {
         const leaderLastIdx = logManager.getLastIndex();
 
@@ -135,6 +151,7 @@ export class LeaderState implements LeaderStateInterface {
         return 0;
     }
 
+    /** Returns true when index is replicated on majority including leader. */
     isReplicatedOnMajority(index: number, voters: NodeId[]): boolean {
         const majorityCount = Math.floor((voters.length + 1) / 2) + 1;
 
@@ -148,6 +165,7 @@ export class LeaderState implements LeaderStateInterface {
         return count >= majorityCount;
     }
 
+    /** Returns majority match index across leader plus voter followers. */
     getMajorityMatchIndex(leaderLastIdx: number, voters: NodeId[]): number {
         const majorityCount = Math.floor((voters.length + 1) / 2) + 1;
 
@@ -168,14 +186,17 @@ export class LeaderState implements LeaderStateInterface {
         return result;
     }
 
+    /** Returns true when all peers have replicated at least index. */
     isFullyReplicated(index: number): boolean {
         return this.peers.every(peerId => this.getMatchIndex(peerId) >= index);
     }
 
+    /** Returns peer ids that are still behind target index. */
     getPeersBehind(targetIndex: number): NodeId[] {
         return this.peers.filter(peer => this.getMatchIndex(peer) < targetIndex);
     }
 
+    /** Returns immutable snapshot of replication progress for all peers. */
     snapshot(): ReadonlyMap<NodeId, LeaderStateSnapshot> {
         const snapshotMap: Map<NodeId, LeaderStateSnapshot> = new Map();
 
@@ -189,14 +210,19 @@ export class LeaderState implements LeaderStateInterface {
         return new Map(snapshotMap);
     }
 
+    /** Resets replication state using provided leader last index baseline. */
     reset(lastLogIndex: number = 0): void {
         this.initialize(lastLogIndex);
     }
 
+    /** Returns copy of currently tracked peer ids. */
     getPeers(): NodeId[] {
         return [...this.peers];
     }
 
+    /**
+     * Updates nextIndex from follower conflict hints in AppendEntries response.
+     */
     async updateNextIndexWithConflict(peerId: NodeId, conflictIndex: number, conflictTerm: number, logManager: LogManager): Promise<void> {
         this.ensureValidPeer(peerId);
 
@@ -218,6 +244,7 @@ export class LeaderState implements LeaderStateInterface {
         }
     }
 
+    /** Adds new peer to replication tracking set. */
     addPeer(peerId: NodeId, lastLogIndex: number): void {
         if (this.peers.includes(peerId)) {
             return
@@ -228,6 +255,7 @@ export class LeaderState implements LeaderStateInterface {
         this.matchIndex.set(peerId, 0);
     }
 
+    /** Finds last local index containing given term, or null if absent. */
     private async findLastIndexOfTerm(term: number, logManager: LogManager): Promise<number | null> {
         const lastIndex = logManager.getLastIndex();
 
@@ -246,6 +274,7 @@ export class LeaderState implements LeaderStateInterface {
         return null;
     }
 
+    /** Validates that peer exists in this leader's tracking set. */
     private ensureValidPeer(peerId: NodeId): void {
         if (!this.peers.includes(peerId)) {
             throw new LeaderStateError(`Invalid peer ID: ${peerId}`);

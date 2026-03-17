@@ -1,12 +1,15 @@
 import { NodeId } from "../core/Config";
 
+/** Supported logging severity levels in ascending order. */
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 
+/** Structured key-value logging context payload. */
 export interface LogContext {
     [key: string]: any;
 }
 
+/** Logging contract used across raft-core components. */
 export interface Logger {
     debug(message: string, context?: LogContext): void;
     info(message: string, context?: LogContext): void;
@@ -14,6 +17,9 @@ export interface Logger {
     error(message: string, context?: LogContext): void;
 }
 
+/**
+ * Console-backed logger with minimum level filtering.
+ */
 export class ConsoleLogger implements Logger {
 
     private static readonly levels: LogLevel[] = ['debug', 'info', 'warn', 'error']; // static => class level, 
@@ -23,22 +29,27 @@ export class ConsoleLogger implements Logger {
         private readonly minDebugLevel: LogLevel = "info"
     ){}
 
+    /** Logs a debug message when min level allows it. */
     debug(message: string, context?: LogContext): void {
         this.printMessage(message, "debug", context);
     }
 
+    /** Logs an informational message when min level allows it. */
     info(message: string, context?: LogContext): void {
         this.printMessage(message, "info", context);
     }
 
+    /** Logs a warning message when min level allows it. */
     warn(message: string, context?: LogContext): void {
         this.printMessage(message, "warn", context);
     }
     
+    /** Logs an error message when min level allows it. */
     error(message: string, context?: LogContext): void {
         this.printMessage(message, "error", context);
     }
 
+    /** Formats and emits one log line to console. */
     private printMessage(message: string, logLevel: LogLevel, context?: LogContext): void {
         if (this.shouldLog(logLevel)) {
 
@@ -50,6 +61,7 @@ export class ConsoleLogger implements Logger {
         }
     }
 
+    /** Returns true when a log level is at or above configured minimum level. */
     private shouldLog(logLevel: LogLevel): boolean {
         const lowIdx = ConsoleLogger.levels.indexOf(this.minDebugLevel);
         const currIdx = ConsoleLogger.levels.indexOf(logLevel);

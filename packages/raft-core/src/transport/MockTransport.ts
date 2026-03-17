@@ -4,6 +4,9 @@ import { NetworkError } from "../util/Error";
 import { Random, SystemRandom } from "../util/Random";
 import { Transport, MessageHandler } from "./Transport";
 
+/**
+ * In-memory transport used for deterministic tests and failure simulation.
+ */
 export class MockTransport implements Transport {
     private handler: MessageHandler | null = null;
     private started: boolean = false;
@@ -15,6 +18,7 @@ export class MockTransport implements Transport {
 
     constructor(private readonly nodeId: NodeId, private readonly random: Random = new SystemRandom()) {}
 
+    /** Registers this transport instance in the shared in-memory transport map. */
     async start(): Promise<void> {
         if (this.started) {
             throw new NetworkError(`Transport for node ${this.nodeId} is already started.`);
@@ -24,6 +28,7 @@ export class MockTransport implements Transport {
         MockTransport.transports.set(this.nodeId, this);
     }
 
+    /** Stops this transport instance and unregisters it from the shared in-memory transport map. */
     async stop(): Promise<void> {
         if (!this.started) {
             throw new NetworkError(`Transport for node ${this.nodeId} is not started.`);
@@ -33,10 +38,14 @@ export class MockTransport implements Transport {
         MockTransport.transports.delete(this.nodeId);
     }
 
+    /** Returns true when transport is started. */
     isStarted(): boolean {
         return this.started;
     }
 
+    /**
+     * Sends an RPC message to a peer with optional simulated failures.
+     */
     async send(peerId: NodeId, message: RPCMessage): Promise<RPCMessage> {
         if (!this.started) {
             throw new NetworkError(`Transport for node ${this.nodeId} is not started.`);
@@ -73,10 +82,12 @@ export class MockTransport implements Transport {
         }
     }
 
+    /** Registers inbound message handler for this transport instance. */
     onMessage(handler: MessageHandler): void {
         this.handler = handler;
     }
 
+    /** Sets local packet drop probability for this node. */
     setDropRate(dropRate: number): void {
 
         if (typeof dropRate !== "number" || dropRate < 0 || dropRate > 1) {
@@ -85,24 +96,29 @@ export class MockTransport implements Transport {
         this.dropRate = dropRate;
     }
 
+    /** Sets packet drop probability for a registered node by id. */
     static setDropRate(nodeId: NodeId, dropRate: number): void {
         const transport = MockTransport.transports.get(nodeId);
         if (!transport) { return; }
         transport.setDropRate(dropRate);
     }
 
+    /** Returns local packet drop probability for this node. */
     getDropRate(): number {
         return this.dropRate;
     }
 
+    /** Creates simulated network partition groups. */
     static partition(...groups: NodeId[][]): void {
         MockTransport.partitions = groups.map(group => new Set(group));
     }
 
+    /** Clears all partition groups. */
     static healPartition(): void {
         MockTransport.partitions = [];
     }
 
+    /** Returns true when two nodes are in different simulated partitions. */
     static isPartitioned(nodeA: NodeId, nodeB: NodeId): boolean {
         if (MockTransport.partitions.length === 0) {
             return false;
@@ -136,30 +152,36 @@ export class MockTransport implements Transport {
         return fromPartition !== toPartition;
     }
 
+    /** Resets global mock transport state. */
     static reset(): void {
         MockTransport.transports.clear();
         MockTransport.partitions = [];
         MockTransport.blockedPairs.clear();
     }
 
+    /** Returns list of currently registered node ids. */
     static getRegisteredNodes(): NodeId[] {
         return Array.from(MockTransport.transports.keys());
     }
 
+    /** Simulates a bidirectional link cut between two nodes. */
     static cutLink(nodeA: NodeId, nodeB: NodeId): void {
         MockTransport.blockedPairs.add(`${nodeA}-${nodeB}`);
         MockTransport.blockedPairs.add(`${nodeB}-${nodeA}`);
     }
 
+    /** Heals a previously cut bidirectional link between two nodes. */
     static healLink(nodeA: NodeId, nodeB: NodeId): void {
         MockTransport.blockedPairs.delete(`${nodeA}-${nodeB}`);
         MockTransport.blockedPairs.delete(`${nodeB}-${nodeA}`);
     }
 
+    /** Heals all cut links. */
     static healAllLinks(): void {
         MockTransport.blockedPairs.clear();
     }
 
+    /** Returns true when link between two nodes is currently blocked. */
     static isLinkBlocked(nodeA: NodeId, nodeB: NodeId): boolean {
         return MockTransport.blockedPairs.has(`${nodeA}-${nodeB}`);
     }

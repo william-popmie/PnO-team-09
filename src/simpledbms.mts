@@ -637,47 +637,6 @@ export class Collection {
   }
 
   /**
-   * Finds documents in the collection using keyset pagination by id.
-   * @param {number} limit Maximum number of documents to return.
-   * @param {string | null} [afterId] Return documents strictly after this id.
-   * @returns {Promise<Document[]>} A page of documents.
-   */
-  async findPagedAfter(limit: number, afterId: string | null = null): Promise<Document[]> {
-    const safeLimit = Math.max(1, Math.floor(limit));
-
-    const results: Document[] = [];
-    const iterator = afterId === null ? this.primaryTree.entries() : this.primaryTree.entriesFrom(afterId);
-
-    for await (const { key, value } of iterator) {
-      if (afterId !== null && key <= afterId) {
-        continue;
-      }
-
-      results.push(value);
-      if (results.length >= safeLimit) {
-        break;
-      }
-    }
-
-    return results;
-  }
-
-  /**
-   * Counts the total number of documents in the collection.
-   * @returns {Promise<number>} The total document count.
-   */
-  async countDocuments(): Promise<number> {
-    let count = 0;
-    const iterator = this.primaryTree.entries();
-
-    while (!(await iterator.next()).done) {
-      count++;
-    }
-
-    return count;
-  }
-
-  /**
    * Performs aggregation on the collection.
    * Uses secondary indexes when available for efficient grouping (O(log n + k)).
    * @param {object} options The aggregation options.

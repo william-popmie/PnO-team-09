@@ -7,11 +7,9 @@ import express from 'express';
 import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
 import cors from 'cors';
-import { EncryptionService } from './encryption/encryption-service.mjs';
+import { EncryptionService } from './encryption-service.mjs';
 import { SimpleDBMS, type DocumentValue } from './simpledbms.mjs';
 import { RealFile } from './file/file.mjs';
-import { rename, writeFile, unlink, access } from 'node:fs/promises';
-import { compactDatabase, defragDatabase } from './compaction.mjs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import {
@@ -21,104 +19,12 @@ import {
   validateAndRefreshToken,
   type AuthenticatedRequest,
 } from './authentication.mjs';
-import { PasswordHasher } from './encryption/password-hashing.mjs';
+import { PasswordHasher } from './password-hashing.mjs';
 import { readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-/**
- * Marker file used to make the two-rename compaction swap recoverable.
- * The swap protocol is:
- *   1. Write marker file (records temp paths)
- *   2. rename(tempDb → db)
- *   3. rename(tempWal → wal)
- *   4. Delete marker file
- *
- * On startup, if the marker exists we know the swap was interrupted and
- * can complete or roll back.
- */
-const COMPACT_MARKER_SUFFIX = '.compact-swap';
-
-function compactMarkerPath(dbPath: string): string {
-  return dbPath + COMPACT_MARKER_SUFFIX;
-}
-
-async function fileExists(p: string): Promise<boolean> {
-  try {
-    await access(p);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Atomically swap temp compaction files into the original paths.
- * Uses a marker file so the operation is recoverable after a crash.
- */
-async function atomicCompactionSwap(
-  tempDbPath: string,
-  tempWalPath: string,
-  targetDbPath: string,
-  targetWalPath: string,
-): Promise<void> {
-  const marker = compactMarkerPath(targetDbPath);
-
-  // Step 1: write marker (fsync-safe intent record)
-  await writeFile(marker, JSON.stringify({ tempDbPath, tempWalPath, targetDbPath, targetWalPath }));
-
-  // Step 2: rename DB file (atomic on POSIX within same FS)
-  await rename(tempDbPath, targetDbPath);
-
-  // Step 3: rename WAL file
-  await rename(tempWalPath, targetWalPath);
-
-  // Step 4: remove marker — swap is complete
-  await unlink(marker);
-}
-
-/**
- * On startup, check if a compaction swap was interrupted and finish it.
- * - If the marker exists and the temp DB is gone (rename #1 succeeded),
- *   complete the WAL rename.
- * - If the marker exists and the temp DB still exists (rename #1 didn't
- *   happen), roll back by removing temp files.
- */
-async function recoverCompactionSwap(dbPath: string): Promise<void> {
-  const marker = compactMarkerPath(dbPath);
-  if (!(await fileExists(marker))) return;
-
-  console.log('Detected interrupted compaction swap, recovering...');
-
-  let info: { tempDbPath: string; tempWalPath: string; targetDbPath: string; targetWalPath: string };
-  try {
-    const raw = await readFile(marker, 'utf-8');
-    info = JSON.parse(raw) as typeof info;
-  } catch {
-    // Corrupt marker — delete it and let normal startup proceed
-    await unlink(marker).catch(() => {});
-    return;
-  }
-
-  const tempDbExists = await fileExists(info.tempDbPath);
-  const tempWalExists = await fileExists(info.tempWalPath);
-
-  if (!tempDbExists && tempWalExists) {
-    // DB rename succeeded, WAL rename did not — complete the swap
-    await rename(info.tempWalPath, info.targetWalPath);
-    console.log('Compaction swap recovered (completed WAL rename).');
-  } else if (tempDbExists) {
-    // DB rename never happened — roll back by cleaning up temp files
-    await unlink(info.tempDbPath).catch(() => {});
-    await unlink(info.tempWalPath).catch(() => {});
-    console.log('Compaction swap recovered (rolled back temp files).');
-  }
-  // else: both temp files gone — swap already completed
-
-  await unlink(marker).catch(() => {});
-}
 
 const app = express();
 const port = 3000;
@@ -170,8 +76,6 @@ const swaggerSpec = swaggerJsdoc(swaggerOptions);
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 let db: SimpleDBMS;
-let currentDbPath: string;
-let currentWalPath: string;
 
 /**
  * Load dummy demo account data from JSON file
@@ -261,14 +165,10 @@ async function loadDummyAccount() {
 
 async function initDB(customDbPath?: string, customWalPath?: string) {
   try {
-    currentDbPath = customDbPath || process.argv[2] || 'mydb.db';
-    currentWalPath = customWalPath || process.argv[3] || 'mydb.wal';
-
-    // Recover from a crashed compaction swap before opening the DB
-    await recoverCompactionSwap(currentDbPath);
-
-    const dbFile = new RealFile(currentDbPath);
-    const walFile = new RealFile(currentWalPath);
+    const dbPath = customDbPath || process.argv[2] || 'mydb.db';
+    const walPath = customWalPath || process.argv[3] || 'mydb.wal';
+    const dbFile = new RealFile(dbPath);
+    const walFile = new RealFile(walPath);
     let isNewDatabase = false;
 
     try {
@@ -741,126 +641,6 @@ app.post('/db/:collection/join', async (req, res) => {
     res.json(results);
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
-  }
-});
-
-/**
- * @swagger
- * /db/compact:
- *   post:
- *     summary: Compact the database
- *     description: >
- *       Defragments the database file by rebuilding it from scratch.
- *       Removes accumulated empty space from deletions and updates,
- *       reducing the physical file size. This is a blocking maintenance
- *       operation — no other requests should be in progress.
- *     responses:
- *       200:
- *         description: Compaction completed successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 collectionsCompacted:
- *                   type: number
- *                 totalDocuments:
- *                   type: number
- *                 sizeBefore:
- *                   type: number
- *                 sizeAfter:
- *                   type: number
- *       500:
- *         description: Compaction failed
- */
-app.post('/db/compact', async (_req, res) => {
-  try {
-    const tempDbPath = currentDbPath + '.compact.tmp';
-    const tempWalPath = currentWalPath + '.compact.tmp';
-    const dbFile = new RealFile(currentDbPath);
-    const walFile = new RealFile(currentWalPath);
-    const tempDbFile = new RealFile(tempDbPath);
-    const tempWalFile = new RealFile(tempWalPath);
-
-    // Streaming compaction: old DB → temp files, then swap
-    const { db: newDb, result } = await compactDatabase(db, dbFile, walFile, tempDbFile, tempWalFile);
-
-    // Close the new DB so we can swap files
-    await newDb.close();
-
-    // Swap temp files into original paths (recoverable across crashes)
-    await atomicCompactionSwap(tempDbPath, tempWalPath, currentDbPath, currentWalPath);
-
-    // Reopen the compacted database from the original paths
-    const reopenedDbFile = new RealFile(currentDbPath);
-    const reopenedWalFile = new RealFile(currentWalPath);
-    db = await SimpleDBMS.open(reopenedDbFile, reopenedWalFile);
-
-    console.log(
-      `Database compacted: ${result.sizeBefore} -> ${result.sizeAfter} bytes ` +
-        `(${result.collectionsCompacted} collections, ${result.totalDocuments} documents)`,
-    );
-
-    res.json(result);
-  } catch (error) {
-    console.error('Compaction error:', error);
-    res.status(500).json({ success: false, error: (error as Error).message });
-  }
-});
-
-/**
- * @swagger
- * /db/defrag:
- *   post:
- *     summary: Defragment the database in-place
- *     description: >
- *       Moves live blocks into free slots and truncates the file,
- *       reducing size without requiring extra disk space.
- *       This is a blocking maintenance operation.
- *     responses:
- *       200:
- *         description: Defragmentation completed successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 blocksTotal:
- *                   type: number
- *                 blocksFree:
- *                   type: number
- *                 blocksMoved:
- *                   type: number
- *                 sizeBefore:
- *                   type: number
- *                 sizeAfter:
- *                   type: number
- *       500:
- *         description: Defragmentation failed
- */
-app.post('/db/defrag', async (_req, res) => {
-  try {
-    const result = await defragDatabase(db.getFreeBlockFile());
-
-    // Close and reopen the DB (in-memory caches hold stale block IDs)
-    await db.close();
-    const reopenedDbFile = new RealFile(currentDbPath);
-    const reopenedWalFile = new RealFile(currentWalPath);
-    db = await SimpleDBMS.open(reopenedDbFile, reopenedWalFile);
-
-    console.log(
-      `Database defragmented: ${result.sizeBefore} -> ${result.sizeAfter} bytes ` +
-        `(${result.blocksMoved} blocks moved, ${result.blocksFree} free blocks reclaimed)`,
-    );
-
-    res.json(result);
-  } catch (error) {
-    console.error('Defrag error:', error);
-    res.status(500).json({ success: false, error: (error as Error).message });
   }
 });
 

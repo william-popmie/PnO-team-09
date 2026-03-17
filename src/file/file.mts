@@ -51,11 +51,11 @@ export interface File {
   /**
    * Reads data from the file into a buffer at the specified position.
    * @param {Buffer} buffer - The buffer to fill with read data.
-   * @param {{position: number}} options - Object containing the read position.
+   * @param {{position: number, offset?: number}} options - Object containing the read position and optional buffer offset.
    * @returns {Promise<void>} Resolves when the read completes.
    * @throws {Error} If the file is not currently open.
    */
-  read(buffer: Buffer, options: { position: number }): Promise<void>;
+  read(buffer: Buffer, options: { position: number; offset?: number }): Promise<void>;
 
   /**
    * Truncates the file to the specified length.
@@ -79,7 +79,7 @@ export interface File {
  */
 export class RealFile implements File {
   /** Sector size for atomic writes. */
-  public readonly sectorSize = 512;
+  public readonly sectorSize: number;
 
   /** Absolute path to the file on disk. */
   public readonly filePath: string;
@@ -90,9 +90,11 @@ export class RealFile implements File {
   /**
    * Constructs a RealFile for a given path.
    * @param {string} filePath - Absolute or relative path to the file.
+   * @param {number} sectorSize - Sector size for atomic writes. Defaults to 4096 bytes.
    */
-  public constructor(filePath: string) {
+  public constructor(filePath: string, sectorSize: number = 4096) {
     this.filePath = filePath;
+    this.sectorSize = sectorSize;
     this.fileHandle = null;
   }
 
@@ -185,13 +187,14 @@ export class RealFile implements File {
   /**
    * Reads from the file into a buffer.
    * @param {Buffer} buffer - Buffer to fill with data.
-   * @param {{position: number}} options - Position to start reading.
+   * @param {{position: number, offset?: number}} options - Position to start reading and optional buffer offset.
    * @returns {Promise<void>} Resolves when reading is complete.
    * @throws {Error} If the file is not currently open.
    */
-  public async read(buffer: Buffer, options: { position: number }): Promise<void> {
+  public async read(buffer: Buffer, options: { position: number; offset?: number }): Promise<void> {
     if (!this.isOpen()) throw new Error('File is not open.');
-    await this.fileHandle!.read(buffer, 0, buffer.length, options.position);
+    const bufferOffset = options.offset ?? 0;
+    await this.fileHandle!.read(buffer, bufferOffset, buffer.length - bufferOffset, options.position);
   }
 
   /**
@@ -201,6 +204,7 @@ export class RealFile implements File {
    * @throws {Error} If the file is not currently open.
    */
   public async truncate(length: number): Promise<void> {
+    if (length < 0) throw new Error('File is not open.');
     if (!this.isOpen()) throw new Error('File is not open.');
     await this.fileHandle!.truncate(length);
   }

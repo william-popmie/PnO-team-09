@@ -1,7 +1,7 @@
 // author @woutvanhemelrijck
 // date: 24/11/2025
 
-import { EncryptionService } from './encryption/encryption-service.mjs';
+import { EncryptionService } from './encryption-service.mjs';
 import { Database } from './trivialdbms.mjs';
 import { RealFile } from './file/file.mjs';
 

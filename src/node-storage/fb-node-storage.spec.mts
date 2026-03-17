@@ -2,6 +2,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { FBChildCursor, FBNodeStorage } from './fb-node-storage.mjs';
 import { FreeBlockFile, NO_BLOCK } from '../freeblockfile.mjs';
 import { MockFile } from '../file/mockfile.mjs';
+import {
+  COMPRESSION_ENVELOPE_HEADER_SIZE,
+  CompressionService,
+  NODE_STORAGE_COMPRESSED_PAYLOAD_MAGIC,
+} from '../compression/compression.mjs';
 
 /**
  * Small TestAtomicFile wrapper used by FreeBlockFile in your test harness.
@@ -73,11 +78,7 @@ describe('FBNodeStorage', () => {
 
     const raw = await fb.readBlob(persistedId);
     expect(Buffer.isBuffer(raw)).toBeTruthy();
-    const parsed = JSON.parse(raw.toString('utf8')) as unknown;
-    if (typeof parsed !== 'object' || parsed === null) throw new Error('parsed payload is not an object');
-    const p = parsed as Record<string, unknown>;
-    expect(p['type']).toBe('leaf');
-    expect(Array.isArray(p['keys'])).toBeTruthy();
+    expect(raw.length).toBeGreaterThan(0);
 
     const loaded = await storage.loadNode(persistedId);
     expect(loaded.isLeaf).toBe(true);
@@ -85,6 +86,28 @@ describe('FBNodeStorage', () => {
       expect(loaded.keys).toEqual([5, 10, 20]);
       expect(loaded.values).toEqual(['v5', 'v10', 'v20']);
     }
+  });
+
+  it('rejects legacy node-storage envelope (v0 without algorithm id)', async () => {
+    const service = new CompressionService({ algorithm: 'zstd' });
+    const legacyPayload = {
+      type: 'leaf',
+      keys: [{ type: 'number', value: 42 }],
+      values: [{ t: 'json', value: JSON.stringify('legacy') }],
+    };
+    const json = Buffer.from(JSON.stringify(legacyPayload), 'utf-8');
+    const compressed = service.compress(json);
+
+    const legacyMeta = Buffer.alloc(COMPRESSION_ENVELOPE_HEADER_SIZE);
+    NODE_STORAGE_COMPRESSED_PAYLOAD_MAGIC.copy(legacyMeta, 0);
+    legacyMeta.writeUInt32LE(compressed.originalSize, 4);
+    legacyMeta.writeUInt32LE(compressed.compressedSize, 8);
+    const legacyBuffer = Buffer.concat([legacyMeta, compressed.payload]);
+
+    const blockId = await fb.allocateAndWrite(legacyBuffer);
+    await fb.commit();
+
+    await expect(storage.loadNode(blockId)).rejects.toThrow();
   });
 
   it('creates an internal node referencing two leaves and loads it', async () => {
@@ -102,16 +125,9 @@ describe('FBNodeStorage', () => {
     await storage.commitAndReclaim();
 
     expect(typeof internal.blockId).toBe('number');
-    // Diagnostic check: ensure the persisted internal payload actually contains keys
     const rawInternal = await fb.readBlob(internal.blockId!);
     expect(Buffer.isBuffer(rawInternal)).toBeTruthy();
-    const parsedInternal = JSON.parse(rawInternal.toString('utf8')) as unknown;
-    if (typeof parsedInternal !== 'object' || parsedInternal === null)
-      throw new Error('parsed internal payload is not an object');
-    const pi = parsedInternal as Record<string, unknown>;
-    expect(pi['type']).toBe('internal');
-    expect(Array.isArray(pi['keys'])).toBeTruthy();
-    expect((pi['keys'] as unknown[]).length).toBeGreaterThan(0);
+    expect(rawInternal.length).toBeGreaterThan(0);
     const loaded = await storage.loadNode(internal.blockId!);
     expect(loaded.isLeaf).toBe(false);
     if (!loaded.isLeaf) {

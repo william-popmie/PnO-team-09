@@ -16,6 +16,10 @@
     "prettier-check": "prettier --check src/",
     "prettier-fix": "prettier --write src/",
     "trivialdbms.test": "tsx src/trivialdbms.test.mts",
+    "bench:compression": "tsx src/benchmarks/compression-algorithm-bench.mts",
+    "bench:compression:quick": "tsx src/benchmarks/compression-algorithm-bench.mts --quick",
+    "bench:compression:csv": "tsx src/benchmarks/compression-algorithm-bench.mts --csv compression-bench.csv",
+    "bench:compression:quick:csv": "tsx src/benchmarks/compression-algorithm-bench.mts --quick --csv compression-bench-quick.csv",
     "dev": "tsc --build && node build/simpledbmsd.mjs",
     "reset-db": "rm -f mydb.db mydb.wal testdb && rm -rf test_files/ && echo 'Database reset complete. Run npm run dev to start with fresh database.'"
   },

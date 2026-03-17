@@ -8,7 +8,34 @@ import { FreeBlockFile, DEFAULT_BLOCK_SIZE } from './freeblockfile.mjs';
 import { AtomicFileImpl } from './atomic-operations/atomic-file.mjs';
 import { WALManagerImpl } from './atomic-operations/wal-manager.mjs';
 import { type File } from './file/file.mjs';
+import { CompressionService, resolveCompressionAlgorithmFromEnvironment } from './compression/compression.mjs';
+import { deserializeCompressionEnvelope, serializeCompressionEnvelope } from './compression/envelope.mjs';
 import { randomUUID } from 'crypto';
+
+const HEADER_COMPRESSED_PAYLOAD_MAGIC = Buffer.from('DBH1', 'ascii');
+const headerCompressionService = new CompressionService({
+  algorithm: resolveCompressionAlgorithmFromEnvironment(),
+});
+
+function encodeHeaderForStorage(header: Record<string, unknown>): Buffer {
+  const jsonBuffer = Buffer.from(JSON.stringify(header));
+  const compressed = headerCompressionService.compress(jsonBuffer);
+
+  if (compressed.compressedSize >= compressed.originalSize) {
+    return jsonBuffer;
+  }
+
+  return serializeCompressionEnvelope(HEADER_COMPRESSED_PAYLOAD_MAGIC, compressed);
+}
+
+function decodeHeaderFromStorage(payload: Buffer): string {
+  const compressed = deserializeCompressionEnvelope(payload, HEADER_COMPRESSED_PAYLOAD_MAGIC);
+  if (compressed === null) {
+    return payload.toString();
+  }
+
+  return headerCompressionService.decompress(compressed).toString();
+}
 
 // Document interface
 export type DocumentValue =
@@ -907,7 +934,8 @@ export class SimpleDBMS {
         await this.saveCatalogRoot();
       } else {
         try {
-          this.dbHeader = JSON.parse(headerBuf.toString()) as typeof this.dbHeader;
+          const decodedHeader = decodeHeaderFromStorage(headerBuf);
+          this.dbHeader = JSON.parse(decodedHeader) as typeof this.dbHeader;
           const rootNode = await this.catalogStorage.loadNode(this.dbHeader.catalogRootBlockId);
           this.catalogTree.load(rootNode);
         } catch {
@@ -934,7 +962,7 @@ export class SimpleDBMS {
 
     this.dbHeader.catalogRootBlockId = rootId;
 
-    const headerBuf = Buffer.from(JSON.stringify(this.dbHeader));
+    const headerBuf = encodeHeaderForStorage(this.dbHeader as unknown as Record<string, unknown>);
     await this.fbFile.writeHeader(headerBuf);
     await this.fbFile.commit();
   }

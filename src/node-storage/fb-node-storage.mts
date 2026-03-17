@@ -17,7 +17,6 @@ import {
 } from '../compression/compression.mjs';
 import {
   deserializeCompressionEnvelope,
-  deserializeLegacyCompressionEnvelopeV0,
   serializeCompressionEnvelope,
 } from '../compression/envelope.mjs';
 
@@ -145,11 +144,6 @@ export class FBNodeStorage<Keystype, ValuesType>
     const decoded = deserializeCompressionEnvelope(buffer, NODE_STORAGE_COMPRESSED_PAYLOAD_MAGIC);
     if (decoded !== null) {
       return this.compressionService.decompress(decoded);
-    }
-
-    const legacy = deserializeLegacyCompressionEnvelopeV0(buffer, NODE_STORAGE_COMPRESSED_PAYLOAD_MAGIC, 'zstd');
-    if (legacy !== null) {
-      return this.compressionService.decompress(legacy);
     }
 
     return buffer;

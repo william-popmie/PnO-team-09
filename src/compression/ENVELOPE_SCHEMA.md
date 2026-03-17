@@ -35,20 +35,10 @@ Versioning rule:
 
 - If metadata layout changes incompatibly, bump marker suffix (`...2`) and provide migration reader.
 
-## Legacy Compatibility
+## Compatibility
 
-### Node-storage legacy v0 (`ZST1`)
-
-Older node-storage payloads reused marker `ZST1` but did **not** include algorithm ID.
-Legacy layout:
-
-- `0..3` (4 bytes): magic marker
-- `4..7` (4 bytes): original size
-- `8..11` (4 bytes): compressed size
-- `12..` payload
-
-Legacy payloads are always interpreted as `zstd`.
-The v1 decoder first attempts v1 parsing, then falls back to v0 parsing for node-storage.
+Only envelope v1 is supported for decoding and encoding.
+Legacy envelope variants are not supported.
 
 ## Validation Requirements
 

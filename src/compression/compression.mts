@@ -23,6 +23,7 @@ export const COMPRESSION_ALGORITHM_ZSTD_ID: number = 1;
 export const COMPRESSION_ALGORITHM_GZIP_ID: number = 2;
 export const COMPRESSION_ALGORITHM_BROTLI_ID: number = 3;
 export const COMPRESSION_ALGORITHM_DEFLATE_ID: number = 4;
+
 export const COMPRESSION_ENVELOPE_MAGIC_SIZE: number = 4;
 export const COMPRESSION_ENVELOPE_ALGORITHM_ID_SIZE: number = 1;
 export const COMPRESSION_ENVELOPE_SIZE_FIELD_SIZE: number = 4;

@@ -52,12 +52,11 @@ describe('Config.ts, validateConfig', () => {
   const invalidConfig4 = {
     nodeId: 'node1',
     address: 'address1',
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment
     peers: [
       { id: 'node2', address: 'address2' },
       { id: 'node3', address: 'address3' },
       { id: 123, address: 'address4' },
-    ] as any,
+    ] as unknown as Array<{ id: string; address: string }>,
     electionTimeoutMinMs: 150,
     electionTimeoutMaxMs: 300,
     heartbeatIntervalMs: 50,

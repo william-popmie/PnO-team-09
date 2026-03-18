@@ -97,13 +97,15 @@ describe('LogEntry.ts, validateLogEntry', () => {
     term: 1,
     index: 1,
     type: LogEntryType.CONFIG,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment
     config: {
       voters: [
         { id: 'node1', address: 'address1' },
         { id: 'node2', address: 'address2' },
       ],
-    } as any,
+    } as unknown as {
+      voters: Array<{ id: string; address: string }>;
+      learners: Array<{ id: string; address: string }>;
+    },
   };
 
   const invalidEntry10: LogEntry = {

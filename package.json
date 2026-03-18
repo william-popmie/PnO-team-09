@@ -40,6 +40,8 @@
     "vitest": "4.0.6"
   },
   "dependencies": {
+    "@grpc/grpc-js": "1.14.3",
+    "@grpc/proto-loader": "0.8.0",
     "@types/bcryptjs": "2.4.6",
     "argon2": "0.44.0",
     "bcryptjs": "3.0.3",

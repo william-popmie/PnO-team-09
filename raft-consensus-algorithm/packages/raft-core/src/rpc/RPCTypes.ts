@@ -196,7 +196,7 @@ export function validateAppendEntriesRequest(request: AppendEntriesRequest): voi
     }
 
     if (!Array.isArray(request.entries) || request.entries.some(entry => typeof entry !== 'object')) {
-        throw new Error(`Invalid entries: ${String(request.entries)}. entries must be an array of LogEntry objects.`);
+        throw new Error(`Invalid entries: ${JSON.stringify(request.entries)}. entries must be an array of LogEntry objects.`);
     }
 }
 
@@ -258,7 +258,7 @@ export function validateInstallSnapshotRequest(request: InstallSnapshotRequest):
     }
 
     if (!Array.isArray(request.config.voters) || !Array.isArray(request.config.learners)) {
-        throw new Error(`Invalid config: ${String(request.config)}. voters and learners must be arrays.`);
+        throw new Error(`Invalid config: ${JSON.stringify(request.config)}. voters and learners must be arrays.`);
     }
 
     if (request.config.voters.some((m: unknown) => {

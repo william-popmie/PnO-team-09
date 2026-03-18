@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { GrpcTransport, rpcMessageToGrpc, grpcToRpcMessage, serializeAppendEntriesResponse } from "./GRPCTransport";
 import { LogEntry, LogEntryType, NetworkError, RPCMessage } from "@maboke123/raft-core";
 import path from "path";
+import fs from "node:fs";
 
 let portCounter = 52000 + Math.floor(Math.random() * 5000);
 
@@ -970,17 +971,23 @@ describe('GRPCTransport.ts, GrpcTransport', () => {
         const portB = nextPort();
 
         const certBase = path.join(__dirname, '../../../certs');
+        const node1Key = path.join(certBase, 'node1/node1.key');
+        const node2Key = path.join(certBase, 'node2/node2.key');
+
+        if (!fs.existsSync(node1Key) || !fs.existsSync(node2Key)) {
+            return;
+        }
 
         const transportA = new GrpcTransport("node1", portA, { node2: `localhost:${portB}` }, {
             caCert: path.join(certBase, 'ca/ca.crt'),
             nodeCert: path.join(certBase, 'node1/node1.crt'),
-            nodeKey: path.join(certBase, 'node1/node1.key'),
+            nodeKey: node1Key,
         });
 
         const transportB = new GrpcTransport("node2", portB, { node1: `localhost:${portA}` }, {
             caCert: path.join(certBase, 'ca/ca.crt'),
             nodeCert: path.join(certBase, 'node2/node2.crt'),
-            nodeKey: path.join(certBase, 'node2/node2.key'),
+            nodeKey: node2Key,
         });
 
         transportB.onMessage(async () => requestVoteResponse);

@@ -65,6 +65,7 @@ export function validateLogEntry(entry: LogEntry): void {
         }
 
         if (!Array.isArray(entry.config.voters) || !Array.isArray(entry.config.learners)) {
+          // eslint-disable-next-line @typescript-eslint/no-base-to-string
             throw new Error(`Invalid config: ${String(entry.config)}. Voters and learners must be arrays`);
         }
     } else if (entry.type === LogEntryType.NOOP) {

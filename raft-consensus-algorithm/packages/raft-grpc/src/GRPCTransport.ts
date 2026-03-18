@@ -539,7 +539,7 @@ export class GrpcTransport implements Transport {
     addPeer(peerId: NodeId, address: string): Promise<void> {
 
         if (!this.cachedClientsCredentials) {
-            throw new NetworkError("Transport is not initialized. Start the transport before adding peers.");
+            return Promise.reject(new NetworkError("Transport is not initialized. Start the transport before adding peers."));
         }
 
         const existing = this.clients.get(peerId);

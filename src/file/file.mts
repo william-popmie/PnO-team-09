@@ -2,6 +2,7 @@
 // @date 2025-11-18
 
 import * as fsPromises from 'node:fs/promises';
+import * as path from 'node:path';
 
 /**
  * Abstraction for a file, supporting atomic sector writes and basic file operations.
@@ -136,6 +137,7 @@ export class RealFile implements File {
    */
   public async create(): Promise<void> {
     if (this.isOpen()) throw new Error('File is already open.');
+    await fsPromises.mkdir(path.dirname(this.filePath), { recursive: true });
     this.fileHandle = await fsPromises.open(this.filePath, 'w+');
   }
 

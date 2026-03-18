@@ -613,11 +613,11 @@ describe('RPCTypes.ts, validateAppendEntriesRequest', () => {
     });
 
     it('should throw error for non array entries', () => {
-        expect(() => validateAppendEntriesRequest(invalidRequest11)).toThrow("Invalid entries: not an array. entries must be an array of LogEntry objects.");
+        expect(() => validateAppendEntriesRequest(invalidRequest11)).toThrow("Invalid entries: \"not an array\". entries must be an array of LogEntry objects.");
     });
 
     it('should throw error for entries array containing non object', () => {
-        expect(() => validateAppendEntriesRequest(invalidRequest12)).toThrow("Invalid entries: 123. entries must be an array of LogEntry objects.");
+        expect(() => validateAppendEntriesRequest(invalidRequest12)).toThrow("Invalid entries: [123]. entries must be an array of LogEntry objects.");
     });
 });
 
@@ -986,7 +986,7 @@ describe('RPCTypes.ts, validateInstallSnapshotRequest', () => {
     });
 
     it('should throw error for config missing voters or learners', () => {
-        expect(() => validateInstallSnapshotRequest(invalidRequest11)).toThrow("Invalid config: [object Object]. voters and learners must be arrays.");
+        expect(() => validateInstallSnapshotRequest(invalidRequest11)).toThrow("Invalid config: {\"voters\":\"not an array\"}. voters and learners must be arrays.");
     });
     it('should throw error for voter missing id or address', () => {
         expect(() => validateInstallSnapshotRequest(invalidRequest12)).toThrow(

@@ -23,6 +23,10 @@ export function useRaftSocket() {
             setStoreWebSocket(ws);
 
             ws.onmessage = (event) => {
+                if (typeof event.data !== "string") {
+                    return;
+                }
+
                 const data = JSON.parse(event.data) as ServerMessage;
 
                 if (data.type === "InitialState") {

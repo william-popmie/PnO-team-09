@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { RPCHandler } from './RPCHandler';

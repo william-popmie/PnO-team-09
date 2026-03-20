@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import { LogEntry, validateLogEntry, Command, LogEntryType } from './LogEntry';
 import { StorageError, LogInconsistencyError } from '../util/Error';
 import { LogStorage } from '../storage/interfaces/LogStorage';

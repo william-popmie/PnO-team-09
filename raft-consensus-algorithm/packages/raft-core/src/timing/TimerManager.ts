@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import { Clock, TimerHandle } from './Clock';
 import { Random } from '../util/Random';
 import { TimerManagerError } from '../util/Error';

@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { LogManager } from './LogManager';
 import { LogEntry, Command, LogEntryType } from './LogEntry';

@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import { useRaftStore } from '../store/raftStore';
 
 export function ConnectionOverlay() {

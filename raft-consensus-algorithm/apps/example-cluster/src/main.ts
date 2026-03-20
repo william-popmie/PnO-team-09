@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import { EventStore, LocalEventBus } from '@maboke123/raft-core';
 import { ClusterRunner } from './ClusterRunner';
 import { ClusterRunnerGRPC } from './ClusterRunnerGRPC';

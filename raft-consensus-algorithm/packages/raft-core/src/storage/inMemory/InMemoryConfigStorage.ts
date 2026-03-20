@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import { StorageError } from '../../util/Error';
 import { ClusterMember } from '../../config/ClusterConfig';
 import { ConfigStorage, ConfigStorageData } from '../interfaces/ConfigStorage';

@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { EventStore } from './EventStore';
 import { RaftEventBus, RaftEvent } from './RaftEvents';

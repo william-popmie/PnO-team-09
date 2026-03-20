@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import { NodeId } from '../core/Config';
 import { LogEntry } from '../log/LogEntry';
 import { ClusterConfig } from '../config/ClusterConfig';

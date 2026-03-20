@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 /** Opaque timer handle type returned by clock implementations. */
 export type TimerHandle = number | NodeJS.Timeout;
 

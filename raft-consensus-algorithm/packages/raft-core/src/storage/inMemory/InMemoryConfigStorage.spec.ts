@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import { describe, it, expect, beforeEach } from 'vitest';
 import { InMemoryConfigStorage } from './InMemoryConfigStorage';
 import { ClusterMember } from '../../config/ClusterConfig';

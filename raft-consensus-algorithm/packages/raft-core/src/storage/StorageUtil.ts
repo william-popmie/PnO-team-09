@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import { LogEntry, LogEntryType } from '../log/LogEntry';
 import { StorageError } from '../util/Error';
 

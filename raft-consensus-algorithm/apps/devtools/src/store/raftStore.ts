@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import type { ClientCommand, ClusterConfig, MessageArrow, NodeUIState, RaftEvent } from '../types/raftTypes';
 import { create } from 'zustand';
 

@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import { NodeId } from '../core/Config';
 
 /** Supported logging severity levels in ascending order. */

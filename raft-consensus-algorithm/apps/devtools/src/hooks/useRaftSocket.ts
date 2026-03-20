@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import { useEffect } from 'react';
 import { setStoreWebSocket, useRaftStore } from '../store/raftStore';
 import type { ServerMessage } from '../types/raftTypes';

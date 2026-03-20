@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { TimerManager } from './TimerManager';
 import { TimerManagerError } from '../util/Error';

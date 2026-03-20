@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 /**
  * Random source abstraction used for election timeout jitter and tests.
  */

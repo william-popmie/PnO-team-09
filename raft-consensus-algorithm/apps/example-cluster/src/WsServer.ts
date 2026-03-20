@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import { EventStore } from '@maboke123/raft-core';
 import { ClientMessage, ServerMessage } from './WsProtocol';
 import { ClusterRunnerInterface } from './ClusterRunnerInterface';

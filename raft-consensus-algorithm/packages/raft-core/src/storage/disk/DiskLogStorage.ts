@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import fs from 'fs/promises';
 import path from 'node:path';
 import { crc32 } from 'node:zlib';

@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call, @typescript-eslint/require-await, @typescript-eslint/no-unused-vars */
 import { describe, expect, it, vi } from 'vitest';
 import { GrpcTransport, rpcMessageToGrpc, grpcToRpcMessage, serializeAppendEntriesResponse } from './GRPCTransport';

@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import { NodeStorage } from '../interfaces/NodeStorage';
 import { InMemoryMetaStorage } from './InMemoryMetaStorage';
 import { InMemoryConfigStorage } from './InMemoryConfigStorage';

@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import { SnapshotStorage, Snapshot, SnapshotMetaData } from '../storage/interfaces/SnapshotStorage';
 import { StorageError } from '../util/Error';
 

@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import { NodeId } from '../core/Config';
 import { RPCMessage } from '../rpc/RPCTypes';
 import { NetworkError } from '../util/Error';

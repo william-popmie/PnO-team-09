@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import { StorageError } from '../../util/Error';
 import { MetaData, MetaStorage } from '../interfaces/MetaStorage';
 import { NodeId } from '../../core/Config';

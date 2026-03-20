@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import { roleColors } from '../constants/colors';
 import { useRaftStore } from '../store/raftStore';
 import { LogStrip } from './LogStrip';

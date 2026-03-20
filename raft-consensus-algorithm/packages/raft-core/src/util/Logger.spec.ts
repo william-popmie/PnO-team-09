@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import { ConsoleLogger } from './Logger';
 import { describe, it, beforeEach, afterEach, vi, expect } from 'vitest';
 

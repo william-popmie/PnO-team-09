@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import { describe, it, expect, beforeEach } from 'vitest';
 import { InMemorySnapshotStorage } from './InMemorySnapshotStorage';
 import { Snapshot } from '../interfaces/SnapshotStorage';

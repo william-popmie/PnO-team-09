@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import { SnapshotManager } from './SnapshotManager';
 import { InMemorySnapshotStorage } from '../storage/inMemory/InMemorySnapshotStorage';
 import { Snapshot } from '../storage/interfaces/SnapshotStorage';

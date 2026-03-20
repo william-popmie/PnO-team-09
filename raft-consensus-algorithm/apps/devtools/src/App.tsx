@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import { useRaftSocket } from './hooks/useRaftSocket';
 import { EventFeed } from './components/EventFeed';
 import { ClusterView } from './components/ClusterView';

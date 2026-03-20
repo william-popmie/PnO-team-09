@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import { Command, createConfig, InMemoryNodeStorage, NodeId, RaftEventBus, RaftNode } from '@maboke123/raft-core';
 import { MockTransport, SeededRandom } from '@maboke123/raft-core/testing';
 import { ClusterRunnerInterface, CommittedConfig } from './ClusterRunnerInterface';

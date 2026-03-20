@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import { NodeId, RaftConfig, validateConfig } from './Config';
 import { Command, LogEntry, LogEntryType } from '../log/LogEntry';
 import { RaftState } from './StateMachine';

@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import { useState } from 'react';
 import { useRaftStore } from '../store/raftStore';
 import { roleColors, messageColors } from '../constants/colors';

@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import { MetaStorage } from './MetaStorage';
 import { ConfigStorage } from './ConfigStorage';
 import { LogStorage } from './LogStorage';

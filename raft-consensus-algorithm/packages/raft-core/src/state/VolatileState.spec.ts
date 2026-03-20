@@ -1,3 +1,5 @@
+// @author Mathias Bouhon Keulen
+// @date 2026-03-20
 import { describe, it, expect } from 'vitest';
 import { VolatileState } from './VolatileState';
 import { VolatileStateError } from '../util/Error';

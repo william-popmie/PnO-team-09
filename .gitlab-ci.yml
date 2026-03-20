@@ -52,4 +52,4 @@ pages:
     paths:
       - public
   rules:
-    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "mathias/feature/deploying-docs"'
+    - if: '$CI_COMMIT_BRANCH == "main"'

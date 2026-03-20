@@ -6,9 +6,9 @@ Raft is a protocol for building fault-tolerant distributed systems. A cluster of
 
 ## Documentation
 
-TypeDoc API documentation is published on GitHub Pages:
+TypeDoc API documentation is published on GitLab Pages:
 
-- https://maboke123.github.io/raft-consensus-algorithm/
+- https://team-09-e1078b.pages.gitlab.kuleuven.be/
 
 ## Packages
 

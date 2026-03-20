@@ -1343,7 +1343,7 @@ export class StateMachine implements StateMachineInterface {
 
     const currentTerm = this.persistentState.getCurrentTerm();
 
-    const voters = this.configManager.getVoters();
+    const voters = this.configManager.getVoters().filter((peerId) => peerId !== this.nodeId);
 
     const newCommitIndex = await this.leaderState.calculateCommitIndex(currentTerm, this.logManager, voters);
 

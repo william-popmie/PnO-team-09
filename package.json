@@ -6,15 +6,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "vitest run --dir src",
+    "test": "vitest run",
     "test-build": "vitest run --dir build",
     "coverage": "vitest run --coverage",
     "build": "tsc --build",
     "clean": "tsc --build --clean",
-    "lint": "eslint src/",
-    "lint-fix": "eslint --fix src/",
-    "prettier-check": "prettier --check src/",
-    "prettier-fix": "prettier --write src/",
+    "lint": "eslint \"src/**/*.{mts,ts,tsx}\" \"raft-consensus-algorithm/**/*.{mts,ts,tsx}\"",
+    "lint-fix": "eslint --fix \"src/**/*.{mts,ts,tsx}\" \"raft-consensus-algorithm/**/*.{mts,ts,tsx}\"",
+    "prettier-check": "prettier --check src/ raft-consensus-algorithm/",
+    "prettier-fix": "prettier --write src/ raft-consensus-algorithm/",
     "trivialdbms.test": "tsx src/trivialdbms.test.mts",
     "bench:compression": "tsx src/benchmarks/compression-algorithm-bench.mts",
     "bench:compression:quick": "tsx src/benchmarks/compression-algorithm-bench.mts --quick",
@@ -25,6 +25,9 @@
   },
   "devDependencies": {
     "@eslint/js": "9.39.0",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "5.1.1",
     "@types/argon2": "0.14.1",
     "@types/cors": "2.8.19",
     "@types/express": "5.0.5",
@@ -37,14 +40,21 @@
     "eslint": "9.39.0",
     "prettier": "3.6.2",
     "random": "5.4.1",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
     "supertest": "7.1.4",
     "ts-node": "10.9.2",
     "tsx": "4.20.6",
     "typescript": "5.9.3",
     "typescript-eslint": "8.46.2",
+    "vite": "7.3.1",
     "vitest": "4.0.6"
   },
   "dependencies": {
+    "@grpc/grpc-js": "1.14.3",
+    "@grpc/proto-loader": "0.8.0",
+    "@maboke123/raft-core": "0.2.0",
+    "@maboke123/raft-grpc": "0.1.0",
     "@types/bcryptjs": "2.4.6",
     "argon2": "0.44.0",
     "bcryptjs": "3.0.3",
@@ -54,6 +64,7 @@
     "express-session": "1.18.2",
     "jsonwebtoken": "9.0.2",
     "swagger-jsdoc": "6.2.8",
-    "swagger-ui-express": "5.0.1"
+    "swagger-ui-express": "5.0.1",
+    "zustand": "5.0.11"
   }
 }

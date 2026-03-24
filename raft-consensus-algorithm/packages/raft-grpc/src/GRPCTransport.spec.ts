@@ -7,7 +7,11 @@ import { LogEntry, LogEntryType, NetworkError, RPCMessage } from '@maboke123/raf
 import path from 'path';
 import fs from 'node:fs';
 
-let portCounter = 52000 + Math.floor(Math.random() * 5000);
+const workerId = Number.parseInt(process.env.VITEST_WORKER_ID ?? '0', 10) || 0;
+const portWindowStart = 20000;
+const portWindowSize = 25000;
+const portSeed = process.pid * 31 + workerId * 997 + Math.floor(Math.random() * 1000);
+let portCounter = portWindowStart + (Math.abs(portSeed) % (portWindowSize - 2000));
 
 function nextPort() {
   return portCounter++;

@@ -32,6 +32,12 @@
 // =============================================================
 
 import { type File } from './file/file.mjs';
+import {
+  CompressionService,
+  FREEBLOCK_COMPRESSED_PAYLOAD_MAGIC,
+  resolveCompressionAlgorithmFromEnvironment,
+} from './compression/compression.mjs';
+import { deserializeCompressionEnvelope, serializeCompressionEnvelope } from './compression/envelope.mjs';
 
 /**
  * Test interface for atomic file operations used by FreeBlockFile.
@@ -101,6 +107,9 @@ export class FreeBlockFile {
   private cachedHeaderBuf: Buffer = Buffer.alloc(0);
 
   private opened = false;
+  private readonly compressionService = new CompressionService({
+    algorithm: resolveCompressionAlgorithmFromEnvironment(),
+  });
 
   private ensureOpened(): void {
     if (!this.opened) throw new Error('FreeBlockFile is not open');
@@ -259,9 +268,10 @@ export class FreeBlockFile {
    */
   async allocateAndWrite(data: Buffer): Promise<number> {
     this.ensureOpened();
+    const payload = this.encodePayload(data);
     const lengthPrefix = Buffer.alloc(LENGTH_PREFIX_SIZE);
-    lengthPrefix.writeBigUInt64LE(BigInt(data.length), 0);
-    const full = Buffer.concat([lengthPrefix, data]);
+    lengthPrefix.writeBigUInt64LE(BigInt(payload.length), 0);
+    const full = Buffer.concat([lengthPrefix, payload]);
     const needed = Math.ceil(full.length / this.payloadSize) || 1;
 
     const blocksOrNumber = await this.allocateBlocks(needed);
@@ -296,9 +306,10 @@ export class FreeBlockFile {
       throw new Error('Cannot overwrite NO_BLOCK');
     }
 
+    const payload = this.encodePayload(data);
     const lengthPrefix = Buffer.alloc(LENGTH_PREFIX_SIZE);
-    lengthPrefix.writeBigUInt64LE(BigInt(data.length), 0);
-    const full = Buffer.concat([lengthPrefix, data]);
+    lengthPrefix.writeBigUInt64LE(BigInt(payload.length), 0);
+    const full = Buffer.concat([lengthPrefix, payload]);
     const needed = Math.ceil(full.length / this.payloadSize) || 1;
 
     // Collect existing blocks in the chain
@@ -371,8 +382,30 @@ export class FreeBlockFile {
     const full = Buffer.concat(parts);
     if (full.length < LENGTH_PREFIX_SIZE) return Buffer.alloc(0);
     const len = Number(full.readBigUInt64LE(0));
-    const data = full.slice(LENGTH_PREFIX_SIZE, LENGTH_PREFIX_SIZE + len);
-    return Buffer.from(data);
+    const payload = full.slice(LENGTH_PREFIX_SIZE, LENGTH_PREFIX_SIZE + len);
+    return this.decodePayload(payload);
+  }
+
+  private encodePayload(data: Buffer): Buffer {
+    const compressed = this.compressionService.compress(data);
+    if (compressed.compressedSize >= compressed.originalSize) {
+      return Buffer.from(data);
+    }
+
+    return serializeCompressionEnvelope(FREEBLOCK_COMPRESSED_PAYLOAD_MAGIC, compressed);
+  }
+
+  private decodePayload(payload: Buffer): Buffer {
+    const decoded = deserializeCompressionEnvelope(payload, FREEBLOCK_COMPRESSED_PAYLOAD_MAGIC);
+    if (decoded === null) {
+      return Buffer.from(payload);
+    }
+
+    try {
+      return this.compressionService.decompress(decoded);
+    } catch {
+      return Buffer.from(payload);
+    }
   }
 
   private async readRawBlock(blockId: number): Promise<Buffer> {

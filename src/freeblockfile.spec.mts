@@ -3,6 +3,12 @@ import { FreeBlockFile, NO_BLOCK } from '../src/freeblockfile.mjs';
 import { MockFile } from '../src/file/mockfile.mjs';
 import type { File as FileInterface } from '../src/file/file.mjs';
 import type { AtomicFile } from '../src/freeblockfile.mjs';
+import {
+  COMPRESSION_ALGORITHM_ZSTD_ID,
+  COMPRESSION_ENVELOPE_HEADER_SIZE,
+  CompressionService,
+  FREEBLOCK_COMPRESSED_PAYLOAD_MAGIC,
+} from '../src/compression/compression.mjs';
 
 const DEFAULT_BLOCK_SIZE = 4096;
 const NEXT_POINTER_SIZE = 4;
@@ -313,6 +319,29 @@ describe('FreeBlockFile', () => {
 
     const out = await fb.readBlob(99);
     expect(out.length).toEqual(0);
+
+    await fb.close();
+  });
+
+  it('reads legacy freeblock compressed envelope payload', async () => {
+    const { fb } = await makeFreeBlockFile();
+    const service = new CompressionService({ algorithm: 'zstd' });
+
+    const original = Buffer.from('legacy-freeblock-payload', 'utf-8');
+    const compressed = service.compress(original);
+
+    const metadata = Buffer.alloc(COMPRESSION_ENVELOPE_HEADER_SIZE);
+    FREEBLOCK_COMPRESSED_PAYLOAD_MAGIC.copy(metadata, 0);
+    metadata.writeUInt8(COMPRESSION_ALGORITHM_ZSTD_ID, 4);
+    metadata.writeUInt32LE(compressed.originalSize, 5);
+    metadata.writeUInt32LE(compressed.compressedSize, 9);
+    const encoded = Buffer.concat([metadata, compressed.payload]);
+
+    const start = await fb.allocateAndWrite(encoded);
+    await fb.commit();
+
+    const out = await fb.readBlob(start);
+    expect(out.equals(original)).toBe(true);
 
     await fb.close();
   });

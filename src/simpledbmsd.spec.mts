@@ -271,6 +271,26 @@ describe('SimpleDBMS Daemon API', () => {
       );
     });
 
+    it('should fetch legacy-style plain JSON document content (no compression envelope)', async () => {
+      await request(app)
+        .post('/api/createDocument')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          collectionName,
+          documentName: 'LegacyPlainDoc',
+          documentContent: { a: 1 },
+        });
+
+      const res = await request(app)
+        .get('/api/fetchDocumentContent')
+        .set('Authorization', `Bearer ${authToken}`)
+        .query({ collectionName, documentName: 'LegacyPlainDoc' });
+
+      expect(res.status).toBe(200);
+      expect((res.body as { success?: boolean }).success).toBe(true);
+      expect((res.body as { documentContent?: { a?: number } }).documentContent?.a).toBe(1);
+    });
+
     it('should update document content', async () => {
       await request(app)
         .post('/api/createDocument')

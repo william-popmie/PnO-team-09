@@ -10,6 +10,12 @@ import type {
   ChildCursor,
 } from './node-storage.mjs';
 import { FreeBlockFile, NO_BLOCK } from '../freeblockfile.mjs';
+import {
+  CompressionService,
+  NODE_STORAGE_COMPRESSED_PAYLOAD_MAGIC,
+  resolveCompressionAlgorithmFromEnvironment,
+} from '../compression/compression.mjs';
+import { deserializeCompressionEnvelope, serializeCompressionEnvelope } from '../compression/envelope.mjs';
 
 type SerializedKey =
   | { type: 'string'; value: string }
@@ -109,6 +115,9 @@ export class FBNodeStorage<Keystype, ValuesType>
 {
   private cache = new Map<number, FBLeafNode<Keystype, ValuesType> | FBInternalNode<Keystype, ValuesType>>();
   private reclaimQueue = new Set<number>();
+  private readonly compressionService = new CompressionService({
+    algorithm: resolveCompressionAlgorithmFromEnvironment(),
+  });
 
   constructor(
     public compareKeys: (a: Keystype, b: Keystype) => number,
@@ -119,6 +128,22 @@ export class FBNodeStorage<Keystype, ValuesType>
 
   getMaxKeySize(): number {
     return this.maxKeySize;
+  }
+
+  private encodeNodePayload(payload: unknown): Buffer {
+    const jsonBuffer = Buffer.from(JSON.stringify(payload), 'utf-8');
+    const compressed = this.compressionService.compress(jsonBuffer);
+
+    return serializeCompressionEnvelope(NODE_STORAGE_COMPRESSED_PAYLOAD_MAGIC, compressed);
+  }
+
+  private decodeNodePayload(buffer: Buffer): Buffer {
+    const decoded = deserializeCompressionEnvelope(buffer, NODE_STORAGE_COMPRESSED_PAYLOAD_MAGIC);
+    if (decoded !== null) {
+      return this.compressionService.decompress(decoded);
+    }
+
+    return buffer;
   }
 
   async createTree(): Promise<FBLeafNode<Keystype, ValuesType>> {
@@ -193,7 +218,7 @@ export class FBNodeStorage<Keystype, ValuesType>
       prevBlockId: node.prevBlockId ?? NO_BLOCK,
       version: 1,
     };
-    const buffer = Buffer.from(JSON.stringify(payload), 'utf-8');
+    const buffer = this.encodeNodePayload(payload);
 
     // In-place update: if node already has a blockId, overwrite it
     if (node.blockId !== undefined && node.blockId !== NO_BLOCK) {
@@ -216,7 +241,7 @@ export class FBNodeStorage<Keystype, ValuesType>
       childBlockIds: node.childBlockIds.slice(),
       version: 1,
     };
-    const buffer = Buffer.from(JSON.stringify(payload), 'utf-8');
+    const buffer = this.encodeNodePayload(payload);
 
     if (node.blockId !== undefined && node.blockId !== NO_BLOCK) {
       await this.FBfile.overwriteBlock(node.blockId, buffer);
@@ -345,7 +370,8 @@ export class FBNodeStorage<Keystype, ValuesType>
       throw new Error(`Block with id ${blockId} not found`);
     }
 
-    const raw = JSON.parse(buffer.toString('utf-8')) as unknown;
+    const decodedPayload = this.decodeNodePayload(buffer);
+    const raw = JSON.parse(decodedPayload.toString('utf-8')) as unknown;
 
     type LeafPayload = {
       type: 'leaf';

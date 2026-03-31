@@ -11,7 +11,7 @@ import { EncryptionService } from './encryption/encryption-service.mjs';
 import { SimpleDBMS, type DocumentValue } from './simpledbms.mjs';
 import { RealFile } from './file/file.mjs';
 import { rename, writeFile, unlink, access } from 'node:fs/promises';
-import { compactDatabase, defragDatabase } from './compaction.mjs';
+import { compactDatabase, shrinkDatabase } from './compaction.mjs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import {
@@ -812,16 +812,16 @@ app.post('/db/compact', async (_req, res) => {
 
 /**
  * @swagger
- * /db/defrag:
+ * /db/shrink:
  *   post:
- *     summary: Defragment the database in-place
+ *     summary: Shrink the database file by reclaiming unused space
  *     description: >
- *       Moves live blocks into free slots and truncates the file,
- *       reducing size without requiring extra disk space.
+ *       Reclaims free and orphaned blocks by relocating live blocks into
+ *       free slots, then truncating the file. Requires zero extra disk space.
  *       This is a blocking maintenance operation.
  *     responses:
  *       200:
- *         description: Defragmentation completed successfully
+ *         description: Shrink completed successfully
  *         content:
  *           application/json:
  *             schema:
@@ -833,18 +833,18 @@ app.post('/db/compact', async (_req, res) => {
  *                   type: number
  *                 blocksFree:
  *                   type: number
- *                 blocksMoved:
+ *                 blocksRelocated:
  *                   type: number
  *                 sizeBefore:
  *                   type: number
  *                 sizeAfter:
  *                   type: number
  *       500:
- *         description: Defragmentation failed
+ *         description: Shrink failed
  */
-app.post('/db/defrag', async (_req, res) => {
+app.post('/db/shrink', async (_req, res) => {
   try {
-    const result = await defragDatabase(db.getFreeBlockFile());
+    const result = await shrinkDatabase(db.getFreeBlockFile());
 
     // Close and reopen the DB (in-memory caches hold stale block IDs)
     await db.close();
@@ -853,13 +853,13 @@ app.post('/db/defrag', async (_req, res) => {
     db = await SimpleDBMS.open(reopenedDbFile, reopenedWalFile);
 
     console.log(
-      `Database defragmented: ${result.sizeBefore} -> ${result.sizeAfter} bytes ` +
-        `(${result.blocksMoved} blocks moved, ${result.blocksFree} free blocks reclaimed)`,
+      `Database shrunk: ${result.sizeBefore} -> ${result.sizeAfter} bytes ` +
+        `(${result.blocksRelocated} blocks relocated, ${result.blocksFree} free blocks reclaimed)`,
     );
 
     res.json(result);
   } catch (error) {
-    console.error('Defrag error:', error);
+    console.error('Shrink error:', error);
     res.status(500).json({ success: false, error: (error as Error).message });
   }
 });

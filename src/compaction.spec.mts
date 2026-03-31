@@ -4,10 +4,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { SimpleDBMS } from './simpledbms.mjs';
 import { MockFile } from './file/mockfile.mjs';
-import { compactDatabase, defragDatabase } from './compaction.mjs';
+import { compactDatabase, shrinkDatabase } from './compaction.mjs';
 import { FBNodeStorage } from './node-storage/fb-node-storage.mjs';
 
-describe('Database Compaction & Defragmentation', () => {
+describe('Database Compaction & Shrink', () => {
   let dbFile: MockFile;
   let walFile: MockFile;
 
@@ -324,15 +324,15 @@ describe('Database Compaction & Defragmentation', () => {
     });
   });
 
-  describe('defragDatabase', () => {
+  describe('shrinkDatabase', () => {
     it('should be a no-op on an empty database', async () => {
       const db = await SimpleDBMS.create(dbFile, walFile);
       const fbf = db.getFreeBlockFile();
 
-      const result = await defragDatabase(fbf);
+      const result = await shrinkDatabase(fbf);
 
       expect(result.success).toBe(true);
-      expect(result.blocksMoved).toBe(0);
+      expect(result.blocksRelocated).toBe(0);
 
       await db.close();
     });
@@ -343,7 +343,7 @@ describe('Database Compaction & Defragmentation', () => {
       await users.insert({ id: 'u1', name: 'Alice' });
 
       const fbf = db.getFreeBlockFile();
-      const result = await defragDatabase(fbf);
+      const result = await shrinkDatabase(fbf);
 
       expect(result.success).toBe(true);
 
@@ -374,7 +374,7 @@ describe('Database Compaction & Defragmentation', () => {
       const sizeBefore = (await dbFile.stat()).size;
       const fbf = db.getFreeBlockFile();
 
-      const result = await defragDatabase(fbf);
+      const result = await shrinkDatabase(fbf);
 
       expect(result.success).toBe(true);
       expect(result.sizeAfter).toBeLessThan(sizeBefore);
@@ -397,7 +397,7 @@ describe('Database Compaction & Defragmentation', () => {
       await db.close();
     });
 
-    it('should preserve multiple collections after defrag', async () => {
+    it('should preserve multiple collections after shrink', async () => {
       let db = await SimpleDBMS.create(dbFile, walFile);
 
       const users = await db.getCollection('users');
@@ -413,7 +413,7 @@ describe('Database Compaction & Defragmentation', () => {
       await posts.delete('p2');
 
       const fbf = db.getFreeBlockFile();
-      const result = await defragDatabase(fbf);
+      const result = await shrinkDatabase(fbf);
       expect(result.success).toBe(true);
 
       // Close and reopen
@@ -431,7 +431,7 @@ describe('Database Compaction & Defragmentation', () => {
       await db.close();
     });
 
-    it('should preserve secondary indexes after defrag', async () => {
+    it('should preserve secondary indexes after shrink', async () => {
       let db = await SimpleDBMS.create(dbFile, walFile);
       const users = await db.getCollection('users');
 
@@ -454,7 +454,7 @@ describe('Database Compaction & Defragmentation', () => {
       }
 
       const fbf = db.getFreeBlockFile();
-      const result = await defragDatabase(fbf);
+      const result = await shrinkDatabase(fbf);
       expect(result.success).toBe(true);
 
       // Close and reopen
@@ -474,7 +474,7 @@ describe('Database Compaction & Defragmentation', () => {
       await db.close();
     });
 
-    it('should persist data across close/reopen after defrag', async () => {
+    it('should persist data across close/reopen after shrink', async () => {
       let db = await SimpleDBMS.create(dbFile, walFile);
       const users = await db.getCollection('users');
       await users.insert({ id: 'u1', name: 'Alice' });
@@ -485,7 +485,7 @@ describe('Database Compaction & Defragmentation', () => {
       await users.delete('u2');
 
       const fbf = db.getFreeBlockFile();
-      await defragDatabase(fbf);
+      await shrinkDatabase(fbf);
 
       await db.close();
 
@@ -502,7 +502,7 @@ describe('Database Compaction & Defragmentation', () => {
       await db.close();
     });
 
-    it('should allow normal operations after defrag', async () => {
+    it('should allow normal operations after shrink', async () => {
       let db = await SimpleDBMS.create(dbFile, walFile);
       const users = await db.getCollection('users');
       await users.insert({ id: 'u1', name: 'Alice' });
@@ -512,9 +512,9 @@ describe('Database Compaction & Defragmentation', () => {
       await users.delete('u2');
 
       const fbf = db.getFreeBlockFile();
-      await defragDatabase(fbf);
+      await shrinkDatabase(fbf);
 
-      // Close and reopen (required after defrag)
+      // Close and reopen (required after shrink)
       await db.close();
       db = await SimpleDBMS.open(dbFile, walFile);
 

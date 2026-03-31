@@ -1,7 +1,7 @@
 // @author Wout Van Hemelrijck
 // @date 2026-02-24
 //
-// Database compaction & defragmentation module.
+// Database compaction & space reclamation module.
 //
 // Two strategies for reclaiming wasted space:
 //
@@ -10,14 +10,15 @@
 //    from old DB → new DB (O(1) memory), recreates secondary indexes, then
 //    swaps temp files into the original location. Requires 2× disk space, so for 1TB DB, you need 1TB free to compact. Safe and robust, suitable for large databases.
 //
-// 2. defragDatabase — In-place block defragmentation
-//    Moves live blocks into free slots at the raw block level, then truncates
-//    the file. Requires zero extra disk space. Works in 4 phases:
+// 2. shrinkDatabase — In-place space reclamation
+//    Reclaims unused and orphaned blocks by relocating live blocks into free
+//    slots, then truncating the file. Requires zero extra disk space. Works
+//    in 4 phases:
 //    a) Build block map (walk free list + all B+ trees)
 //    b) Build relocation table (pair highest live blocks with lowest free slots)
 //    c) Execute relocations (rewrite block ID references, stage, commit atomically)
 //    d) Truncate file
-//    The database must be closed and reopened after defrag.
+//    The database must be closed and reopened after shrinking.
 
 import { SimpleDBMS } from './simpledbms.mjs';
 import { FBNodeStorage } from './node-storage/fb-node-storage.mjs';
@@ -136,22 +137,18 @@ export async function compactDatabase(
         const newCollection = await newDb.getCollection(meta.name);
 
         // Stream documents one at a time — O(1) memory
-        if (oldCollection && typeof oldCollection.entries === 'function') {
-          for await (const { value: doc } of oldCollection.entries()) {
-            await newCollection.insert(doc);
-            totalDocuments++;
-          }
+        for await (const { value: doc } of oldCollection.entries()) {
+          await newCollection.insert(doc);
+          totalDocuments++;
         }
 
         // Recreate secondary indexes (createIndex already streams internally)
         for (const field of meta.indexedFields) {
-          const blockSize = newDb.getFreeBlockFile().blockSize;
-          const pageSize = () => newDb!.getFreeBlockFile().payloadSize;
           const indexStorage = new FBNodeStorage<string, string>(
             (a, b) => (a < b ? -1 : a > b ? 1 : 0),
-            pageSize,
+            () => 1024,
             newDb.getFreeBlockFile(),
-            blockSize,
+            4096,
           );
           await newCollection.createIndex(field, indexStorage);
         }
@@ -205,13 +202,11 @@ export async function compactDatabase(
         }
 
         for (const field of meta.indexedFields) {
-          const blockSize = newDb.getFreeBlockFile().blockSize;
-          const pageSize = () => newDb!.getFreeBlockFile().payloadSize;
           const indexStorage = new FBNodeStorage<string, string>(
             (a, b) => (a < b ? -1 : a > b ? 1 : 0),
-            pageSize,
+            () => 1024,
             newDb.getFreeBlockFile(),
-            blockSize,
+            4096,
           );
           await newCollection.createIndex(field, indexStorage);
         }
@@ -261,13 +256,13 @@ export async function compactDatabase(
 }
 
 /**
- * Result returned after a defragmentation operation.
+ * Result returned after a shrink (space reclamation) operation.
  */
-export interface DefragResult {
+export interface ShrinkResult {
   success: boolean;
   blocksTotal: number;
   blocksFree: number;
-  blocksMoved: number;
+  blocksRelocated: number;
   sizeBefore: number;
   sizeAfter: number;
 }
@@ -287,16 +282,17 @@ interface BlobInfo {
 }
 
 /**
- * Defragments a database file in-place by moving live blocks into free slots
- * and truncating the file. Requires zero extra disk space.
+ * Shrinks a database file in-place by reclaiming free and orphaned blocks.
+ * Relocates live blocks into free slots at lower offsets, then truncates the
+ * file. Requires zero extra disk space.
  *
  * The database must be closed and reopened after this function returns,
  * because in-memory caches hold stale block IDs.
  *
- * @param {FreeBlockFile} fbf - The open FreeBlockFile to defragment.
- * @returns {Promise<DefragResult>} Statistics about the defragmentation.
+ * @param {FreeBlockFile} fbf - The open FreeBlockFile to shrink.
+ * @returns {Promise<ShrinkResult>} Statistics about the shrink operation.
  */
-export async function defragDatabase(fbf: FreeBlockFile): Promise<DefragResult> {
+export async function shrinkDatabase(fbf: FreeBlockFile): Promise<ShrinkResult> {
   const blockSize = fbf.blockSize;
   const payloadSize = fbf.payloadSize;
   const totalBlocks = await fbf.getTotalBlockCount();
@@ -309,7 +305,7 @@ export async function defragDatabase(fbf: FreeBlockFile): Promise<DefragResult> 
       success: true,
       blocksTotal: totalBlocks,
       blocksFree: 0,
-      blocksMoved: 0,
+      blocksRelocated: 0,
       sizeBefore,
       sizeAfter: sizeBefore,
     };
@@ -317,7 +313,8 @@ export async function defragDatabase(fbf: FreeBlockFile): Promise<DefragResult> 
 
   // ── Phase 1: Build Block Map ──────────────────────────────────────────
 
-  // Track which blocks are free vs live
+  // Track block status: FREE (on free list), LIVE (reachable from a tree),
+  // or undefined (not yet classified — will be treated as orphaned → FREE).
   const blockStatus = new Array<'FREE' | 'LIVE' | undefined>(totalBlocks);
   const freeBlockIds = new Set<number>();
   const blobInfos: BlobInfo[] = [];
@@ -338,7 +335,7 @@ export async function defragDatabase(fbf: FreeBlockFile): Promise<DefragResult> 
       success: true,
       blocksTotal: totalBlocks,
       blocksFree: freeBlockIds.size,
-      blocksMoved: 0,
+      blocksRelocated: 0,
       sizeBefore,
       sizeAfter: sizeBefore,
     };
@@ -452,7 +449,7 @@ export async function defragDatabase(fbf: FreeBlockFile): Promise<DefragResult> 
       success: true,
       blocksTotal: totalBlocks,
       blocksFree: 0,
-      blocksMoved: 0,
+      blocksRelocated: 0,
       sizeBefore,
       sizeAfter: sizeBefore,
     };
@@ -460,22 +457,22 @@ export async function defragDatabase(fbf: FreeBlockFile): Promise<DefragResult> 
 
   // ── Phase 2: Build Relocation Table ───────────────────────────────────
 
-  const freeSorted = [...freeBlockIds].sort((a, b) => a - b);
-  const liveSorted: number[] = [];
+  const freeSorted = [...freeBlockIds].sort((a, b) => a - b); // ASC
+  const liveSorted: number[] = []; // DESC (iterated high-to-low below)
   for (let i = totalBlocks - 1; i >= 1; i--) {
     if (blockStatus[i] === 'LIVE') liveSorted.push(i);
   }
 
   const relocationMap = new Map<number, number>();
-  let fi = 0;
-  let li = 0;
-  while (fi < freeSorted.length && li < liveSorted.length) {
-    const freeSlot = freeSorted[fi];
-    const liveBlock = liveSorted[li];
+  let freeIdx = 0;
+  let liveIdx = 0;
+  while (freeIdx < freeSorted.length && liveIdx < liveSorted.length) {
+    const freeSlot = freeSorted[freeIdx];
+    const liveBlock = liveSorted[liveIdx];
     if (liveBlock > freeSlot) {
       relocationMap.set(liveBlock, freeSlot);
-      fi++;
-      li++;
+      freeIdx++;
+      liveIdx++;
     } else {
       break;
     }
@@ -618,7 +615,7 @@ export async function defragDatabase(fbf: FreeBlockFile): Promise<DefragResult> 
     success: true,
     blocksTotal: totalBlocks,
     blocksFree,
-    blocksMoved: relocationMap.size,
+    blocksRelocated: relocationMap.size,
     sizeBefore,
     sizeAfter: newFileSize,
   };

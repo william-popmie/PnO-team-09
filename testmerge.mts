@@ -5,14 +5,23 @@ import 'dotenv/config';
 import express from 'express';
 import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
+<<<<<<< src/simpledbmsd.ours.mts
 import { SimpleDBMS, type Document, type AggregateQuery, type FilterOperators } from './simpledbms.mjs';
+=======
+import cors from 'cors';
+import { EncryptionService } from './encryption-service.mjs';
 import { CompressionService, resolveCompressionAlgorithmFromEnvironment } from './compression/compression.mjs';
 import { deserializeCompressionEnvelope, serializeCompressionEnvelope } from './compression/envelope.mjs';
+import { SimpleDBMS, type DocumentValue } from './simpledbms.mjs';
+>>>>>>> src/simpledbmsd.theirs.mts
 import { RealFile } from './file/file.mjs';
 import { FBNodeStorage } from './node-storage/fb-node-storage.mjs';
 
 const app = express();
 const port = 3000;
+<<<<<<< src/simpledbmsd.ours.mts
+=======
+const passwordHasher = new PasswordHasher();
 const contentCompressionService = new CompressionService({
   algorithm: resolveCompressionAlgorithmFromEnvironment(),
 });
@@ -38,6 +47,11 @@ function decodeContentFromStorage(payload: Buffer): Record<string, unknown> {
   const decoded = contentCompressionService.decompress(compressed);
   return JSON.parse(decoded.toString()) as Record<string, unknown>;
 }
+
+// Initialize encryption service
+const masterKey = process.env['ENCRYPTION_KEY'] || EncryptionService.generateMasterKey();
+let encryptionService: EncryptionService;
+>>>>>>> src/simpledbmsd.theirs.mts
 
 app.use(express.json());
 
@@ -111,6 +125,132 @@ const swaggerOptions = {
 const swaggerSpec = swaggerJsdoc(swaggerOptions);
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
+<<<<<<< src/simpledbmsd.ours.mts
+=======
+let db: SimpleDBMS;
+
+/**
+ * Load dummy demo account data from JSON file
+ * This creates a demo user with pre-populated collections and documents
+ */
+async function loadDummyAccount() {
+  try {
+    const dummyDataPath = path.join(__dirname, '../data/dummy-account.json');
+
+    if (!existsSync(dummyDataPath)) {
+      console.log('No dummy-account.json found, skipping demo data initialization.');
+      return;
+    }
+
+    const dummyDataContent = await readFile(dummyDataPath, 'utf-8');
+    const dummyData = JSON.parse(dummyDataContent) as {
+      username: string;
+      password: string;
+      collections: Array<{
+        name: string;
+        documents: Array<{
+          name: string;
+          content: Record<string, unknown>;
+        }>;
+      }>;
+    };
+
+    // Check if demo user already exists
+    const usersCollection = await db.getCollection('users');
+    const existingUsers = await usersCollection.find();
+    const demoUserExists = existingUsers.some((user) => {
+      const userData = user as unknown as { username: string };
+      return userData.username && userData.username.toLowerCase() === dummyData.username.toLowerCase();
+    });
+
+    if (demoUserExists) {
+      console.log('Demo user already exists, skipping initialization.');
+      return;
+    }
+
+    console.log('Creating demo account...');
+
+    // Hash the password
+    const hashedPassword = await passwordHasher.hashPassword(dummyData.password);
+
+    // Create collections list
+    const collectionNames = dummyData.collections.map((col) => col.name);
+
+    // Create the demo user
+    const demoUser = await usersCollection.insert({
+      username: dummyData.username,
+      password: hashedPassword,
+      collections: collectionNames,
+      createdAt: new Date().toISOString(),
+    });
+
+    console.log(`Demo user '${dummyData.username}' created with ID: ${demoUser.id}`);
+
+    // Create collections and insert documents
+    for (const collectionData of dummyData.collections) {
+      const collection = await db.getCollection(collectionData.name);
+      console.log(`  Creating collection: ${collectionData.name}`);
+
+      for (const docData of collectionData.documents) {
+        // Compress then encrypt the document content
+        const encodedContent = encodeContentForStorage(docData.content);
+        const encryptedBuffer = encryptionService.encrypt(encodedContent);
+
+        await collection.insert({
+          name: docData.name,
+          userId: demoUser.id,
+          createdAt: new Date().toISOString(),
+          content: encryptedBuffer.toString('base64') as unknown as Record<string, DocumentValue>,
+        });
+      }
+
+      console.log(`    Added ${collectionData.documents.length} documents to ${collectionData.name}`);
+    }
+
+    console.log(
+      `Demo account setup complete! Login with username: '${dummyData.username}' password: '${dummyData.password}'`,
+    );
+  } catch (error) {
+    console.error('Failed to load dummy account:', error);
+    // Don't throw - this is optional initialization
+  }
+}
+
+async function initDB(customDbPath?: string, customWalPath?: string) {
+  try {
+    const dbPath = customDbPath || process.argv[2] || 'mydb.db';
+    const walPath = customWalPath || process.argv[3] || 'mydb.wal';
+    const dbFile = new RealFile(dbPath);
+    const walFile = new RealFile(walPath);
+    let isNewDatabase = false;
+
+    try {
+      db = await SimpleDBMS.open(dbFile, walFile);
+      console.log('Database opened successfully.');
+    } catch {
+      console.log('Could not open existing database, creating new one...');
+      await dbFile.create();
+      await dbFile.close();
+      await walFile.create();
+      await walFile.close();
+      db = await SimpleDBMS.create(dbFile, walFile);
+      console.log('Database created successfully.');
+      isNewDatabase = true;
+    }
+
+    encryptionService = EncryptionService.fromHexKey(masterKey);
+
+    // Load dummy account data if this is a new database
+    if (isNewDatabase) {
+      await loadDummyAccount();
+    }
+  } catch (error) {
+    console.error('Failed to initialize database:', error);
+    throw error;
+  }
+}
+
+>>>>>>> src/simpledbmsd.theirs.mts
 /**
  * @swagger
  * /db:
@@ -151,11 +291,14 @@ app.get('/db', (_req, res) => {
  *         required: true
  *         schema:
  *           type: string
+<<<<<<< src/simpledbmsd.ours.mts
  *       - in: query
  *         name: filter
  *         schema:
  *           type: string
  *         description: 'JSON string for filter (e.g., {"age": {"$gt": 20}})'
+=======
+>>>>>>> src/simpledbmsd.theirs.mts
  *     responses:
  *       200:
  *         description: List of documents
@@ -203,7 +346,173 @@ app.get('/db/:collection', async (req, res) => {
 
 /**
  * @swagger
+<<<<<<< src/simpledbmsd.ours.mts
  * /db/{collection}/indexes:
+=======
+ * /db/{collection}/paged:
+ *   get:
+ *     summary: Find documents in a collection with keyset pagination
+ *     parameters:
+ *       - in: path
+ *         name: collection
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *         description: Maximum number of documents to return
+ *       - in: query
+ *         name: after
+ *         schema:
+ *           type: string
+ *         description: Cursor id; returns documents strictly after this id (keyset pagination)
+ *       - in: query
+ *         name: filterField
+ *         schema:
+ *           type: string
+ *         description: Field name for equality filter
+ *       - in: query
+ *         name: filterValue
+ *         schema:
+ *           type: string
+ *         description: Field value for equality filter
+ *       - in: query
+ *         name: sortField
+ *         schema:
+ *           type: string
+ *         description: Field name to sort by
+ *       - in: query
+ *         name: sortOrder
+ *         schema:
+ *           type: string
+ *           enum: [asc, desc]
+ *         description: Sort direction (defaults to asc)
+ *       - in: query
+ *         name: projection
+ *         schema:
+ *           type: string
+ *         description: Comma-separated list of fields to return
+ *     responses:
+ *       200:
+ *         description: Paged documents with metadata
+ */
+app.get('/db/:collection/paged', async (req, res) => {
+  try {
+    const parseQueryValue = (raw: string): DocumentValue => {
+      if (raw === 'null') return null;
+      if (raw === 'true') return true;
+      if (raw === 'false') return false;
+      const numeric = Number(raw);
+      if (!Number.isNaN(numeric) && raw.trim() !== '') return numeric;
+      try {
+        return JSON.parse(raw) as DocumentValue;
+      } catch {
+        return raw;
+      }
+    };
+
+    const collectionName = req.params.collection;
+    const collection = await db.getCollection(collectionName);
+    const rawLimit = req.query['limit'];
+    const rawAfter = req.query['after'];
+    const rawFilterField = req.query['filterField'];
+    const rawFilterValue = req.query['filterValue'];
+    const rawSortField = req.query['sortField'];
+    const rawSortOrder = req.query['sortOrder'];
+    const rawProjection = req.query['projection'];
+
+    const limit = typeof rawLimit === 'string' && rawLimit.length > 0 ? Number.parseInt(rawLimit, 10) : null;
+    const after = typeof rawAfter === 'string' && rawAfter.length > 0 ? rawAfter : null;
+    const filterField =
+      typeof rawFilterField === 'string' && rawFilterField.trim().length > 0 ? rawFilterField.trim() : null;
+    const filterValue = typeof rawFilterValue === 'string' ? parseQueryValue(rawFilterValue) : null;
+    const sortField = typeof rawSortField === 'string' && rawSortField.trim().length > 0 ? rawSortField.trim() : null;
+    const sortOrder: 'asc' | 'desc' = rawSortOrder === 'desc' ? 'desc' : 'asc';
+    const projection =
+      typeof rawProjection === 'string' && rawProjection.trim().length > 0
+        ? rawProjection
+            .split(',')
+            .map((field) => field.trim())
+            .filter((field) => field.length > 0)
+        : null;
+
+    if (limit !== null && (!Number.isInteger(limit) || limit < 1)) {
+      res.status(400).json({ error: 'Invalid limit. Expected integer >= 1.' });
+      return;
+    }
+
+    if (rawSortOrder !== undefined && rawSortOrder !== 'asc' && rawSortOrder !== 'desc') {
+      res.status(400).json({ error: "Invalid sortOrder. Expected 'asc' or 'desc'." });
+      return;
+    }
+
+    if (filterField !== null && rawFilterValue === undefined) {
+      res.status(400).json({ error: 'filterValue is required when filterField is provided.' });
+      return;
+    }
+
+    if (filterField === null && rawFilterValue !== undefined) {
+      res.status(400).json({ error: 'filterField is required when filterValue is provided.' });
+      return;
+    }
+
+    const resolvedLimit = limit ?? 25;
+    const hasQueryShaping = Boolean(filterField || sortField || projection);
+
+    let pagePlusOne: import('./simpledbms.mjs').Document[];
+    if (!hasQueryShaping) {
+      pagePlusOne = await collection.findPagedAfter(resolvedLimit + 1, after);
+    } else {
+      const query: import('./simpledbms.mjs').Query = {};
+
+      if (filterField !== null && filterValue !== null) {
+        query.filter = (doc) => doc[filterField] === filterValue;
+      }
+
+      if (sortField !== null) {
+        query.sort = { field: sortField, order: sortOrder };
+      }
+
+      if (projection !== null && projection.length > 0) {
+        query.projection = projection;
+      }
+
+      const shapedDocs = await collection.find(query);
+      const startIndex = after !== null ? Math.max(0, shapedDocs.findIndex((doc) => doc.id === after) + 1) : 0;
+      pagePlusOne = shapedDocs.slice(startIndex, startIndex + resolvedLimit + 1);
+    }
+
+    const hasNextPage = pagePlusOne.length > resolvedLimit;
+    const docs = hasNextPage ? pagePlusOne.slice(0, resolvedLimit) : pagePlusOne;
+    const nextCursor = hasNextPage ? (docs[docs.length - 1]?.id ?? null) : null;
+
+    res.json({
+      items: docs,
+      limit: resolvedLimit,
+      after: after ?? null,
+      mode: 'keyset',
+      query: {
+        filterField: filterField ?? null,
+        filterValue: rawFilterValue ?? null,
+        sortField: sortField ?? null,
+        sortOrder: sortField ? sortOrder : null,
+        projection: projection ?? null,
+      },
+      hasNextPage,
+      nextCursor,
+    });
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * @swagger
+ * /db/{collection}/{id}:
+>>>>>>> src/simpledbmsd.theirs.mts
  *   get:
  *     summary: List all indexes for a collection
  *     parameters:
@@ -639,6 +948,28 @@ app.put('/db/:collection/:id', async (req, res) => {
     } else {
       res.status(404).json({ error: 'Document not found' });
     }
+<<<<<<< src/simpledbmsd.ours.mts
+=======
+
+    // Compress then encrypt the document content before storing
+    const encodedContent = encodeContentForStorage(documentContent || {});
+    const encryptedBuffer = encryptionService.encrypt(encodedContent);
+
+    // Create the document in the collection with encrypted content
+    await collection.insert({
+      name: documentName,
+      userId: req.user!.userId,
+      createdAt: new Date().toISOString(),
+      content: encryptedBuffer.toString('base64') as unknown as Record<string, DocumentValue>,
+    });
+
+    const response = addTokenToResponse(req, {
+      success: true,
+      message: `Document '${documentName}' created successfully in collection '${collectionName}'`,
+    });
+
+    res.status(201).json(response);
+>>>>>>> src/simpledbmsd.theirs.mts
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
   }
@@ -706,14 +1037,71 @@ app.delete('/db/:collection/indexes/:field', async (req, res) => {
   try {
     const { collection: collectionName, field } = req.params;
     const collection = await db.getCollection(collectionName);
+<<<<<<< src/simpledbmsd.ours.mts
     await collection.dropIndex(field);
     res.json({ success: true, field, message: `Index dropped for field '${field}'` });
+=======
+    const allDocuments = await collection.find();
+
+    // Find the document by name and userId
+    const document = allDocuments.find((doc) => {
+      const docData = doc as unknown as { name?: string; userId?: string };
+      return docData.name === documentName && docData.userId === req.user!.userId;
+    });
+
+    if (!document) {
+      res.status(404).json({ success: false, message: 'Document not found' });
+      return;
+    }
+
+    // Extract and decrypt the content
+    const docData = document as unknown as { content?: string };
+    const encryptedContent = docData.content || '';
+
+    // Decrypt then decode the content
+    const decryptedBuffer = encryptionService.decrypt(Buffer.from(encryptedContent, 'base64'));
+    const documentContent = decodeContentFromStorage(decryptedBuffer);
+
+    const response = addTokenToResponse(req, {
+      success: true,
+      message: 'Document content fetched successfully',
+      documentContent,
+    });
+
+    res.json(response);
+>>>>>>> src/simpledbmsd.theirs.mts
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('Index does not exist')) {
       res.status(400).json({ error: error.message });
       return;
     }
+<<<<<<< src/simpledbmsd.ours.mts
     res.status(500).json({ error: (error as Error).message });
+=======
+
+    // Compress then encrypt the new content before storing
+    const encodedContent = encodeContentForStorage(newDocumentContent);
+    const encryptedBuffer = encryptionService.encrypt(encodedContent);
+
+    // Update the document content while preserving all system fields
+    const docData = document as unknown as { createdAt?: string };
+    await collection.update(document.id, {
+      name: documentName,
+      userId: req.user!.userId,
+      createdAt: docData.createdAt || new Date().toISOString(),
+      content: encryptedBuffer.toString('base64') as unknown as Record<string, DocumentValue>,
+    });
+
+    const response = addTokenToResponse(req, {
+      success: true,
+      message: `Document '${documentName}' updated successfully in collection '${collectionName}'`,
+    });
+
+    res.json(response);
+  } catch (error) {
+    console.error('Update document error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+>>>>>>> src/simpledbmsd.theirs.mts
   }
 });
 

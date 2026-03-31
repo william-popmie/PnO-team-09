@@ -1,18 +1,36 @@
 // @author Maarten Haine, Jari Daemen, William Ragnarsson, Wout Van Hemelrijck
+// also used Claude to help with debugging
 // @date 2025-11-22
 
 import 'dotenv/config';
 import express from 'express';
 import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
-import { SimpleDBMS, type Document, type AggregateQuery, type FilterOperators } from './simpledbms.mjs';
+import cors from 'cors';
+import { EncryptionService } from './encryption-service.mjs';
 import { CompressionService, resolveCompressionAlgorithmFromEnvironment } from './compression/compression.mjs';
 import { deserializeCompressionEnvelope, serializeCompressionEnvelope } from './compression/envelope.mjs';
+import { SimpleDBMS, type DocumentValue } from './simpledbms.mjs';
 import { RealFile } from './file/file.mjs';
-import { FBNodeStorage } from './node-storage/fb-node-storage.mjs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import {
+  authenticateToken,
+  addTokenToResponse,
+  generateToken,
+  validateAndRefreshToken,
+  type AuthenticatedRequest,
+} from './authentication.mjs';
+import { PasswordHasher } from './password-hashing.mjs';
+import { readFile } from 'fs/promises';
+import { existsSync } from 'fs';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const port = 3000;
+const passwordHasher = new PasswordHasher();
 const contentCompressionService = new CompressionService({
   algorithm: resolveCompressionAlgorithmFromEnvironment(),
 });
@@ -39,48 +57,21 @@ function decodeContentFromStorage(payload: Buffer): Record<string, unknown> {
   return JSON.parse(decoded.toString()) as Record<string, unknown>;
 }
 
+// Initialize encryption service
+const masterKey = process.env['ENCRYPTION_KEY'] || EncryptionService.generateMasterKey();
+let encryptionService: EncryptionService;
+
+app.use(cors());
 app.use(express.json());
+// Serve static frontend assets (HTML, CSS) from src, scripts from build
+app.use('/components', express.static(path.join(__dirname, '../src/frontend/components')));
+app.use('/styles', express.static(path.join(__dirname, '../src/frontend/styles')));
+app.use('/scripts', express.static(path.join(__dirname, 'frontend/scripts')));
 
-let db!: SimpleDBMS;
-
-async function initDB(
-  customDbPath?: string,
-  customWalPath?: string,
-  customHeapPath?: string,
-  customHeapWalPath?: string,
-) {
-  try {
-    const dbPath = customDbPath || process.argv[2] || 'mydb.db';
-    const walPath = customWalPath || process.argv[3] || 'mydb.wal';
-    const heapPath = customHeapPath || process.argv[4] || 'mydb-heap.db';
-    const heapWalPath = customHeapWalPath || process.argv[5] || 'mydb-heap.wal';
-
-    const dbFile = new RealFile(dbPath);
-    const walFile = new RealFile(walPath);
-    const heapFile = new RealFile(heapPath);
-    const heapWalFile = new RealFile(heapWalPath);
-
-    try {
-      db = await SimpleDBMS.open(dbFile, walFile, heapFile, heapWalFile);
-      console.log('Database opened successfully.');
-    } catch {
-      console.log('Could not open existing database, creating new one...');
-      await dbFile.create();
-      await dbFile.close();
-      await walFile.create();
-      await walFile.close();
-      await heapFile.create();
-      await heapFile.close();
-      await heapWalFile.create();
-      await heapWalFile.close();
-      db = await SimpleDBMS.create(dbFile, walFile, heapFile, heapWalFile);
-      console.log('Database created successfully.');
-    }
-  } catch (error) {
-    console.error('Failed to initialize database:', error);
-    throw error;
-  }
-}
+// Redirect root to the main webclient UI
+app.get('/', (_req, res) => {
+  res.redirect('/components/simpledbmswebclient.html');
+});
 
 const swaggerOptions = {
   definition: {
@@ -111,30 +102,161 @@ const swaggerOptions = {
 const swaggerSpec = swaggerJsdoc(swaggerOptions);
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
+let db: SimpleDBMS;
+
+/**
+ * Load dummy demo account data from JSON file
+ * This creates a demo user with pre-populated collections and documents
+ */
+async function loadDummyAccount() {
+  try {
+    const dummyDataPath = path.join(__dirname, '../data/dummy-account.json');
+
+    if (!existsSync(dummyDataPath)) {
+      console.log('No dummy-account.json found, skipping demo data initialization.');
+      return;
+    }
+
+    const dummyDataContent = await readFile(dummyDataPath, 'utf-8');
+    const dummyData = JSON.parse(dummyDataContent) as {
+      username: string;
+      password: string;
+      collections: Array<{
+        name: string;
+        documents: Array<{
+          name: string;
+          content: Record<string, unknown>;
+        }>;
+      }>;
+    };
+
+    // Check if demo user already exists
+    const usersCollection = await db.getCollection('users');
+    const existingUsers = await usersCollection.find();
+    const demoUserExists = existingUsers.some((user) => {
+      const userData = user as unknown as { username: string };
+      return userData.username && userData.username.toLowerCase() === dummyData.username.toLowerCase();
+    });
+
+    if (demoUserExists) {
+      console.log('Demo user already exists, skipping initialization.');
+      return;
+    }
+
+    console.log('Creating demo account...');
+
+    // Hash the password
+    const hashedPassword = await passwordHasher.hashPassword(dummyData.password);
+
+    // Create collections list
+    const collectionNames = dummyData.collections.map((col) => col.name);
+
+    // Create the demo user
+    const demoUser = await usersCollection.insert({
+      username: dummyData.username,
+      password: hashedPassword,
+      collections: collectionNames,
+      createdAt: new Date().toISOString(),
+    });
+
+    console.log(`Demo user '${dummyData.username}' created with ID: ${demoUser.id}`);
+
+    // Create collections and insert documents
+    for (const collectionData of dummyData.collections) {
+      const collection = await db.getCollection(collectionData.name);
+      console.log(`  Creating collection: ${collectionData.name}`);
+
+      for (const docData of collectionData.documents) {
+        // Compress then encrypt the document content
+        const encodedContent = encodeContentForStorage(docData.content);
+        const encryptedBuffer = encryptionService.encrypt(encodedContent);
+
+        await collection.insert({
+          name: docData.name,
+          userId: demoUser.id,
+          createdAt: new Date().toISOString(),
+          content: encryptedBuffer.toString('base64') as unknown as Record<string, DocumentValue>,
+        });
+      }
+
+      console.log(`    Added ${collectionData.documents.length} documents to ${collectionData.name}`);
+    }
+
+    console.log(
+      `Demo account setup complete! Login with username: '${dummyData.username}' password: '${dummyData.password}'`,
+    );
+  } catch (error) {
+    console.error('Failed to load dummy account:', error);
+    // Don't throw - this is optional initialization
+  }
+}
+
+async function initDB(customDbPath?: string, customWalPath?: string) {
+  try {
+    const dbPath = customDbPath || process.argv[2] || 'mydb.db';
+    const walPath = customWalPath || process.argv[3] || 'mydb.wal';
+    const dbFile = new RealFile(dbPath);
+    const walFile = new RealFile(walPath);
+    let isNewDatabase = false;
+
+    try {
+      db = await SimpleDBMS.open(dbFile, walFile);
+      console.log('Database opened successfully.');
+    } catch {
+      console.log('Could not open existing database, creating new one...');
+      await dbFile.create();
+      await dbFile.close();
+      await walFile.create();
+      await walFile.close();
+      db = await SimpleDBMS.create(dbFile, walFile);
+      console.log('Database created successfully.');
+      isNewDatabase = true;
+    }
+
+    encryptionService = EncryptionService.fromHexKey(masterKey);
+
+    // Load dummy account data if this is a new database
+    if (isNewDatabase) {
+      await loadDummyAccount();
+    }
+  } catch (error) {
+    console.error('Failed to initialize database:', error);
+    throw error;
+  }
+}
+
 /**
  * @swagger
- * /db:
- *   get:
- *     summary: List all collections in the database
+ * /db/{collection}:
+ *   post:
+ *     summary: Insert a document into a collection
+ *     parameters:
+ *       - in: path
+ *         name: collection
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
  *     responses:
- *       200:
- *         description: A list of collection names
+ *       201:
+ *         description: Created
  *         content:
  *           application/json:
  *             schema:
  *               type: object
- *               properties:
- *                 collections:
- *                   type: array
- *                   items:
- *                     type: string
- *               example:
- *                 collections: ["users", "products", "orders"]
  */
-app.get('/db', (_req, res) => {
+app.post('/db/:collection', async (req, res) => {
   try {
-    const collections = db.getCollectionNames();
-    res.json({ collections });
+    const collectionName = req.params.collection;
+    const doc = req.body as Omit<import('./simpledbms.mjs').Document, 'id'> & { id?: string };
+    const collection = await db.getCollection(collectionName);
+    const newDoc = await collection.insert(doc);
+    res.status(201).json(newDoc);
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
   }
@@ -151,11 +273,6 @@ app.get('/db', (_req, res) => {
  *         required: true
  *         schema:
  *           type: string
- *       - in: query
- *         name: filter
- *         schema:
- *           type: string
- *         description: 'JSON string for filter (e.g., {"age": {"$gt": 20}})'
  *     responses:
  *       200:
  *         description: List of documents
@@ -163,65 +280,171 @@ app.get('/db', (_req, res) => {
 app.get('/db/:collection', async (req, res) => {
   try {
     const collectionName = req.params.collection;
-    const filterQuery = req.query['filter'];
-    const limitQuery = req.query['limit'];
-    const skipQuery = req.query['skip'];
-    const sortFieldQuery = req.query['sortField'];
-    const sortOrderQuery = req.query['sortOrder'];
-
-    let filterOps: FilterOperators | undefined = undefined;
-    if (typeof filterQuery === 'string') {
-      try {
-        filterOps = JSON.parse(filterQuery) as FilterOperators;
-      } catch {
-        res.status(400).json({ error: 'Invalid JSON in filter query parameter' });
-        return;
-      }
-    }
-
-    let limit: number | undefined = undefined;
-    let skip: number | undefined = undefined;
-    if (typeof limitQuery === 'string') limit = parseInt(limitQuery, 10);
-    if (typeof skipQuery === 'string') skip = parseInt(skipQuery, 10);
-
-    let sort: { field: string; order: 'asc' | 'desc' } | undefined = undefined;
-    if (typeof sortFieldQuery === 'string') {
-      sort = { field: sortFieldQuery, order: sortOrderQuery === 'desc' ? 'desc' : 'asc' };
-    }
-
     const collection = await db.getCollection(collectionName);
-    const docs = await collection.find({ filterOps, limit, skip, sort });
+    const docs = await collection.find();
     res.json(docs);
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith('Comparison operators')) {
-      res.status(400).json({ error: error.message });
-      return;
-    }
     res.status(500).json({ error: (error as Error).message });
   }
 });
 
 /**
  * @swagger
- * /db/{collection}/indexes:
+ * /db/{collection}/paged:
  *   get:
- *     summary: List all indexes for a collection
+ *     summary: Find documents in a collection with keyset pagination
  *     parameters:
  *       - in: path
  *         name: collection
  *         required: true
  *         schema:
  *           type: string
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *         description: Maximum number of documents to return
+ *       - in: query
+ *         name: after
+ *         schema:
+ *           type: string
+ *         description: Cursor id; returns documents strictly after this id (keyset pagination)
+ *       - in: query
+ *         name: filterField
+ *         schema:
+ *           type: string
+ *         description: Field name for equality filter
+ *       - in: query
+ *         name: filterValue
+ *         schema:
+ *           type: string
+ *         description: Field value for equality filter
+ *       - in: query
+ *         name: sortField
+ *         schema:
+ *           type: string
+ *         description: Field name to sort by
+ *       - in: query
+ *         name: sortOrder
+ *         schema:
+ *           type: string
+ *           enum: [asc, desc]
+ *         description: Sort direction (defaults to asc)
+ *       - in: query
+ *         name: projection
+ *         schema:
+ *           type: string
+ *         description: Comma-separated list of fields to return
  *     responses:
  *       200:
- *         description: List of indexed fields
+ *         description: Paged documents with metadata
  */
-app.get('/db/:collection/indexes', async (req, res) => {
+app.get('/db/:collection/paged', async (req, res) => {
   try {
+    const parseQueryValue = (raw: string): DocumentValue => {
+      if (raw === 'null') return null;
+      if (raw === 'true') return true;
+      if (raw === 'false') return false;
+      const numeric = Number(raw);
+      if (!Number.isNaN(numeric) && raw.trim() !== '') return numeric;
+      try {
+        return JSON.parse(raw) as DocumentValue;
+      } catch {
+        return raw;
+      }
+    };
+
     const collectionName = req.params.collection;
     const collection = await db.getCollection(collectionName);
-    const indexes = collection.getIndexedFields();
-    res.json({ indexes });
+    const rawLimit = req.query['limit'];
+    const rawAfter = req.query['after'];
+    const rawFilterField = req.query['filterField'];
+    const rawFilterValue = req.query['filterValue'];
+    const rawSortField = req.query['sortField'];
+    const rawSortOrder = req.query['sortOrder'];
+    const rawProjection = req.query['projection'];
+
+    const limit = typeof rawLimit === 'string' && rawLimit.length > 0 ? Number.parseInt(rawLimit, 10) : null;
+    const after = typeof rawAfter === 'string' && rawAfter.length > 0 ? rawAfter : null;
+    const filterField =
+      typeof rawFilterField === 'string' && rawFilterField.trim().length > 0 ? rawFilterField.trim() : null;
+    const filterValue = typeof rawFilterValue === 'string' ? parseQueryValue(rawFilterValue) : null;
+    const sortField = typeof rawSortField === 'string' && rawSortField.trim().length > 0 ? rawSortField.trim() : null;
+    const sortOrder: 'asc' | 'desc' = rawSortOrder === 'desc' ? 'desc' : 'asc';
+    const projection =
+      typeof rawProjection === 'string' && rawProjection.trim().length > 0
+        ? rawProjection
+            .split(',')
+            .map((field) => field.trim())
+            .filter((field) => field.length > 0)
+        : null;
+
+    if (limit !== null && (!Number.isInteger(limit) || limit < 1)) {
+      res.status(400).json({ error: 'Invalid limit. Expected integer >= 1.' });
+      return;
+    }
+
+    if (rawSortOrder !== undefined && rawSortOrder !== 'asc' && rawSortOrder !== 'desc') {
+      res.status(400).json({ error: "Invalid sortOrder. Expected 'asc' or 'desc'." });
+      return;
+    }
+
+    if (filterField !== null && rawFilterValue === undefined) {
+      res.status(400).json({ error: 'filterValue is required when filterField is provided.' });
+      return;
+    }
+
+    if (filterField === null && rawFilterValue !== undefined) {
+      res.status(400).json({ error: 'filterField is required when filterValue is provided.' });
+      return;
+    }
+
+    const resolvedLimit = limit ?? 25;
+    const hasQueryShaping = Boolean(filterField || sortField || projection);
+
+    let pagePlusOne: import('./simpledbms.mjs').Document[];
+    if (!hasQueryShaping) {
+      pagePlusOne = await collection.findPagedAfter(resolvedLimit + 1, after);
+    } else {
+      const query: import('./simpledbms.mjs').Query = {};
+
+      if (filterField !== null && filterValue !== null) {
+        query.filter = (doc) => doc[filterField] === filterValue;
+      }
+
+      if (sortField !== null) {
+        query.sort = { field: sortField, order: sortOrder };
+      }
+
+      if (projection !== null && projection.length > 0) {
+        query.projection = projection;
+      }
+
+      const shapedDocs = await collection.find(query);
+      const startIndex = after !== null ? Math.max(0, shapedDocs.findIndex((doc) => doc.id === after) + 1) : 0;
+      pagePlusOne = shapedDocs.slice(startIndex, startIndex + resolvedLimit + 1);
+    }
+
+    const hasNextPage = pagePlusOne.length > resolvedLimit;
+    const docs = hasNextPage ? pagePlusOne.slice(0, resolvedLimit) : pagePlusOne;
+    const nextCursor = hasNextPage ? (docs[docs.length - 1]?.id ?? null) : null;
+
+    res.json({
+      items: docs,
+      limit: resolvedLimit,
+      after: after ?? null,
+      mode: 'keyset',
+      query: {
+        filterField: filterField ?? null,
+        filterValue: rawFilterValue ?? null,
+        sortField: sortField ?? null,
+        sortOrder: sortField ? sortOrder : null,
+        projection: projection ?? null,
+      },
+      hasNextPage,
+      nextCursor,
+    });
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
   }
@@ -267,337 +490,6 @@ app.get('/db/:collection/:id', async (req, res) => {
 
 /**
  * @swagger
- * /db:
- *   post:
- *     summary: Create a new collection
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - name
- *             properties:
- *               name:
- *                 type: string
- *                 description: The name of the new collection
- *             example:
- *               name: "new_collection"
- *     responses:
- *       201:
- *         description: Collection created successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 message:
- *                   type: string
- *                 collection:
- *                   type: string
- *               example:
- *                 message: "Collection 'new_collection' created"
- *                 collection: "new_collection"
- *       400:
- *         description: Bad request (missing name)
- */
-app.post('/db', async (req, res) => {
-  try {
-    const { name } = req.body as { name?: string };
-    if (!name || typeof name !== 'string') {
-      res.status(400).json({ error: 'Collection name is required and must be a string' });
-      return;
-    }
-
-    // Checking if it already exists to avoid silently overwriting (though getCollection should be able to handle this, just tob e sure)
-    const existingCollections = db.getCollectionNames();
-    if (existingCollections.includes(name)) {
-      res.status(400).json({ error: `Collection '${name}' already exists` });
-      return;
-    }
-    await db.createCollection(name);
-
-    res.status(201).json({ message: `Collection '${name}' created`, collection: name });
-  } catch (error) {
-    res.status(500).json({ error: (error as Error).message });
-  }
-});
-
-/**
- * @swagger
- * /db/{collection}:
- *   post:
- *     summary: Insert a document into a collection
- *     parameters:
- *       - in: path
- *         name: collection
- *         required: true
- *         schema:
- *           type: string
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             example:
- *               name: "John Doe"
- *               age: 25
- *               isActive: true
- *     responses:
- *       201:
- *         description: Created
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- */
-app.post('/db/:collection', async (req, res) => {
-  try {
-    const collectionName = req.params.collection;
-    const doc = req.body as Omit<Document, 'id'> & { id?: string };
-    const collection = await db.getCollection(collectionName);
-    const newDoc = await collection.insert(doc);
-    res.status(201).json(newDoc);
-  } catch (error) {
-    res.status(500).json({ error: (error as Error).message });
-  }
-});
-
-/**
- * @swagger
- * /db/{collection}/indexes/{field}:
- *   post:
- *     summary: Create an index on a field
- *     parameters:
- *       - in: path
- *         name: collection
- *         required: true
- *         schema:
- *           type: string
- *       - in: path
- *         name: field
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       201:
- *         description: Index created
- */
-app.post('/db/:collection/indexes/:field', async (req, res) => {
-  try {
-    const collectionName = req.params.collection;
-    const field = req.params.field;
-    const collection = await db.getCollection(collectionName);
-
-    // Create storage for the index
-    const indexStorage = new FBNodeStorage<string, number>(
-      (a, b) => (a < b ? -1 : a > b ? 1 : 0),
-      () => 1024,
-      db.getFreeBlockFile(),
-      4096,
-    );
-
-    await collection.createIndex(field, indexStorage);
-    res.status(201).json({ success: true, field, message: `Index created on field '${field}'` });
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      (error.message.startsWith('Index already exists') || error.message.startsWith('Field'))
-    ) {
-      res.status(400).json({ error: error.message });
-      return;
-    }
-    res.status(500).json({ error: (error as Error).message });
-  }
-});
-
-/**
- * @swagger
- * /db/{collection}/aggregate:
- *   post:
- *     summary: Perform aggregation on a collection
- *     parameters:
- *       - in: path
- *         name: collection
- *         required: true
- *         schema:
- *           type: string
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             example:
- *               groupBy: "category"
- *               operations:
- *                 count: "totalProducts"
- *                 avg:
- *                   - field: "price"
- *                     as: "averagePrice"
- *                 max:
- *                   - field: "price"
- *                     as: "highestPrice"
- *                 sum:
- *                   - field: "stockQuantity"
- *                     as: "totalStock"
- *     responses:
- *       200:
- *         description: Aggregation results
- */
-app.post('/db/:collection/aggregate', async (req, res) => {
-  try {
-    const collectionName = req.params.collection;
-    const body = req.body as { groupBy?: string | null; operations: AggregateQuery['operations'] };
-    const { groupBy, operations } = body;
-
-    if (!operations) {
-      res.status(400).json({ error: 'operations are required' });
-      return;
-    }
-
-    const collection = await db.getCollection(collectionName);
-    const results = await collection.aggregate({ groupBy, operations });
-    res.json(results);
-  } catch (error) {
-    res.status(500).json({ error: (error as Error).message });
-  }
-});
-
-/**
- * @swagger
- * /db/{collection}/bulk:
- *   post:
- *     summary: Perform bulk operations
- *     parameters:
- *       - in: path
- *         name: collection
- *         required: true
- *         schema:
- *           type: string
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             example:
- *               operations:
- *                 - type: "insert"
- *                   document:
- *                     name: "Alice"
- *                     age: 30
- *                 - type: "update"
- *                   id: "123e4567-e89b-12d3-a456-426614174000"
- *                   updates:
- *                     age: 31
- *                 - type: "delete"
- *                   id: "987fcdeb-51a2-43d7-9012-3456789abcde"
- *     responses:
- *       200:
- *         description: Bulk operation results
- */
-app.post('/db/:collection/bulk', async (req, res) => {
-  try {
-    const collectionName = req.params.collection;
-    const body = req.body as { operations?: unknown[] };
-    const { operations } = body;
-
-    if (!operations || !Array.isArray(operations)) {
-      res.status(400).json({ error: 'operations array is required' });
-      return;
-    }
-
-    const collection = await db.getCollection(collectionName);
-    const results: Array<{
-      success: boolean;
-      type?: string;
-      id?: string;
-      found?: boolean;
-      deleted?: boolean;
-      error?: string;
-    }> = [];
-
-    for (const op of operations) {
-      try {
-        const operation = op as { type: string; document?: unknown; id?: string; updates?: unknown };
-        if (operation.type === 'insert') {
-          const doc = await collection.insert(operation.document as Omit<Document, 'id'> & { id?: string });
-          results.push({ success: true, type: 'insert', id: doc.id });
-        } else if (operation.type === 'update') {
-          const doc = await collection.update(operation.id as string, operation.updates as Partial<Document>);
-          results.push({ success: true, type: 'update', id: operation.id, found: !!doc });
-        } else if (operation.type === 'delete') {
-          const deleted = await collection.delete(operation.id as string);
-          results.push({ success: true, type: 'delete', id: operation.id, deleted });
-        } else {
-          results.push({ success: false, error: `Unknown operation type: ${operation.type}` });
-        }
-      } catch (error) {
-        results.push({ success: false, error: (error as Error).message });
-      }
-    }
-
-    res.json({ results });
-  } catch (error) {
-    res.status(500).json({ error: (error as Error).message });
-  }
-});
-
-/**
- * @swagger
- * /db/{collection}/join:
- *   post:
- *     summary: Join two collections on a common field
- *     parameters:
- *       - in: path
- *         name: collection
- *         required: true
- *         schema:
- *           type: string
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             example:
- *               collection: "departments"
- *               on: "departmentId"
- *               rightOn: "id"
- *     responses:
- *       200:
- *         description: Join results
- */
-app.post('/db/:collection/join', async (req, res) => {
-  try {
-    const leftCollection = req.params.collection;
-    const body = req.body as { collection?: string; on?: string; rightOn?: string; type?: 'inner' | 'left' | 'right' };
-    const { collection: rightCollection, on, rightOn, type } = body;
-
-    if (!rightCollection || !on) {
-      res.status(400).json({ error: 'collection and on fields are required' });
-      return;
-    }
-
-    const results = await db.join({
-      leftCollection,
-      rightCollection,
-      on,
-      rightOn,
-      type: type || 'inner',
-    });
-
-    res.json(results);
-  } catch (error) {
-    res.status(500).json({ error: (error as Error).message });
-  }
-});
-
-/**
- * @swagger
  * /db/{collection}/{id}:
  *   put:
  *     summary: Update a document
@@ -618,9 +510,6 @@ app.post('/db/:collection/join', async (req, res) => {
  *         application/json:
  *           schema:
  *             type: object
- *             example:
- *               age: 26
- *               isActive: false
  *     responses:
  *       200:
  *         description: Updated document
@@ -631,7 +520,7 @@ app.put('/db/:collection/:id', async (req, res) => {
   try {
     const collectionName = req.params.collection;
     const id = req.params.id;
-    const updates = req.body as Partial<Document>;
+    const updates = req.body as Partial<import('./simpledbms.mjs').Document>;
     const collection = await db.getCollection(collectionName);
     const updated = await collection.update(id, updates);
     if (updated) {
@@ -684,6 +573,74 @@ app.delete('/db/:collection/:id', async (req, res) => {
 
 /**
  * @swagger
+ * /db/{collection}/indexes:
+ *   get:
+ *     summary: List all indexes for a collection
+ *     parameters:
+ *       - in: path
+ *         name: collection
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: List of indexed fields
+ */
+app.get('/db/:collection/indexes', async (req, res) => {
+  try {
+    const collectionName = req.params.collection;
+    const collection = await db.getCollection(collectionName);
+    const indexes = collection.getIndexedFields();
+    res.json({ indexes });
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * @swagger
+ * /db/{collection}/indexes/{field}:
+ *   post:
+ *     summary: Create an index on a field
+ *     parameters:
+ *       - in: path
+ *         name: collection
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: field
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       201:
+ *         description: Index created
+ */
+app.post('/db/:collection/indexes/:field', async (req, res) => {
+  try {
+    const collectionName = req.params.collection;
+    const field = req.params.field;
+    const collection = await db.getCollection(collectionName);
+
+    // Create storage for the index
+    const { FBNodeStorage } = await import('./node-storage/fb-node-storage.mjs');
+    const indexStorage = new FBNodeStorage<string, string>(
+      (a, b) => (a < b ? -1 : a > b ? 1 : 0),
+      () => 1024,
+      db.getFreeBlockFile(),
+      4096,
+    );
+
+    await collection.createIndex(field, indexStorage);
+    res.status(201).json({ success: true, field, message: `Index created on field '${field}'` });
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * @swagger
  * /db/{collection}/indexes/{field}:
  *   delete:
  *     summary: Drop an index from a field
@@ -704,16 +661,943 @@ app.delete('/db/:collection/:id', async (req, res) => {
  */
 app.delete('/db/:collection/indexes/:field', async (req, res) => {
   try {
-    const { collection: collectionName, field } = req.params;
+    const collectionName = req.params.collection;
+    const field = req.params.field;
     const collection = await db.getCollection(collectionName);
     await collection.dropIndex(field);
-    res.json({ success: true, field, message: `Index dropped for field '${field}'` });
+    res.json({ success: true, field, message: `Index dropped from field '${field}'` });
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith('Index does not exist')) {
-      res.status(400).json({ error: error.message });
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * @swagger
+ * /db/{collection}/aggregate:
+ *   post:
+ *     summary: Perform aggregation on a collection
+ *     parameters:
+ *       - in: path
+ *         name: collection
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *     responses:
+ *       200:
+ *         description: Aggregation results
+ */
+app.post('/db/:collection/aggregate', async (req, res) => {
+  try {
+    const collectionName = req.params.collection;
+    const body = req.body as { groupBy?: string; operations?: import('./simpledbms.mjs').AggregateQuery['operations'] };
+    const { groupBy, operations } = body;
+
+    if (!groupBy || !operations) {
+      res.status(400).json({ error: 'groupBy and operations are required' });
       return;
     }
+
+    const collection = await db.getCollection(collectionName);
+    const results = await collection.aggregate({ groupBy, operations });
+    res.json(results);
+  } catch (error) {
     res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * @swagger
+ * /db/{collection}/bulk:
+ *   post:
+ *     summary: Perform bulk operations
+ *     parameters:
+ *       - in: path
+ *         name: collection
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *     responses:
+ *       200:
+ *         description: Bulk operation results
+ */
+app.post('/db/:collection/bulk', async (req, res) => {
+  try {
+    const collectionName = req.params.collection;
+    const body = req.body as { operations?: unknown[] };
+    const { operations } = body;
+
+    if (!operations || !Array.isArray(operations)) {
+      res.status(400).json({ error: 'operations array is required' });
+      return;
+    }
+
+    const collection = await db.getCollection(collectionName);
+    const results: Array<{
+      success: boolean;
+      type?: string;
+      id?: string;
+      found?: boolean;
+      deleted?: boolean;
+      error?: string;
+    }> = [];
+
+    for (const op of operations) {
+      try {
+        const operation = op as { type: string; document?: unknown; id?: string; updates?: unknown };
+        if (operation.type === 'insert') {
+          const doc = await collection.insert(
+            operation.document as Omit<import('./simpledbms.mjs').Document, 'id'> & { id?: string },
+          );
+          results.push({ success: true, type: 'insert', id: doc.id });
+        } else if (operation.type === 'update') {
+          const doc = await collection.update(
+            operation.id as string,
+            operation.updates as Partial<import('./simpledbms.mjs').Document>,
+          );
+          results.push({ success: true, type: 'update', id: operation.id, found: !!doc });
+        } else if (operation.type === 'delete') {
+          const deleted = await collection.delete(operation.id as string);
+          results.push({ success: true, type: 'delete', id: operation.id, deleted });
+        } else {
+          results.push({ success: false, error: `Unknown operation type: ${operation.type}` });
+        }
+      } catch (error) {
+        results.push({ success: false, error: (error as Error).message });
+      }
+    }
+
+    res.json({ results });
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * @swagger
+ * /db/{collection}/join:
+ *   post:
+ *     summary: Join two collections on a common field
+ *     parameters:
+ *       - in: path
+ *         name: collection
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *     responses:
+ *       200:
+ *         description: Join results
+ */
+app.post('/db/:collection/join', async (req, res) => {
+  try {
+    const leftCollection = req.params.collection;
+    const body = req.body as { collection?: string; on?: string; type?: 'inner' | 'left' | 'right' };
+    const { collection: rightCollection, on, type } = body;
+
+    if (!rightCollection || !on) {
+      res.status(400).json({ error: 'collection and on fields are required' });
+      return;
+    }
+
+    const results = await db.join({
+      leftCollection,
+      rightCollection,
+      on,
+      type: type || 'inner',
+    });
+
+    res.json(results);
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * William Ragnarsson
+ * Frontend webapp routing endpoints
+ * Note: These endpoints are not included in public API documentation for security reasons
+ */
+
+/**
+ * POST /api/signup
+ * Register a new user account
+ * @param {string} username - The desired username
+ * @param {string} password - The user's password (TODO: should be hashed)
+ * @returns {object} { success: boolean, message: string, token: string }
+ */
+app.post('/api/signup', async (req, res) => {
+  try {
+    const { username, password } = req.body as { username?: string; password?: string };
+
+    // Validate input
+    if (!username || !password) {
+      res.status(400).json({ success: false, message: 'Username and password are required' });
+      return;
+    }
+
+    // Get users collection (this internally uses db.getCollection())
+    const usersCollection = await db.getCollection('users');
+
+    // Check if user already exists
+    const existingUsers = await usersCollection.find();
+    const userExists = existingUsers.some((user) => {
+      const userData = user as unknown as { username: string };
+      return userData.username && userData.username.toLowerCase() === username.toLowerCase();
+    });
+
+    if (userExists) {
+      res.status(400).json({ success: false, message: 'Username already exists' });
+      return;
+    }
+
+    // Hash the password before storing
+    const hashedPassword = await passwordHasher.hashPassword(password);
+
+    // Create new user (this internally calls collection.insert())
+    const newUser = await usersCollection.insert({
+      username,
+      password: hashedPassword,
+      collections: [],
+      createdAt: new Date().toISOString(),
+    });
+
+    // Create JWT token (expires in 30 minutes)
+    const token = generateToken(newUser.id, username);
+
+    res.status(201).json({
+      success: true,
+      message: 'User created successfully',
+      token,
+    });
+  } catch (error) {
+    console.error('Signup error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * POST /api/login
+ * Authenticate a user with credentials or validate an existing token
+ * @param {string} [username] - Username for credential-based login
+ * @param {string} [password] - Password for credential-based login
+ * @param {string} [token] - Existing JWT token for validation
+ * @returns {object} { success: boolean, message: string, token: string }
+ */
+app.post('/api/login', async (req, res) => {
+  try {
+    const {
+      username,
+      password,
+      token: existingToken,
+    } = req.body as {
+      username?: string;
+      password?: string;
+      token?: string;
+    };
+
+    // If token is provided, validate it for auto-login
+    if (existingToken) {
+      const validation = validateAndRefreshToken(existingToken);
+
+      if (validation.valid) {
+        res.json({
+          success: true,
+          message: 'Already authenticated',
+          token: validation.newToken || existingToken,
+        });
+        return;
+      }
+      // Token invalid or expired, fall through to username/password login
+    }
+
+    // Validate input
+    if (!username || !password) {
+      res.status(400).json({ success: false, message: 'Username and password are required' });
+      return;
+    }
+
+    // Get users collection
+    const usersCollection = await db.getCollection('users');
+    const users = await usersCollection.find();
+
+    // Find user
+    const user = users.find((u) => {
+      const userData = u as unknown as { username?: string };
+      return userData.username && userData.username.toLowerCase() === username.toLowerCase();
+    }) as { id: string; username: string; password: string } | undefined;
+
+    if (!user) {
+      res.status(401).json({ success: false, message: 'Invalid username or password' });
+      return;
+    }
+
+    // Verify the password against the stored hash
+    const isPasswordValid = await passwordHasher.verifyPassword(password, user.password);
+
+    if (!isPasswordValid) {
+      res.status(401).json({ success: false, message: 'Invalid username or password' });
+      return;
+    }
+
+    // Create JWT token
+    const token = generateToken(user.id, user.username);
+
+    res.json({
+      success: true,
+      message: 'Login successful',
+      token,
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * GET /api/getUserData
+ * Retrieve the authenticated user's personal data (GDPR compliance)
+ * @requires Authentication - Bearer token in Authorization header
+ * @returns {object} { success: boolean, message: string, userData: { userId: string, username: string, hashedPassword: string }, token?: string }
+ */
+app.get('/api/getUserData', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ success: false, message: 'User not authenticated' });
+      return;
+    }
+
+    const userId = req.user.userId;
+
+    // Get users collection
+    const usersCollection = await db.getCollection('users');
+
+    // Find user by ID
+    const user = await usersCollection.findById(userId);
+
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    // Extract user data
+    const userData = user as unknown as { id: string; username: string; password: string };
+
+    // Return user data (including hashed password for GDPR transparency)
+    const responseData = addTokenToResponse(req, {
+      success: true,
+      message: 'User data retrieved successfully',
+      userData: {
+        userId: userData.id,
+        username: userData.username,
+        hashedPassword: userData.password, // Show hashed password for transparency
+      },
+    });
+
+    res.json(responseData);
+  } catch (error) {
+    console.error('Get user data error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * GET /api/getAllUserData
+ * Retrieve all user data including collections and documents (GDPR data export)
+ * @requires Authentication - Bearer token in Authorization header
+ * @returns {object} Complete user data export including all collections and documents
+ */
+app.get('/api/getAllUserData', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ success: false, message: 'User not authenticated' });
+      return;
+    }
+
+    const userId = req.user.userId;
+
+    // Get users collection
+    const usersCollection = await db.getCollection('users');
+    const user = await usersCollection.findById(userId);
+
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    const userData = user as unknown as {
+      id: string;
+      username: string;
+      password: string;
+      collections?: string[];
+    };
+
+    // Build collections data structure
+    const collectionsData: Record<string, Array<Record<string, unknown>>> = {};
+
+    if (userData.collections && Array.isArray(userData.collections)) {
+      for (const collectionName of userData.collections) {
+        try {
+          const collection = await db.getCollection(collectionName);
+          const allDocs = await collection.find();
+
+          // Filter documents belonging to this user
+          const userDocs = allDocs.filter((doc) => {
+            const docData = doc as unknown as { userId?: string };
+            return docData.userId === userId;
+          });
+
+          collectionsData[collectionName] = userDocs as Array<Record<string, unknown>>;
+        } catch (error) {
+          console.error(`Error fetching collection ${collectionName}:`, error);
+          collectionsData[collectionName] = [];
+        }
+      }
+    }
+
+    // Build complete data export
+    const completeData = {
+      userId: userData.id,
+      username: userData.username,
+      password: userData.password,
+      collections: collectionsData,
+    };
+
+    res.json(completeData);
+  } catch (error) {
+    console.error('Get all user data error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * POST /api/createCollection
+ * Create a new collection for the authenticated user
+ * @requires Authentication - Bearer token in Authorization header
+ * @param {string} collectionName - Name of the collection to create
+ * @returns {object} { success: boolean, message: string, token?: string }
+ */
+app.post('/api/createCollection', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { collectionName } = req.body as { collectionName?: string };
+
+    if (!collectionName) {
+      res.status(400).json({ success: false, message: 'collectionName is required' });
+      return;
+    }
+
+    // Check if user already has this collection
+    const usersCollection = await db.getCollection('users');
+    const user = await usersCollection.findById(req.user!.userId);
+
+    if (user) {
+      const userData = user as unknown as { collections?: string[] };
+
+      // Initialize collections array if it doesn't exist
+      if (!userData.collections) {
+        userData.collections = [];
+      }
+
+      // Check if collection already exists for this user
+      if (userData.collections.includes(collectionName)) {
+        res.status(400).json({ success: false, message: 'Collection already exists' });
+        return;
+      }
+
+      // Create the collection and add to user's list
+      await db.getCollection(collectionName);
+      userData.collections.push(collectionName);
+      await usersCollection.update(req.user!.userId, { collections: userData.collections });
+    }
+
+    const response = addTokenToResponse(req, {
+      success: true,
+      message: `Collection created succesfully and assigned to: ${req.user!.username}`,
+    });
+
+    res.status(201).json(response);
+  } catch (error) {
+    console.error('Create collection error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * GET /api/fetchCollections
+ * Retrieve all collections owned by the authenticated user
+ * @requires Authentication - Bearer token in Authorization header
+ * @returns {object} { success: boolean, message: string, collections: string[], token?: string }
+ */
+app.get('/api/fetchCollections', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    // Get user's collections list
+    const usersCollection = await db.getCollection('users');
+    const user = await usersCollection.findById(req.user!.userId);
+
+    let collections: string[] = [];
+    if (user) {
+      const userData = user as unknown as { collections: string[] };
+      collections = userData.collections || null;
+    }
+
+    if (!collections) {
+      res.status(400).json({ success: false, message: 'Server error when fetching usercollections' });
+      return;
+    }
+
+    const response = addTokenToResponse(req, {
+      success: true,
+      message: 'collections fetched succesfully',
+      collections,
+    });
+
+    res.json(response);
+  } catch (error) {
+    console.error('Get collections error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * DELETE /api/deleteCollection
+ * Delete a collection from the authenticated user's account
+ * @requires Authentication - Bearer token in Authorization header
+ * @param {string} collectionName - Name of the collection to delete
+ * @returns {object} { success: boolean, message: string, token?: string }
+ */
+app.delete('/api/deleteCollection', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { collectionName } = req.body as { collectionName?: string };
+
+    if (!collectionName) {
+      res.status(400).json({ success: false, message: 'collectionName is required' });
+      return;
+    }
+
+    // Get user document
+    const usersCollection = await db.getCollection('users');
+    const user = await usersCollection.findById(req.user!.userId);
+
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    const userData = user as unknown as { collections: string[] };
+
+    // Check if collection exists in user's list
+    if (!userData.collections.includes(collectionName)) {
+      res.status(400).json({ success: false, message: 'Collection not found in user collections' });
+      return;
+    }
+
+    // Delete all documents in the collection that belong to this user
+    const collection = await db.getCollection(collectionName);
+    const allDocuments = await collection.find();
+
+    const userDocuments = allDocuments.filter((doc) => {
+      const docData = doc as unknown as { userId?: string };
+      return docData.userId === req.user!.userId;
+    });
+
+    // Delete each document
+    for (const doc of userDocuments) {
+      await collection.delete(doc.id);
+    }
+
+    console.log(
+      `Deleted ${userDocuments.length} documents from collection '${collectionName}' for user ${req.user!.userId}`,
+    );
+
+    // Remove collection from user's list
+    userData.collections = userData.collections.filter((name) => name !== collectionName);
+    await usersCollection.update(req.user!.userId, { collections: userData.collections });
+
+    const response = addTokenToResponse(req, {
+      success: true,
+      message: `Collection '${collectionName}' and ${userDocuments.length} associated document(s) deleted successfully`,
+    });
+
+    res.json(response);
+  } catch (error) {
+    console.error('Delete collection error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * POST /api/createDocument
+ * Create a new document in a collection for the authenticated user
+ * @requires Authentication - Bearer token in Authorization header
+ * @param {string} collectionName - Name of the collection
+ * @param {string} documentName - Name of the document (must be unique per user per collection)
+ * @param {object} documentContent - JSON object containing the document data
+ * @returns {object} { success: boolean, message: string, token?: string }
+ */
+app.post('/api/createDocument', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { collectionName, documentName, documentContent } = req.body as {
+      collectionName?: string;
+      documentName?: string;
+      documentContent?: Record<string, unknown>;
+    };
+
+    if (!collectionName || !documentName) {
+      res.status(400).json({ success: false, message: 'collectionName and documentName are required' });
+      return;
+    }
+
+    // Verify user has access to this collection
+    const usersCollection = await db.getCollection('users');
+    const user = await usersCollection.findById(req.user!.userId);
+
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    const userData = user as unknown as { collections?: string[] };
+
+    // Check if collection exists in user's list
+    if (!userData.collections || !userData.collections.includes(collectionName)) {
+      res.status(400).json({ success: false, message: 'Collection not found in user collections' });
+      return;
+    }
+
+    // Get the collection and check for duplicate document names
+    const collection = await db.getCollection(collectionName);
+    const existingDocuments = await collection.find();
+
+    // Check if a document with this name already exists for this user in this collection
+    const documentExists = existingDocuments.some((doc) => {
+      const docData = doc as unknown as { name?: string; userId?: string };
+      return docData.name === documentName && docData.userId === req.user!.userId;
+    });
+
+    if (documentExists) {
+      res.status(400).json({ success: false, message: 'A document with this name already exists in the collection' });
+      return;
+    }
+
+    // Compress then encrypt the document content before storing
+    const encodedContent = encodeContentForStorage(documentContent || {});
+    const encryptedBuffer = encryptionService.encrypt(encodedContent);
+
+    // Create the document in the collection with encrypted content
+    await collection.insert({
+      name: documentName,
+      userId: req.user!.userId,
+      createdAt: new Date().toISOString(),
+      content: encryptedBuffer.toString('base64') as unknown as Record<string, DocumentValue>,
+    });
+
+    const response = addTokenToResponse(req, {
+      success: true,
+      message: `Document '${documentName}' created successfully in collection '${collectionName}'`,
+    });
+
+    res.status(201).json(response);
+  } catch (error) {
+    console.error('Create document error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * DELETE /api/deleteDocument
+ * Delete a document from a collection
+ * @requires Authentication - Bearer token in Authorization header
+ * @param {string} collectionName - Name of the collection
+ * @param {string} documentName - Name of the document to delete
+ * @returns {object} { success: boolean, message: string, token?: string }
+ */
+app.delete('/api/deleteDocument', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { collectionName, documentName } = req.body as {
+      collectionName?: string;
+      documentName?: string;
+    };
+
+    if (!collectionName || !documentName) {
+      res.status(400).json({ success: false, message: 'collectionName and documentName are required' });
+      return;
+    }
+
+    // Verify user has access to this collection
+    const usersCollection = await db.getCollection('users');
+    const user = await usersCollection.findById(req.user!.userId);
+
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    const userData = user as unknown as { collections?: string[] };
+
+    // Check if collection exists in user's list
+    if (!userData.collections || !userData.collections.includes(collectionName)) {
+      res.status(400).json({ success: false, message: 'Collection not found in user collections' });
+      return;
+    }
+
+    // Find and delete the document
+    const collection = await db.getCollection(collectionName);
+    const documents = await collection.find();
+
+    // Find the document by name and userId
+    const document = documents.find((doc) => {
+      const docData = doc as unknown as { name?: string; userId?: string };
+      return docData.name === documentName && docData.userId === req.user!.userId;
+    });
+
+    if (!document) {
+      res.status(404).json({ success: false, message: 'Document not found' });
+      return;
+    }
+
+    // Delete the document
+    await collection.delete(document.id);
+
+    const response = addTokenToResponse(req, {
+      success: true,
+      message: `Document '${documentName}' deleted successfully from collection '${collectionName}'`,
+    });
+
+    res.json(response);
+  } catch (error) {
+    console.error('Delete document error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * GET /api/fetchDocuments
+ * Retrieve all document names from a collection for the authenticated user
+ * @requires Authentication - Bearer token in Authorization header
+ * @param {string} collectionName - Name of the collection (query parameter)
+ * @returns {object} { success: boolean, message: string, documentNames: string[], token?: string }
+ */
+app.get('/api/fetchDocuments', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const collectionName = req.query['collectionName'] as string | undefined;
+
+    if (!collectionName) {
+      res.status(400).json({ success: false, message: 'collectionName is required' });
+      return;
+    }
+
+    // Verify user has access to this collection
+    const usersCollection = await db.getCollection('users');
+    const user = await usersCollection.findById(req.user!.userId);
+
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    const userData = user as unknown as { collections?: string[] };
+
+    // Check if collection exists in user's list
+    if (!userData.collections || !userData.collections.includes(collectionName)) {
+      res.status(400).json({ success: false, message: 'Collection not found in user collections' });
+      return;
+    }
+
+    // Get all documents from the collection that belong to this user
+    const collection = await db.getCollection(collectionName);
+    const allDocuments = await collection.find();
+
+    // Filter documents by userId and extract names
+    const documentNames = allDocuments
+      .filter((doc) => {
+        const docData = doc as unknown as { userId?: string };
+        return docData.userId === req.user!.userId;
+      })
+      .map((doc) => {
+        const docData = doc as unknown as { name?: string };
+        return docData.name || '';
+      })
+      .filter((name) => name !== ''); // Remove empty names
+
+    const response = addTokenToResponse(req, {
+      success: true,
+      message: 'Documents fetched successfully',
+      documentNames,
+    });
+
+    res.json(response);
+  } catch (error) {
+    console.error('Fetch documents error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * GET /api/fetchDocumentContent
+ * Retrieve the full content of a specific document
+ * @requires Authentication - Bearer token in Authorization header
+ * @param {string} collectionName - Name of the collection (query parameter)
+ * @param {string} documentName - Name of the document (query parameter)
+ * @returns {object} { success: boolean, message: string, documentContent: object, token?: string }
+ */
+app.get('/api/fetchDocumentContent', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const collectionName = req.query['collectionName'] as string | undefined;
+    const documentName = req.query['documentName'] as string | undefined;
+
+    if (!collectionName || !documentName) {
+      res.status(400).json({ success: false, message: 'collectionName and documentName are required' });
+      return;
+    }
+
+    // Verify user has access to this collection
+    const usersCollection = await db.getCollection('users');
+    const user = await usersCollection.findById(req.user!.userId);
+
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    const userData = user as unknown as { collections?: string[] };
+
+    // Check if collection exists in user's list
+    if (!userData.collections || !userData.collections.includes(collectionName)) {
+      res.status(400).json({ success: false, message: 'Collection not found in user collections' });
+      return;
+    }
+
+    // Find the document in the collection
+    const collection = await db.getCollection(collectionName);
+    const allDocuments = await collection.find();
+
+    // Find the document by name and userId
+    const document = allDocuments.find((doc) => {
+      const docData = doc as unknown as { name?: string; userId?: string };
+      return docData.name === documentName && docData.userId === req.user!.userId;
+    });
+
+    if (!document) {
+      res.status(404).json({ success: false, message: 'Document not found' });
+      return;
+    }
+
+    // Extract and decrypt the content
+    const docData = document as unknown as { content?: string };
+    const encryptedContent = docData.content || '';
+
+    // Decrypt then decode the content
+    const decryptedBuffer = encryptionService.decrypt(Buffer.from(encryptedContent, 'base64'));
+    const documentContent = decodeContentFromStorage(decryptedBuffer);
+
+    const response = addTokenToResponse(req, {
+      success: true,
+      message: 'Document content fetched successfully',
+      documentContent,
+    });
+
+    res.json(response);
+  } catch (error) {
+    console.error('Fetch document content error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * PUT /api/updateDocument
+ * Update the content of an existing document
+ * @requires Authentication - Bearer token in Authorization header
+ * @param {string} collectionName - Name of the collection
+ * @param {string} documentName - Name of the document to update
+ * @param {object} newDocumentContent - New JSON object to replace the document content
+ * @returns {object} { success: boolean, message: string, token?: string }
+ * @note The name and userId fields are preserved during update
+ */
+app.put('/api/updateDocument', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { collectionName, documentName, newDocumentContent } = req.body as {
+      collectionName?: string;
+      documentName?: string;
+      newDocumentContent?: Record<string, unknown>;
+    };
+
+    if (!collectionName || !documentName || !newDocumentContent) {
+      res
+        .status(400)
+        .json({ success: false, message: 'collectionName, documentName, and newDocumentContent are required' });
+      return;
+    }
+
+    // Verify user has access to this collection
+    const usersCollection = await db.getCollection('users');
+    const user = await usersCollection.findById(req.user!.userId);
+
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    const userData = user as unknown as { collections?: string[] };
+
+    // Check if collection exists in user's list
+    if (!userData.collections || !userData.collections.includes(collectionName)) {
+      res.status(400).json({ success: false, message: 'Collection not found in user collections' });
+      return;
+    }
+
+    // Find the document in the collection
+    const collection = await db.getCollection(collectionName);
+    const allDocuments = await collection.find();
+
+    // Find the document by name and userId
+    const document = allDocuments.find((doc) => {
+      const docData = doc as unknown as { name?: string; userId?: string };
+      return docData.name === documentName && docData.userId === req.user!.userId;
+    });
+
+    if (!document) {
+      res.status(404).json({ success: false, message: 'Document not found' });
+      return;
+    }
+
+    // Compress then encrypt the new content before storing
+    const encodedContent = encodeContentForStorage(newDocumentContent);
+    const encryptedBuffer = encryptionService.encrypt(encodedContent);
+
+    // Update the document content while preserving all system fields
+    const docData = document as unknown as { createdAt?: string };
+    await collection.update(document.id, {
+      name: documentName,
+      userId: req.user!.userId,
+      createdAt: docData.createdAt || new Date().toISOString(),
+      content: encryptedBuffer.toString('base64') as unknown as Record<string, DocumentValue>,
+    });
+
+    const response = addTokenToResponse(req, {
+      success: true,
+      message: `Document '${documentName}' updated successfully in collection '${collectionName}'`,
+    });
+
+    res.json(response);
+  } catch (error) {
+    console.error('Update document error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
@@ -732,4 +1616,4 @@ if (process.env['NODE_ENV'] !== 'test') {
     });
 }
 
-export { app, initDB };
+export { app, loadDummyAccount, initDB };

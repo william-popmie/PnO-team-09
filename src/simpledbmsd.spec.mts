@@ -3,7 +3,7 @@
 
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { app, initDB } from './simpledbmsd.mjs';
+import { app, initDB, loadDummyAccount } from './simpledbmsd.mjs';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -12,16 +12,14 @@ describe('SimpleDBMS Daemon API', () => {
   let tempDir: string;
   let dbPath: string;
   let walPath: string;
-  let heapPath: string;
-  let heapWalPath: string;
 
   beforeAll(async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'simpledbms-test-'));
     dbPath = path.join(tempDir, 'test.db');
     walPath = path.join(tempDir, 'test.wal');
-    heapPath = path.join(tempDir, 'test-heap.db');
-    heapWalPath = path.join(tempDir, 'test-heap.wal');
-    await initDB(dbPath, walPath, heapPath, heapWalPath);
+    await initDB(dbPath, walPath);
+    // Load dummy account data for testing
+    await loadDummyAccount();
   });
 
   afterAll(async () => {
@@ -29,10 +27,6 @@ describe('SimpleDBMS Daemon API', () => {
   });
 
   describe('Core REST API', () => {
-    beforeAll(async () => {
-      await request(app).post('/db').send({ name: 'users' });
-    });
-
     it('create a document', async () => {
       const res = await request(app).post('/db/users').send({ name: 'maarten', age: 22 });
 
@@ -47,7 +41,7 @@ describe('SimpleDBMS Daemon API', () => {
       const res = await request(app).get('/db/users');
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body)).toBe(true);
-      expect((res.body as unknown[]).length).toBeGreaterThanOrEqual(2);
+      expect((res.body as unknown[]).length).toBeGreaterThanOrEqual(2); // Alice + Bob
     });
 
     it('get a document by ID', async () => {
@@ -82,57 +76,408 @@ describe('SimpleDBMS Daemon API', () => {
       const checkRes = await request(app).get(`/db/users/${id}`);
       expect(checkRes.status).toBe(404);
     });
+  });
 
-    it('should create and search with index', async () => {
-      await request(app).post('/db').send({ name: 'indexedCol' });
-      await request(app).post('/db/indexedCol').send({ name: 'indexerBase' });
+  describe('Authentication API', () => {
+    it('should sign up a new user', async () => {
+      const res = await request(app).post('/api/signup').send({ username: 'testuser', password: 'testpass' });
 
-      // Create index
-      const idxRes = await request(app).post('/db/indexedCol/indexes/uniqueField123');
-      if (idxRes.status !== 201) throw new Error(JSON.stringify(idxRes.body));
-      expect(idxRes.status).toBe(201);
-
-      // Now insert document having the field so it gets indexed
-      await request(app).post('/db/indexedCol').send({ name: 'indexedUser', uniqueField123: 200 });
-
-      // Verify index appears in the index list
-      const listIdxRes = await request(app).get('/db/indexedCol/indexes');
-      expect(listIdxRes.status).toBe(200);
-      expect((listIdxRes.body as { indexes: string[] }).indexes).toContain('uniqueField123');
-
-      // Search using index
-      const filter = encodeURIComponent(JSON.stringify({ uniqueField123: { $eq: 200 } }));
-      const findRes = await request(app).get(`/db/indexedCol?filter=${filter}`);
-      expect(findRes.status).toBe(200);
-      expect((findRes.body as unknown[]).length).toBeGreaterThanOrEqual(1);
+      expect(res.status).toBe(201);
+      expect((res.body as { success?: boolean }).success).toBe(true);
+      expect((res.body as { token?: string }).token).toBeDefined();
     });
 
-    it('should drop index', async () => {
-      const dropRes = await request(app).delete('/db/indexedCol/indexes/uniqueField123');
-      if (dropRes.status !== 200) console.error(dropRes.body);
-      expect(dropRes.status).toBe(200);
+    it('should not allow duplicate usernames', async () => {
+      await request(app).post('/api/signup').send({ username: 'duplicate', password: 'pass' });
 
-      const listIdxRes = await request(app).get('/db/indexedCol/indexes');
-      expect((listIdxRes.body as { indexes: string[] }).indexes).not.toContain('uniqueField123');
+      const res = await request(app).post('/api/signup').send({ username: 'duplicate', password: 'pass' });
+
+      expect(res.status).toBe(400);
+      expect((res.body as { message?: string }).message).toContain('already exists');
     });
 
-    it('should paginate and sort results', async () => {
-      // Create some mock data
-      await request(app).post('/db/users').send({ name: 'A', score: 10 });
-      await request(app).post('/db/users').send({ name: 'B', score: 20 });
-      await request(app).post('/db/users').send({ name: 'C', score: 30 });
-      await request(app).post('/db/users').send({ name: 'D', score: 40 });
+    it('should login with valid credentials', async () => {
+      await request(app).post('/api/signup').send({ username: 'loginuser', password: 'loginpass' });
 
-      // Fetch with pagination and sort descending
-      const query = '?sortField=score&sortOrder=desc&limit=2&skip=1';
-      const res = await request(app).get(`/db/users${query}`);
+      const res = await request(app).post('/api/login').send({ username: 'loginuser', password: 'loginpass' });
 
       expect(res.status).toBe(200);
-      const docs = res.body as { name: string; score: number }[];
-      expect(docs).toHaveLength(2);
-      // Descending total: D(40), C(30), B(20), A(10). Skip 1 -> C, B.
-      expect(docs[0].name).toBe('C');
-      expect(docs[1].name).toBe('B');
+      expect((res.body as { success?: boolean }).success).toBe(true);
+      expect((res.body as { token?: string }).token).toBeDefined();
+    });
+
+    it('should reject invalid credentials', async () => {
+      const res = await request(app).post('/api/login').send({ username: 'nonexistent', password: 'wrongpass' });
+
+      expect(res.status).toBe(401);
+    });
+
+    it('should validate existing token', async () => {
+      const signupRes = await request(app).post('/api/signup').send({ username: 'tokenuser', password: 'tokenpass' });
+
+      const token = (signupRes.body as { token: string }).token;
+
+      const res = await request(app).post('/api/login').send({ token });
+
+      expect(res.status).toBe(200);
+      expect((res.body as { success?: boolean }).success).toBe(true);
+    });
+  });
+
+  describe('Collection Management API', () => {
+    let authToken: string;
+
+    beforeAll(async () => {
+      const signupRes = await request(app).post('/api/signup').send({ username: 'collectionuser', password: 'pass' });
+      authToken = (signupRes.body as { token: string }).token;
+    });
+
+    it('should create a collection', async () => {
+      const res = await request(app)
+        .post('/api/createCollection')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ collectionName: 'myNotes' });
+
+      expect(res.status).toBe(201);
+      expect((res.body as { success?: boolean }).success).toBe(true);
+    });
+
+    it('should not allow duplicate collections', async () => {
+      await request(app)
+        .post('/api/createCollection')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ collectionName: 'duplicateCollection' });
+
+      const res = await request(app)
+        .post('/api/createCollection')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ collectionName: 'duplicateCollection' });
+
+      expect(res.status).toBe(400);
+      expect((res.body as { message?: string }).message).toContain('already exists');
+    });
+
+    it('should fetch all collections', async () => {
+      const res = await request(app).get('/api/fetchCollections').set('Authorization', `Bearer ${authToken}`);
+
+      expect(res.status).toBe(200);
+      expect((res.body as { success?: boolean }).success).toBe(true);
+      expect(Array.isArray((res.body as { collections?: string[] }).collections)).toBe(true);
+    });
+
+    it('should delete a collection', async () => {
+      await request(app)
+        .post('/api/createCollection')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ collectionName: 'toDelete' });
+
+      const res = await request(app)
+        .delete('/api/deleteCollection')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ collectionName: 'toDelete' });
+
+      expect(res.status).toBe(200);
+      expect((res.body as { success?: boolean }).success).toBe(true);
+    });
+
+    it('should reject unauthorized collection creation', async () => {
+      const res = await request(app).post('/api/createCollection').send({ collectionName: 'unauthorized' });
+
+      expect(res.status).toBe(401);
+    });
+  });
+
+  describe('Document Management API', () => {
+    let authToken: string;
+    const collectionName = 'testDocs';
+
+    beforeAll(async () => {
+      const signupRes = await request(app).post('/api/signup').send({ username: 'docuser', password: 'pass' });
+      authToken = (signupRes.body as { token: string }).token;
+
+      await request(app)
+        .post('/api/createCollection')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ collectionName });
+    });
+
+    it('should create a document', async () => {
+      const res = await request(app)
+        .post('/api/createDocument')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          collectionName,
+          documentName: 'MyFirstDoc',
+          documentContent: { text: 'Hello World', priority: 'high' },
+        });
+
+      expect(res.status).toBe(201);
+      expect((res.body as { success?: boolean }).success).toBe(true);
+    });
+
+    it('should not allow duplicate document names', async () => {
+      await request(app)
+        .post('/api/createDocument')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          collectionName,
+          documentName: 'DuplicateDoc',
+          documentContent: { text: 'First' },
+        });
+
+      const res = await request(app)
+        .post('/api/createDocument')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          collectionName,
+          documentName: 'DuplicateDoc',
+          documentContent: { text: 'Second' },
+        });
+
+      expect(res.status).toBe(400);
+      expect((res.body as { message?: string }).message).toContain('already exists');
+    });
+
+    it('should fetch all document names', async () => {
+      const res = await request(app)
+        .get('/api/fetchDocuments')
+        .set('Authorization', `Bearer ${authToken}`)
+        .query({ collectionName });
+
+      expect(res.status).toBe(200);
+      expect((res.body as { success?: boolean }).success).toBe(true);
+      expect(Array.isArray((res.body as { documentNames?: string[] }).documentNames)).toBe(true);
+    });
+
+    it('should fetch document content', async () => {
+      await request(app)
+        .post('/api/createDocument')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          collectionName,
+          documentName: 'ContentDoc',
+          documentContent: { description: 'Test content', value: 42 },
+        });
+
+      const res = await request(app)
+        .get('/api/fetchDocumentContent')
+        .set('Authorization', `Bearer ${authToken}`)
+        .query({ collectionName, documentName: 'ContentDoc' });
+
+      expect(res.status).toBe(200);
+      expect((res.body as { success?: boolean }).success).toBe(true);
+      expect((res.body as { documentContent?: { description?: string } }).documentContent?.description).toBe(
+        'Test content',
+      );
+    });
+
+    it('should fetch legacy-style plain JSON document content (no compression envelope)', async () => {
+      await request(app)
+        .post('/api/createDocument')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          collectionName,
+          documentName: 'LegacyPlainDoc',
+          documentContent: { a: 1 },
+        });
+
+      const res = await request(app)
+        .get('/api/fetchDocumentContent')
+        .set('Authorization', `Bearer ${authToken}`)
+        .query({ collectionName, documentName: 'LegacyPlainDoc' });
+
+      expect(res.status).toBe(200);
+      expect((res.body as { success?: boolean }).success).toBe(true);
+      expect((res.body as { documentContent?: { a?: number } }).documentContent?.a).toBe(1);
+    });
+
+    it('should update document content', async () => {
+      await request(app)
+        .post('/api/createDocument')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          collectionName,
+          documentName: 'UpdateDoc',
+          documentContent: { status: 'draft' },
+        });
+
+      const res = await request(app)
+        .put('/api/updateDocument')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          collectionName,
+          documentName: 'UpdateDoc',
+          newDocumentContent: { status: 'published', views: 100 },
+        });
+
+      expect(res.status).toBe(200);
+      expect((res.body as { success?: boolean }).success).toBe(true);
+
+      const checkRes = await request(app)
+        .get('/api/fetchDocumentContent')
+        .set('Authorization', `Bearer ${authToken}`)
+        .query({ collectionName, documentName: 'UpdateDoc' });
+
+      expect((checkRes.body as { documentContent?: { status?: string } }).documentContent?.status).toBe('published');
+    });
+
+    it('should delete a document', async () => {
+      await request(app)
+        .post('/api/createDocument')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          collectionName,
+          documentName: 'DeleteDoc',
+          documentContent: { temp: true },
+        });
+
+      const res = await request(app)
+        .delete('/api/deleteDocument')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ collectionName, documentName: 'DeleteDoc' });
+
+      expect(res.status).toBe(200);
+      expect((res.body as { success?: boolean }).success).toBe(true);
+
+      const checkRes = await request(app)
+        .get('/api/fetchDocumentContent')
+        .set('Authorization', `Bearer ${authToken}`)
+        .query({ collectionName, documentName: 'DeleteDoc' });
+
+      expect(checkRes.status).toBe(404);
+    });
+
+    it('should reject unauthorized document operations', async () => {
+      const res = await request(app)
+        .post('/api/createDocument')
+        .send({ collectionName, documentName: 'Unauthorized', documentContent: {} });
+
+      expect(res.status).toBe(401);
+    });
+  });
+
+  describe('GDPR Compliance API', () => {
+    let authToken: string;
+    const testCollectionName = 'gdprTestCollection';
+
+    beforeAll(async () => {
+      const signupRes = await request(app).post('/api/signup').send({ username: 'gdpruser', password: 'gdprpass' });
+      authToken = (signupRes.body as { token: string }).token;
+
+      // Create a collection with some documents
+      await request(app)
+        .post('/api/createCollection')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ collectionName: testCollectionName });
+
+      await request(app)
+        .post('/api/createDocument')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          collectionName: testCollectionName,
+          documentName: 'TestDoc1',
+          documentContent: { data: 'sample1' },
+        });
+
+      await request(app)
+        .post('/api/createDocument')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          collectionName: testCollectionName,
+          documentName: 'TestDoc2',
+          documentContent: { data: 'sample2' },
+        });
+    });
+
+    it('should retrieve user data', async () => {
+      const res = await request(app).get('/api/getUserData').set('Authorization', `Bearer ${authToken}`);
+
+      expect(res.status).toBe(200);
+      expect((res.body as { success?: boolean }).success).toBe(true);
+      expect((res.body as { userData?: { userId?: string } }).userData?.userId).toBeDefined();
+      expect((res.body as { userData?: { username?: string } }).userData?.username).toBe('gdpruser');
+      expect((res.body as { userData?: { hashedPassword?: string } }).userData?.hashedPassword).toBeDefined();
+    });
+
+    it('should reject unauthorized access to user data', async () => {
+      const res = await request(app).get('/api/getUserData');
+
+      expect(res.status).toBe(401);
+    });
+
+    it('should retrieve all user data including collections and documents', async () => {
+      const res = await request(app).get('/api/getAllUserData').set('Authorization', `Bearer ${authToken}`);
+
+      expect(res.status).toBe(200);
+      expect((res.body as { userId?: string }).userId).toBeDefined();
+      expect((res.body as { username?: string }).username).toBe('gdpruser');
+      expect((res.body as { password?: string }).password).toBeDefined(); // Hashed password
+      expect((res.body as { collections?: Record<string, unknown[]> }).collections).toBeDefined();
+
+      const collections = (res.body as { collections?: Record<string, unknown[]> }).collections;
+      expect(collections?.[testCollectionName]).toBeDefined();
+      expect(Array.isArray(collections?.[testCollectionName])).toBe(true);
+      expect(collections?.[testCollectionName].length).toBeGreaterThanOrEqual(2); // At least 2 documents
+    });
+
+    it('should reject unauthorized access to all user data', async () => {
+      const res = await request(app).get('/api/getAllUserData');
+
+      expect(res.status).toBe(401);
+    });
+
+    it('should only include user-owned documents in data export', async () => {
+      // Create another user with their own collection and documents
+      const otherUserRes = await request(app).post('/api/signup').send({ username: 'otheruser', password: 'pass' });
+      const otherToken = (otherUserRes.body as { token: string }).token;
+
+      await request(app)
+        .post('/api/createCollection')
+        .set('Authorization', `Bearer ${otherToken}`)
+        .send({ collectionName: 'otherCollection' });
+
+      await request(app)
+        .post('/api/createDocument')
+        .set('Authorization', `Bearer ${otherToken}`)
+        .send({
+          collectionName: 'otherCollection',
+          documentName: 'OtherDoc',
+          documentContent: { data: 'other' },
+        });
+
+      // Fetch first user's data
+      const res = await request(app).get('/api/getAllUserData').set('Authorization', `Bearer ${authToken}`);
+
+      expect(res.status).toBe(200);
+      const collections = (res.body as { collections?: Record<string, unknown[]> }).collections;
+
+      // Should only have testCollectionName, not otherCollection
+      expect(collections?.[testCollectionName]).toBeDefined();
+      expect(collections?.['otherCollection']).toBeUndefined();
+    });
+  });
+
+  describe('Dummy Account Data', () => {
+    let demoToken: string;
+
+    beforeAll(async () => {
+      // Login with demo account
+      const loginRes = await request(app).post('/api/login').send({ username: 'demo', password: 'demo12345' });
+      demoToken = (loginRes.body as { token: string }).token;
+    });
+
+    it('should login with demo account', async () => {
+      const res = await request(app).post('/api/login').send({ username: 'demo', password: 'demo12345' });
+
+      expect(res.status).toBe(200);
+      expect((res.body as { success?: boolean }).success).toBe(true);
+      expect((res.body as { token?: string }).token).toBeDefined();
+
+      // Verify the demoToken from beforeAll is valid
+      const collectionsRes = await request(app)
+        .get('/api/fetchCollections')
+        .set('Authorization', `Bearer ${demoToken}`);
+      expect(collectionsRes.status).toBe(200);
     });
   });
 });

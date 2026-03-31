@@ -5,6 +5,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Collection, SimpleDBMS, type DocumentValue } from './simpledbms.mjs';
 import { MockFile } from './file/mockfile.mjs';
 import { FBNodeStorage } from './node-storage/fb-node-storage.mjs';
+import {
+  COMPRESSION_ALGORITHM_ZSTD_ID,
+  COMPRESSION_ENVELOPE_HEADER_SIZE,
+  CompressionService,
+} from './compression/compression.mjs';
 
 describe('Collection', () => {
   let db: SimpleDBMS;
@@ -349,6 +354,93 @@ describe('SimpleDBMS', () => {
 
     expect(await users2.findById('u1')).toBeDefined();
     expect(await posts2.findById('p1')).toBeDefined();
+    await db.close();
+  });
+
+  it('should persist and reopen with compressed db header', async () => {
+      let db = await SimpleDBMS.create(dbFile, walFile, heapFile, heapWalFile);
+
+    await db.getCollection('users');
+
+    const freeBlockFile = db.getFreeBlockFile();
+    const currentHeader = await freeBlockFile.readHeader();
+
+    let parsedHeader: unknown;
+    if (currentHeader.subarray(0, 4).equals(Buffer.from('DBH1', 'ascii'))) {
+      const compressedSize = currentHeader.readUInt32LE(9);
+      const compressedPayload = currentHeader.subarray(
+        COMPRESSION_ENVELOPE_HEADER_SIZE,
+        COMPRESSION_ENVELOPE_HEADER_SIZE + compressedSize,
+      );
+      const decoded = compressionService.decompress({
+        algorithm: 'zstd',
+        originalSize: currentHeader.readUInt32LE(5),
+        compressedSize,
+        payload: Buffer.from(compressedPayload),
+      });
+      parsedHeader = JSON.parse(decoded.toString());
+    } else {
+      parsedHeader = JSON.parse(currentHeader.toString());
+    }
+
+    const headerJson = Buffer.from(JSON.stringify(parsedHeader));
+    const compressedHeader = compressionService.compress(headerJson);
+    const metadata = Buffer.alloc(COMPRESSION_ENVELOPE_HEADER_SIZE);
+    Buffer.from('DBH1', 'ascii').copy(metadata, 0);
+    metadata.writeUInt8(COMPRESSION_ALGORITHM_ZSTD_ID, 4);
+    metadata.writeUInt32LE(compressedHeader.originalSize, 5);
+    metadata.writeUInt32LE(compressedHeader.compressedSize, 9);
+
+    await freeBlockFile.writeHeader(Buffer.concat([metadata, compressedHeader.payload]));
+    await freeBlockFile.commit();
+
+    await db.close();
+
+      db = await SimpleDBMS.open(dbFile, walFile, heapFile, heapWalFile);
+    const collection = await db.getCollection('users');
+    await collection.insert({ id: 'doc-header-test', value: 'ok' });
+    const found = await collection.findById('doc-header-test');
+    expect(found).toBeDefined();
+    expect(found!['value']).toBe('ok');
+    await db.close();
+  });
+
+  it('should reopen with legacy plain JSON header', async () => {
+      let db = await SimpleDBMS.create(dbFile, walFile, heapFile, heapWalFile);
+    const users = await db.getCollection('users');
+    await users.insert({ id: 'legacy-user', name: 'legacy' });
+
+    const freeBlockFile = db.getFreeBlockFile();
+    const header = await freeBlockFile.readHeader();
+
+    let parsedHeader: unknown;
+    if (header.subarray(0, 4).equals(Buffer.from('DBH1', 'ascii'))) {
+      const compressedSize = header.readUInt32LE(9);
+      const payload = header.subarray(
+        COMPRESSION_ENVELOPE_HEADER_SIZE,
+        COMPRESSION_ENVELOPE_HEADER_SIZE + compressedSize,
+      );
+      const service = new CompressionService({ algorithm: 'zstd' });
+      const decoded = service.decompress({
+        algorithm: 'zstd',
+        originalSize: header.readUInt32LE(5),
+        compressedSize,
+        payload: Buffer.from(payload),
+      });
+      parsedHeader = JSON.parse(decoded.toString());
+    } else {
+      parsedHeader = JSON.parse(header.toString());
+    }
+
+    await freeBlockFile.writeHeader(Buffer.from(JSON.stringify(parsedHeader)));
+    await freeBlockFile.commit();
+    await db.close();
+
+      db = await SimpleDBMS.open(dbFile, walFile, heapFile, heapWalFile);
+    const reopenedUsers = await db.getCollection('users');
+    const found = await reopenedUsers.findById('legacy-user');
+    expect(found).toBeDefined();
+    expect(found!['name']).toBe('legacy');
     await db.close();
   });
 });

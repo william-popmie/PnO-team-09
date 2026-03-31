@@ -8,7 +8,34 @@ import { FreeBlockFile, DEFAULT_BLOCK_SIZE, NO_BLOCK } from './freeblockfile.mjs
 import { AtomicFileImpl } from './atomic-operations/atomic-file.mjs';
 import { WALManagerImpl } from './atomic-operations/wal-manager.mjs';
 import { type File } from './file/file.mjs';
+import { CompressionService, resolveCompressionAlgorithmFromEnvironment } from './compression/compression.mjs';
+import { deserializeCompressionEnvelope, serializeCompressionEnvelope } from './compression/envelope.mjs';
 import { randomUUID } from 'crypto';
+
+const HEADER_COMPRESSED_PAYLOAD_MAGIC = Buffer.from('DBH1', 'ascii');
+const headerCompressionService = new CompressionService({
+  algorithm: resolveCompressionAlgorithmFromEnvironment(),
+});
+
+function encodeHeaderForStorage(header: Record<string, unknown>): Buffer {
+  const jsonBuffer = Buffer.from(JSON.stringify(header));
+  const compressed = headerCompressionService.compress(jsonBuffer);
+
+  if (compressed.compressedSize >= compressed.originalSize) {
+    return jsonBuffer;
+  }
+
+  return serializeCompressionEnvelope(HEADER_COMPRESSED_PAYLOAD_MAGIC, compressed);
+}
+
+function decodeHeaderFromStorage(payload: Buffer): string {
+  const compressed = deserializeCompressionEnvelope(payload, HEADER_COMPRESSED_PAYLOAD_MAGIC);
+  if (compressed === null) {
+    return payload.toString();
+  }
+
+  return headerCompressionService.decompress(compressed).toString();
+}
 
 // Document interface
 // shows all valid data types for the document
@@ -871,6 +898,47 @@ export class Collection {
   }
 
   /**
+   * Finds documents in the collection using keyset pagination by id.
+   * @param {number} limit Maximum number of documents to return.
+   * @param {string | null} [afterId] Return documents strictly after this id.
+   * @returns {Promise<Document[]>} A page of documents.
+   */
+  async findPagedAfter(limit: number, afterId: string | null = null): Promise<Document[]> {
+    const safeLimit = Math.max(1, Math.floor(limit));
+
+    const results: Document[] = [];
+    const iterator = afterId === null ? this.primaryTree.entries() : this.primaryTree.entriesFrom(afterId);
+
+    for await (const { key, value } of iterator) {
+      if (afterId !== null && key <= afterId) {
+        continue;
+      }
+
+      results.push(value);
+      if (results.length >= safeLimit) {
+        break;
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Counts the total number of documents in the collection.
+   * @returns {Promise<number>} The total document count.
+   */
+  async countDocuments(): Promise<number> {
+    let count = 0;
+    const iterator = this.primaryTree.entries();
+
+    while (!(await iterator.next()).done) {
+      count++;
+    }
+
+    return count;
+  }
+
+  /**
    * Performs aggregation on the collection.
    * Uses secondary indexes when available for efficient grouping (O(log n + k)).
    * @param {object} options The aggregation options.
@@ -1251,9 +1319,8 @@ export class SimpleDBMS {
         await this.saveCatalogRoot();
       } else {
         try {
-          // Remove null bytes before parsing
-          const jsonStr = headerBuf.toString().replace(/\0/g, '');
-          this.dbHeader = JSON.parse(jsonStr) as typeof this.dbHeader;
+          const decodedHeader = decodeHeaderFromStorage(headerBuf);
+          this.dbHeader = JSON.parse(decodedHeader) as typeof this.dbHeader;
           const rootNode = await this.catalogStorage.loadNode(this.dbHeader.catalogRootBlockId);
           this.catalogTree.load(rootNode);
         } catch {
@@ -1280,7 +1347,7 @@ export class SimpleDBMS {
 
     this.dbHeader.catalogRootBlockId = rootId;
 
-    const headerBuf = Buffer.from(JSON.stringify(this.dbHeader));
+    const headerBuf = encodeHeaderForStorage(this.dbHeader as unknown as Record<string, unknown>);
     await this.fbFile.writeHeader(headerBuf);
     await this.fbFile.commit();
   }

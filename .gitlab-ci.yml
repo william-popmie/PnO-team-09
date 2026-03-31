@@ -6,6 +6,7 @@ stages:
   - coverage
   - lint
   - prettier-check
+  - deploy-docs
 
 cache:
   paths:
@@ -36,3 +37,19 @@ prettier-check:
   stage: prettier-check
   script:
     - npm run prettier-check
+
+pages:
+  stage: deploy-docs
+  script:
+    - cd raft-consensus-algorithm
+    - npm ci --ignore-scripts
+    - npm run build --workspace @maboke123/raft-core
+    - npm run build --workspace @maboke123/raft-grpc
+    - npm run docs
+    - mkdir -p ../public
+    - cp -r docs/* ../public/
+  artifacts:
+    paths:
+      - public
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'

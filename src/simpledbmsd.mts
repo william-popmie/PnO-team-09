@@ -6,11 +6,38 @@ import express from 'express';
 import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
 import { SimpleDBMS, type Document, type AggregateQuery, type FilterOperators } from './simpledbms.mjs';
+import { CompressionService, resolveCompressionAlgorithmFromEnvironment } from './compression/compression.mjs';
+import { deserializeCompressionEnvelope, serializeCompressionEnvelope } from './compression/envelope.mjs';
 import { RealFile } from './file/file.mjs';
 import { FBNodeStorage } from './node-storage/fb-node-storage.mjs';
 
 const app = express();
 const port = 3000;
+const contentCompressionService = new CompressionService({
+  algorithm: resolveCompressionAlgorithmFromEnvironment(),
+});
+const DOCUMENT_COMPRESSED_PAYLOAD_MAGIC = Buffer.from('DOC1', 'ascii');
+
+function encodeContentForStorage(content: Record<string, unknown>): Buffer {
+  const jsonBuffer = Buffer.from(JSON.stringify(content));
+  const compressed = contentCompressionService.compress(jsonBuffer);
+
+  if (compressed.compressedSize >= compressed.originalSize) {
+    return jsonBuffer;
+  }
+
+  return serializeCompressionEnvelope(DOCUMENT_COMPRESSED_PAYLOAD_MAGIC, compressed);
+}
+
+function decodeContentFromStorage(payload: Buffer): Record<string, unknown> {
+  const compressed = deserializeCompressionEnvelope(payload, DOCUMENT_COMPRESSED_PAYLOAD_MAGIC);
+  if (compressed === null) {
+    return JSON.parse(payload.toString()) as Record<string, unknown>;
+  }
+
+  const decoded = contentCompressionService.decompress(compressed);
+  return JSON.parse(decoded.toString()) as Record<string, unknown>;
+}
 
 app.use(express.json());
 

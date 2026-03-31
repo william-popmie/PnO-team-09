@@ -1,7 +1,23 @@
 // @author Frederick Hillen, Arwin Gorissen
-// @date 2025-11-17
+// @date 2025-03-16
 
 import type { File } from '../file/file.mjs';
+
+// Shared magic number that appears at the start of every WAL record.
+const WAL_MAGIC = 0x574c4152;
+
+const RECORD_TYPE_WRITE = 1;
+const RECORD_TYPE_COMMIT = 2;
+
+// WRITE record layout (20-byte header + payload):
+//   [magic(4)][type(4)][offset(4)][payloadLength(4)][payloadChecksum(4)][payload...]
+const WRITE_HEADER_SIZE = 20;
+
+// COMMIT record layout (8 bytes, no payload):
+//   [magic(4)][type(4)]
+const COMMIT_RECORD_SIZE = 8;
+
+const WAL_SIZE_LIMIT = 100 * 1024 * 1024; // 100 MB
 
 /**
  * Interface to manage the write-ahead log.
@@ -21,7 +37,7 @@ export interface WALManager {
  *  Small async mutex used to serialize WAL file operations
  *  to avoid races (used in every function of wal-manager).
  */
-class Mutex {
+export class Mutex {
   private locked = false;
   private waiters: (() => void)[] = [];
 
@@ -119,10 +135,22 @@ export class WALManagerImpl implements WALManager {
    */
   public async logWrite(offset: number, data: Uint8Array): Promise<void> {
     return this.mutex.runExclusive(async () => {
+      const walSize: number = await this.walFile.stat().then((stat) => stat.size);
+      const recordSize = WRITE_HEADER_SIZE + data.length;
+      if (walSize + recordSize > WAL_SIZE_LIMIT) {
+        console.log('WAL size limit reached. Triggering automatic checkpoint.');
+        await this.checkpointInternalWithoutMutex();
+      }
+
       const checksum: number = this.checksumCalculator(data);
-      const header: Uint32Array = new Uint32Array([offset, data.length, checksum]);
+      const header = Buffer.alloc(WRITE_HEADER_SIZE);
+      header.writeUInt32LE(WAL_MAGIC, 0);
+      header.writeUInt32LE(RECORD_TYPE_WRITE, 4);
+      header.writeUInt32LE(offset, 8);
+      header.writeUInt32LE(data.length, 12);
+      header.writeUInt32LE(checksum, 16);
       const pos: number = await this.walFile.stat().then((stat) => stat.size);
-      await this.walFile.writev([Buffer.from(header.buffer), Buffer.from(data)], pos);
+      await this.walFile.writev([header, Buffer.from(data)], pos);
     });
   }
 
@@ -132,9 +160,17 @@ export class WALManagerImpl implements WALManager {
    */
   public async addCommitMarker(): Promise<void> {
     return this.mutex.runExclusive(async () => {
-      const marker: Buffer = Buffer.from('COMMIT\n');
+      const walSize: number = await this.walFile.stat().then((stat) => stat.size);
+      if (walSize + COMMIT_RECORD_SIZE > WAL_SIZE_LIMIT) {
+        console.log('WAL size limit reached. Triggering automatic checkpoint.');
+        await this.checkpointInternalWithoutMutex();
+      }
+
+      const record = Buffer.alloc(COMMIT_RECORD_SIZE);
+      record.writeUInt32LE(WAL_MAGIC, 0);
+      record.writeUInt32LE(RECORD_TYPE_COMMIT, 4);
       const pos: number = await this.walFile.stat().then((stat) => stat.size);
-      await this.walFile.writev([marker], pos);
+      await this.walFile.writev([record], pos);
     });
   }
 
@@ -148,11 +184,14 @@ export class WALManagerImpl implements WALManager {
   }
 
   /**
-   * Writes all committed data in the WAL to the database.
+   * Writes all committed data in the WAL to the database and clears the WAL.
    */
   public async checkpoint(): Promise<void> {
     return this.mutex.runExclusive(async () => {
       await this.checkpointInternal();
+      await this.dbFile.sync();
+      await this.walFile.truncate(0);
+      await this.walFile.sync();
     });
   }
 
@@ -173,45 +212,58 @@ export class WALManagerImpl implements WALManager {
   }
 
   /**
+   * Internal checkpoint with full durability cycle without acquiring the mutex.
+   * Called when WAL size limit is reached during logWrite or addCommitMarker.
+   */
+  private async checkpointInternalWithoutMutex(): Promise<void> {
+    await this.checkpointInternal();
+    await this.dbFile.sync();
+    await this.walFile.truncate(0);
+    await this.walFile.sync();
+  }
+
+  /**
    * Helper function that extracts all committed data from the WAL.
    * @param {number} walSize a number > 0, the size of the WAL
    * @param {Buffer} buffer contents of WAL
    * @returns {{ writes: { offset: number; data: Buffer }[] }} An object containing an array writes, of which each element represents a fully committed write.
    */
   private getCommittedData(walSize: number, buffer: Buffer): { writes: { offset: number; data: Buffer }[] } {
-    let pos: number = 0;
-    const marker: Buffer = Buffer.from('COMMIT\n');
-    let writes: { offset: number; data: Buffer }[] = [];
+    let pos = 0;
+    const writes: { offset: number; data: Buffer }[] = [];
     let tempWrites: { offset: number; data: Buffer }[] = [];
-    while (pos + 12 <= walSize) {
-      const headerSize: number = 12;
-      const size: number = headerSize + buffer.readUInt32LE(pos + 4);
-      const offset: number = buffer.readUInt32LE(pos);
-      const checksum = buffer.readUInt32LE(pos + 8);
-      const data: Buffer = buffer.subarray(pos + headerSize, pos + size);
 
-      if (pos + size + marker.length > walSize) break;
-      const check: number = this.checksumCalculator(data);
-      if (check !== checksum) {
-        console.log('All previous commits to the WAL were corrupted, sorry... :(( \nFlusing...');
-        writes = [];
-        break;
-      }
-      if (
-        pos + size + marker.length <= walSize &&
-        buffer.subarray(pos + size, pos + size + marker.length).equals(marker)
-      ) {
+    while (pos + COMMIT_RECORD_SIZE <= walSize) {
+      const magic = buffer.readUInt32LE(pos);
+      if (magic !== WAL_MAGIC) break;
+
+      const recordType = buffer.readUInt32LE(pos + 4);
+
+      if (recordType === RECORD_TYPE_WRITE) {
+        if (pos + WRITE_HEADER_SIZE > walSize) break;
+        const offset = buffer.readUInt32LE(pos + 8);
+        const payloadLength = buffer.readUInt32LE(pos + 12);
+        const payloadChecksum = buffer.readUInt32LE(pos + 16);
+        if (pos + WRITE_HEADER_SIZE + payloadLength > walSize) break;
+        const data = buffer.subarray(pos + WRITE_HEADER_SIZE, pos + WRITE_HEADER_SIZE + payloadLength);
+        if (this.checksumCalculator(data) !== payloadChecksum) {
+          console.log('Corrupted WAL record detected. Preserving previously committed records and stopping replay.');
+          tempWrites = [];
+          break;
+        }
+        tempWrites.push({ offset, data });
+        pos += WRITE_HEADER_SIZE + payloadLength;
+      } else if (recordType === RECORD_TYPE_COMMIT) {
         for (const w of tempWrites) {
           writes.push(w);
         }
-        writes.push({ offset, data });
         tempWrites = [];
-        pos += size + marker.length;
+        pos += COMMIT_RECORD_SIZE;
       } else {
-        tempWrites.push({ offset, data });
-        pos += size;
+        break;
       }
     }
+
     return { writes };
   }
 
@@ -230,18 +282,21 @@ export class WALManagerImpl implements WALManager {
 
       const journalBuffer: Buffer = Buffer.alloc(journalSize);
       await this.walFile.read(journalBuffer, { position: 0 });
-      const journalContents: string = journalBuffer.toString();
 
-      if (!journalContents.includes('COMMIT')) {
+      const committedData = this.getCommittedData(journalSize, journalBuffer);
+      if (committedData.writes.length === 0) {
         console.log('No committed changes detected. Flushing...');
         await this.walFile.truncate(0);
+        await this.walFile.sync();
         return;
       }
 
       console.log('Recovering committed WAL...');
       await this.checkpointInternal();
+      await this.dbFile.sync();
       console.log('Committed changes succesfully recovered.');
       await this.walFile.truncate(0);
+      await this.walFile.sync();
     });
   }
 

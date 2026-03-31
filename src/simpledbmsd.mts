@@ -7,7 +7,9 @@ import express from 'express';
 import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
 import cors from 'cors';
-import { EncryptionService } from './encryption/encryption-service.mjs';
+import { EncryptionService } from './encryption-service.mjs';
+import { CompressionService, resolveCompressionAlgorithmFromEnvironment } from './compression/compression.mjs';
+import { deserializeCompressionEnvelope, serializeCompressionEnvelope } from './compression/envelope.mjs';
 import { SimpleDBMS, type DocumentValue } from './simpledbms.mjs';
 import { RealFile } from './file/file.mjs';
 import { rename, writeFile, unlink, access } from 'node:fs/promises';
@@ -21,12 +23,41 @@ import {
   validateAndRefreshToken,
   type AuthenticatedRequest,
 } from './authentication.mjs';
-import { PasswordHasher } from './encryption/password-hashing.mjs';
+import { PasswordHasher } from './password-hashing.mjs';
 import { readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+const app = express();
+const port = 3000;
+const passwordHasher = new PasswordHasher();
+const contentCompressionService = new CompressionService({
+  algorithm: resolveCompressionAlgorithmFromEnvironment(),
+});
+const DOCUMENT_COMPRESSED_PAYLOAD_MAGIC = Buffer.from('DOC1', 'ascii');
+
+function encodeContentForStorage(content: Record<string, unknown>): Buffer {
+  const jsonBuffer = Buffer.from(JSON.stringify(content));
+  const compressed = contentCompressionService.compress(jsonBuffer);
+
+  if (compressed.compressedSize >= compressed.originalSize) {
+    return jsonBuffer;
+  }
+
+  return serializeCompressionEnvelope(DOCUMENT_COMPRESSED_PAYLOAD_MAGIC, compressed);
+}
+
+function decodeContentFromStorage(payload: Buffer): Record<string, unknown> {
+  const compressed = deserializeCompressionEnvelope(payload, DOCUMENT_COMPRESSED_PAYLOAD_MAGIC);
+  if (compressed === null) {
+    return JSON.parse(payload.toString()) as Record<string, unknown>;
+  }
+
+  const decoded = contentCompressionService.decompress(compressed);
+  return JSON.parse(decoded.toString()) as Record<string, unknown>;
+}
 
 /**
  * Marker file used to make the two-rename compaction swap recoverable.
@@ -103,26 +134,20 @@ async function recoverCompactionSwap(dbPath: string): Promise<void> {
   }
 
   const tempDbExists = await fileExists(info.tempDbPath);
-  const tempWalExists = await fileExists(info.tempWalPath);
-
-  if (!tempDbExists && tempWalExists) {
-    // DB rename succeeded, WAL rename did not — complete the swap
-    await rename(info.tempWalPath, info.targetWalPath);
-    console.log('Compaction swap recovered (completed WAL rename).');
-  } else if (tempDbExists) {
-    // DB rename never happened — roll back by cleaning up temp files
+  if (!tempDbExists) {
+    // rename #1 succeeded — complete the WAL rename
+    if (await fileExists(info.tempWalPath)) {
+      await rename(info.tempWalPath, info.targetWalPath);
+    }
+  } else {
+    // rename #1 didn't happen — roll back by removing temp files
     await unlink(info.tempDbPath).catch(() => {});
     await unlink(info.tempWalPath).catch(() => {});
-    console.log('Compaction swap recovered (rolled back temp files).');
   }
-  // else: both temp files gone — swap already completed
 
   await unlink(marker).catch(() => {});
+  console.log('Compaction swap recovery complete.');
 }
-
-const app = express();
-const port = 3000;
-const passwordHasher = new PasswordHasher();
 
 // Initialize encryption service
 const masterKey = process.env['ENCRYPTION_KEY'] || EncryptionService.generateMasterKey();
@@ -236,8 +261,9 @@ async function loadDummyAccount() {
       console.log(`  Creating collection: ${collectionData.name}`);
 
       for (const docData of collectionData.documents) {
-        // Encrypt the document content
-        const encryptedBuffer = encryptionService.encrypt(Buffer.from(JSON.stringify(docData.content)));
+        // Compress then encrypt the document content
+        const encodedContent = encodeContentForStorage(docData.content);
+        const encryptedBuffer = encryptionService.encrypt(encodedContent);
 
         await collection.insert({
           name: docData.name,
@@ -264,7 +290,6 @@ async function initDB(customDbPath?: string, customWalPath?: string) {
     currentDbPath = customDbPath || process.argv[2] || 'mydb.db';
     currentWalPath = customWalPath || process.argv[3] || 'mydb.wal';
 
-    // Recover from a crashed compaction swap before opening the DB
     await recoverCompactionSwap(currentDbPath);
 
     const dbFile = new RealFile(currentDbPath);
@@ -345,11 +370,6 @@ app.post('/db/:collection', async (req, res) => {
  *         required: true
  *         schema:
  *           type: string
- *       - in: query
- *         name: filter
- *         schema:
- *           type: string
- *         description: JSON string for filter (not fully implemented in query parser yet)
  *     responses:
  *       200:
  *         description: List of documents
@@ -360,6 +380,168 @@ app.get('/db/:collection', async (req, res) => {
     const collection = await db.getCollection(collectionName);
     const docs = await collection.find();
     res.json(docs);
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * @swagger
+ * /db/{collection}/paged:
+ *   get:
+ *     summary: Find documents in a collection with keyset pagination
+ *     parameters:
+ *       - in: path
+ *         name: collection
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *         description: Maximum number of documents to return
+ *       - in: query
+ *         name: after
+ *         schema:
+ *           type: string
+ *         description: Cursor id; returns documents strictly after this id (keyset pagination)
+ *       - in: query
+ *         name: filterField
+ *         schema:
+ *           type: string
+ *         description: Field name for equality filter
+ *       - in: query
+ *         name: filterValue
+ *         schema:
+ *           type: string
+ *         description: Field value for equality filter
+ *       - in: query
+ *         name: sortField
+ *         schema:
+ *           type: string
+ *         description: Field name to sort by
+ *       - in: query
+ *         name: sortOrder
+ *         schema:
+ *           type: string
+ *           enum: [asc, desc]
+ *         description: Sort direction (defaults to asc)
+ *       - in: query
+ *         name: projection
+ *         schema:
+ *           type: string
+ *         description: Comma-separated list of fields to return
+ *     responses:
+ *       200:
+ *         description: Paged documents with metadata
+ */
+app.get('/db/:collection/paged', async (req, res) => {
+  try {
+    const parseQueryValue = (raw: string): DocumentValue => {
+      if (raw === 'null') return null;
+      if (raw === 'true') return true;
+      if (raw === 'false') return false;
+      const numeric = Number(raw);
+      if (!Number.isNaN(numeric) && raw.trim() !== '') return numeric;
+      try {
+        return JSON.parse(raw) as DocumentValue;
+      } catch {
+        return raw;
+      }
+    };
+
+    const collectionName = req.params.collection;
+    const collection = await db.getCollection(collectionName);
+    const rawLimit = req.query['limit'];
+    const rawAfter = req.query['after'];
+    const rawFilterField = req.query['filterField'];
+    const rawFilterValue = req.query['filterValue'];
+    const rawSortField = req.query['sortField'];
+    const rawSortOrder = req.query['sortOrder'];
+    const rawProjection = req.query['projection'];
+
+    const limit = typeof rawLimit === 'string' && rawLimit.length > 0 ? Number.parseInt(rawLimit, 10) : null;
+    const after = typeof rawAfter === 'string' && rawAfter.length > 0 ? rawAfter : null;
+    const filterField =
+      typeof rawFilterField === 'string' && rawFilterField.trim().length > 0 ? rawFilterField.trim() : null;
+    const filterValue = typeof rawFilterValue === 'string' ? parseQueryValue(rawFilterValue) : null;
+    const sortField = typeof rawSortField === 'string' && rawSortField.trim().length > 0 ? rawSortField.trim() : null;
+    const sortOrder: 'asc' | 'desc' = rawSortOrder === 'desc' ? 'desc' : 'asc';
+    const projection =
+      typeof rawProjection === 'string' && rawProjection.trim().length > 0
+        ? rawProjection
+            .split(',')
+            .map((field) => field.trim())
+            .filter((field) => field.length > 0)
+        : null;
+
+    if (limit !== null && (!Number.isInteger(limit) || limit < 1)) {
+      res.status(400).json({ error: 'Invalid limit. Expected integer >= 1.' });
+      return;
+    }
+
+    if (rawSortOrder !== undefined && rawSortOrder !== 'asc' && rawSortOrder !== 'desc') {
+      res.status(400).json({ error: "Invalid sortOrder. Expected 'asc' or 'desc'." });
+      return;
+    }
+
+    if (filterField !== null && rawFilterValue === undefined) {
+      res.status(400).json({ error: 'filterValue is required when filterField is provided.' });
+      return;
+    }
+
+    if (filterField === null && rawFilterValue !== undefined) {
+      res.status(400).json({ error: 'filterField is required when filterValue is provided.' });
+      return;
+    }
+
+    const resolvedLimit = limit ?? 25;
+    const hasQueryShaping = Boolean(filterField || sortField || projection);
+
+    let pagePlusOne: import('./simpledbms.mjs').Document[];
+    if (!hasQueryShaping) {
+      pagePlusOne = await collection.findPagedAfter(resolvedLimit + 1, after);
+    } else {
+      const query: import('./simpledbms.mjs').Query = {};
+
+      if (filterField !== null && filterValue !== null) {
+        query.filter = (doc) => doc[filterField] === filterValue;
+      }
+
+      if (sortField !== null) {
+        query.sort = { field: sortField, order: sortOrder };
+      }
+
+      if (projection !== null && projection.length > 0) {
+        query.projection = projection;
+      }
+
+      const shapedDocs = await collection.find(query);
+      const startIndex = after !== null ? Math.max(0, shapedDocs.findIndex((doc) => doc.id === after) + 1) : 0;
+      pagePlusOne = shapedDocs.slice(startIndex, startIndex + resolvedLimit + 1);
+    }
+
+    const hasNextPage = pagePlusOne.length > resolvedLimit;
+    const docs = hasNextPage ? pagePlusOne.slice(0, resolvedLimit) : pagePlusOne;
+    const nextCursor = hasNextPage ? (docs[docs.length - 1]?.id ?? null) : null;
+
+    res.json({
+      items: docs,
+      limit: resolvedLimit,
+      after: after ?? null,
+      mode: 'keyset',
+      query: {
+        filterField: filterField ?? null,
+        filterValue: rawFilterValue ?? null,
+        sortField: sortField ?? null,
+        sortOrder: sortField ? sortOrder : null,
+        projection: projection ?? null,
+      },
+      hasNextPage,
+      nextCursor,
+    });
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
   }
@@ -1330,8 +1512,9 @@ app.post('/api/createDocument', authenticateToken, async (req: AuthenticatedRequ
       return;
     }
 
-    // Encrypt the document content before storing
-    const encryptedBuffer = encryptionService.encrypt(Buffer.from(JSON.stringify(documentContent || {})));
+    // Compress then encrypt the document content before storing
+    const encodedContent = encodeContentForStorage(documentContent || {});
+    const encryptedBuffer = encryptionService.encrypt(encodedContent);
 
     // Create the document in the collection with encrypted content
     await collection.insert({
@@ -1536,9 +1719,9 @@ app.get('/api/fetchDocumentContent', authenticateToken, async (req: Authenticate
     const docData = document as unknown as { content?: string };
     const encryptedContent = docData.content || '';
 
-    // Decrypt the content
+    // Decrypt then decode the content
     const decryptedBuffer = encryptionService.decrypt(Buffer.from(encryptedContent, 'base64'));
-    const documentContent = JSON.parse(decryptedBuffer.toString()) as Record<string, unknown>;
+    const documentContent = decodeContentFromStorage(decryptedBuffer);
 
     const response = addTokenToResponse(req, {
       success: true,
@@ -1610,8 +1793,9 @@ app.put('/api/updateDocument', authenticateToken, async (req: AuthenticatedReque
       return;
     }
 
-    // Encrypt the new content before storing
-    const encryptedBuffer = encryptionService.encrypt(Buffer.from(JSON.stringify(newDocumentContent)));
+    // Compress then encrypt the new content before storing
+    const encodedContent = encodeContentForStorage(newDocumentContent);
+    const encryptedBuffer = encryptionService.encrypt(encodedContent);
 
     // Update the document content while preserving all system fields
     const docData = document as unknown as { createdAt?: string };

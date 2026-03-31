@@ -6,6 +6,8 @@ import { MockFile } from '../file/mockfile.mjs';
 import { WALManagerImpl } from './wal-manager.mjs';
 import { AtomicFileImpl } from './atomic-file.mjs';
 
+const BINARY_COMMIT_SIZE = 8;
+
 describe('AtomicFile + WALManager integration (concurrency safe skeleton)', () => {
   let dbFile: MockFile;
   let walFile: MockFile;
@@ -85,38 +87,45 @@ describe('AtomicFile + WALManager integration (concurrency safe skeleton)', () =
   });
 
   it('journalWrite() test', async () => {
+    // WRITE record header is 20 bytes: magic(4)+type(4)+offset(4)+length(4)+checksum(4)
+    const WRITE_HEADER_SIZE = 20;
+
     await expect(atomic.journalWrite(16, data)).rejects.toThrowError('No active transaction.');
 
     //writes correctly to WAL
     await atomic.begin();
     await atomic.journalWrite(0, data);
     const buffer: Buffer = Buffer.alloc(data.length);
-    await walFile.read(buffer, { position: 12 });
+    await walFile.read(buffer, { position: WRITE_HEADER_SIZE });
     expect(buffer).toEqual(Buffer.from(data));
 
     //writes correctly to WAL if there is already data present
     await atomic.journalWrite(0, data2);
     const buffer2: Buffer = Buffer.alloc(data2.length);
-    const pos: number = data2.length + 24;
-    await walFile.read(buffer, { position: 12 });
+    // second record starts at WRITE_HEADER_SIZE + data.length; its payload is another WRITE_HEADER_SIZE in
+    const pos: number = data.length + WRITE_HEADER_SIZE * 2;
+    await walFile.read(buffer, { position: WRITE_HEADER_SIZE });
     await walFile.read(buffer2, { position: pos });
     expect(buffer).toEqual(Buffer.from(data));
     expect(buffer2).toEqual(Buffer.from(data2));
   });
 
   it('journalCommitToWall() test', async () => {
+    const WRITE_HEADER_SIZE = 20;
+
     await atomic.begin();
     await atomic.journalWrite(0, Uint8Array.from(data));
     await atomic.commitDataToWal();
 
-    //after commit the WAL contains the data and the commit marker
+    //after commit the WAL contains the data followed by a binary commit record
     const out: Buffer = Buffer.alloc(data.length);
-    await walFile.read(out, { position: 12 });
-    const marker: Buffer = Buffer.alloc(Buffer.from('COMMIT\n').length);
-    await walFile.read(marker, { position: 12 + data.length });
+    await walFile.read(out, { position: WRITE_HEADER_SIZE });
+    const marker: Buffer = Buffer.alloc(BINARY_COMMIT_SIZE);
+    await walFile.read(marker, { position: WRITE_HEADER_SIZE + data.length });
 
     expect(out).toEqual(Buffer.from(data));
-    expect(Buffer.from('COMMIT\n')).toEqual(marker);
+    expect(marker.length).toEqual(BINARY_COMMIT_SIZE);
+    expect(marker.equals(Buffer.from('COMMIT\n'))).toBe(false);
 
     await atomic.abort();
 
@@ -125,11 +134,13 @@ describe('AtomicFile + WALManager integration (concurrency safe skeleton)', () =
     await atomic.journalWrite(0, data);
     await atomic.journalWrite(0, data2);
     await atomic.commitDataToWal();
-    const marker2: Buffer = Buffer.alloc(Buffer.from('COMMIT\n').length);
-    const pos: number = 24 + data.length + data2.length;
+    const marker2: Buffer = Buffer.alloc(BINARY_COMMIT_SIZE);
+    // commit record follows two WRITE records
+    const pos: number = WRITE_HEADER_SIZE * 2 + data.length + data2.length;
     await walFile.read(marker2, { position: pos });
 
-    expect(Buffer.from('COMMIT\n')).toEqual(marker2);
+    expect(marker2.length).toEqual(BINARY_COMMIT_SIZE);
+    expect(marker2.equals(Buffer.from('COMMIT\n'))).toBe(false);
   });
 
   it('checkpoint() test1: seperate writes to database', async () => {
@@ -190,12 +201,13 @@ describe('AtomicFile + WALManager integration (concurrency safe skeleton)', () =
   });
 
   it('checkpoint() test4: checksum test', async () => {
+    const WRITE_HEADER_SIZE = 20;
     await atomic.begin();
     await atomic.journalWrite(0, Uint8Array.from(data2));
     await atomic.journalWrite(data.length, Uint8Array.from(data2));
     await atomic.commitDataToWal();
     //corrupt data in WAL
-    await walFile.writev([Buffer.from(data)], 12);
+    await walFile.writev([Buffer.from(data)], WRITE_HEADER_SIZE);
     await atomic.checkpoint();
 
     //nothing should be written to database and WAL should be flushed

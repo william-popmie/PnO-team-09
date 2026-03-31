@@ -14,7 +14,7 @@ const compat = new FlatCompat({
 });
 
 export default [{
-    ignores: ["**/build/", "**/coverage/", "eslint.config.mjs"],
+    ignores: ["**/build/", "**/coverage/", "**/dist/"],
 }, ...compat.extends(
     "eslint:recommended",
     "plugin:@typescript-eslint/recommended",
@@ -30,7 +30,13 @@ export default [{
         sourceType: "script",
 
         parserOptions: {
-            project: ["./tsconfig.json"],
+            project: [
+                "./tsconfig.json",
+                "./raft-consensus-algorithm/packages/*/tsconfig*.json",
+                "./raft-consensus-algorithm/apps/*/tsconfig.json",
+                "./raft-consensus-algorithm/apps/*/tsconfig.*.json",
+            ],
+            tsconfigRootDir: __dirname,
         },
     },
 

@@ -386,7 +386,7 @@ export class FreeBlockFile {
     return this.decodePayload(payload);
   }
 
-  private encodePayload(data: Buffer): Buffer {
+  encodePayload(data: Buffer): Buffer {
     const compressed = this.compressionService.compress(data);
     if (compressed.compressedSize >= compressed.originalSize) {
       return Buffer.from(data);
@@ -395,7 +395,7 @@ export class FreeBlockFile {
     return serializeCompressionEnvelope(FREEBLOCK_COMPRESSED_PAYLOAD_MAGIC, compressed);
   }
 
-  private decodePayload(payload: Buffer): Buffer {
+  decodePayload(payload: Buffer): Buffer {
     const decoded = deserializeCompressionEnvelope(payload, FREEBLOCK_COMPRESSED_PAYLOAD_MAGIC);
     if (decoded === null) {
       return Buffer.from(payload);

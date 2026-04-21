@@ -89,7 +89,7 @@ describe('FBNodeStorage', () => {
   });
 
   it('rejects legacy node-storage envelope (v0 without algorithm id)', async () => {
-    const service = new CompressionService({ algorithm: 'zstd' });
+    const service = new CompressionService({ algorithm: 'gzip' });
     const legacyPayload = {
       type: 'leaf',
       keys: [{ type: 'number', value: 42 }],

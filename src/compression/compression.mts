@@ -37,7 +37,7 @@ export const COMPRESSION_ENVELOPE_HEADER_SIZE: number =
 // - ZST1: Node-storage zstd payload envelope, version 1
 export const FREEBLOCK_COMPRESSED_PAYLOAD_MAGIC: Buffer = Buffer.from('FBC1', 'ascii');
 export const NODE_STORAGE_COMPRESSED_PAYLOAD_MAGIC: Buffer = Buffer.from('ZST1', 'ascii');
-export const DEFAULT_COMPRESSION_ALGORITHM: CompressionAlgorithm = 'zstd';
+export const DEFAULT_COMPRESSION_ALGORITHM: CompressionAlgorithm = 'gzip';
 export const COMPRESSION_ALGORITHM_ENV_VAR = 'COMPRESSION_ALGO';
 export const COMPRESSION_ALGORITHMS: CompressionAlgorithm[] = ['zstd', 'gzip', 'brotli', 'deflate'];
 let hasLoggedCompressionAlgorithmSelection = false;

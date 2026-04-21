@@ -32,6 +32,9 @@ import {
   HEADER_LENGTH_OFFSET,
   HEADER_CLIENT_AREA_OFFSET,
 } from './freeblockfile.mjs';
+import { CompressionService, NODE_STORAGE_COMPRESSED_PAYLOAD_MAGIC } from './compression/compression.mjs';
+import { deserializeCompressionEnvelope } from './compression/envelope.mjs';
+import assert from 'node:assert';
 
 /**
  * Result returned after a compaction operation.
@@ -242,6 +245,7 @@ export async function compactDatabase(
 
   // Step 5: Measure file size after compaction
   const sizeAfter = (await targetDbFile.stat()).size;
+  assert(sizeAfter <= sizeBefore);
 
   return {
     db: newDb,
@@ -313,8 +317,10 @@ export async function shrinkDatabase(fbf: FreeBlockFile): Promise<ShrinkResult> 
 
   // ── Phase 1: Build Block Map ──────────────────────────────────────────
 
-  // Track block status: FREE (on free list), LIVE (reachable from a tree),
-  // or undefined (not yet classified — will be treated as orphaned → FREE).
+  // Compression service for decoding node payloads (algorithm read from envelope header)
+  const nodeCompressionService = new CompressionService();
+
+  // Track which blocks are free vs live
   const blockStatus = new Array<'FREE' | 'LIVE' | undefined>(totalBlocks);
   const freeBlockIds = new Set<number>();
   const blobInfos: BlobInfo[] = [];
@@ -393,7 +399,12 @@ export async function shrinkDatabase(fbf: FreeBlockFile): Promise<ShrinkResult> 
     const data = readBlobDataFromParts(parts);
     if (data.length === 0) return;
 
-    const node = JSON.parse(data.toString('utf-8')) as {
+    // Decode FBC1 wrapper (applied by FreeBlockFile.encodePayload), then ZST1 wrapper (applied by FBNodeStorage)
+    const decodedFBC1 = fbf.decodePayload(data);
+    const nodeCompResult = deserializeCompressionEnvelope(decodedFBC1, NODE_STORAGE_COMPRESSED_PAYLOAD_MAGIC);
+    const jsonBuf = nodeCompResult !== null ? nodeCompressionService.decompress(nodeCompResult) : decodedFBC1;
+
+    const node = JSON.parse(jsonBuf.toString('utf-8')) as {
       type: string;
       childBlockIds?: number[];
       values?: Array<{ t?: string; value?: unknown }>;
@@ -457,22 +468,22 @@ export async function shrinkDatabase(fbf: FreeBlockFile): Promise<ShrinkResult> 
 
   // ── Phase 2: Build Relocation Table ───────────────────────────────────
 
-  const freeSorted = [...freeBlockIds].sort((a, b) => a - b); // ASC
-  const liveSorted: number[] = []; // DESC (iterated high-to-low below)
+  const freeSorted = [...freeBlockIds].sort((a, b) => a - b);
+  const liveSorted: number[] = [];
   for (let i = totalBlocks - 1; i >= 1; i--) {
     if (blockStatus[i] === 'LIVE') liveSorted.push(i);
   }
 
   const relocationMap = new Map<number, number>();
-  let freeIdx = 0;
-  let liveIdx = 0;
-  while (freeIdx < freeSorted.length && liveIdx < liveSorted.length) {
-    const freeSlot = freeSorted[freeIdx];
-    const liveBlock = liveSorted[liveIdx];
+  let fi = 0;
+  let li = 0;
+  while (fi < freeSorted.length && li < liveSorted.length) {
+    const freeSlot = freeSorted[fi];
+    const liveBlock = liveSorted[li];
     if (liveBlock > freeSlot) {
       relocationMap.set(liveBlock, freeSlot);
-      freeIdx++;
-      liveIdx++;
+      fi++;
+      li++;
     } else {
       break;
     }
@@ -496,8 +507,15 @@ export async function shrinkDatabase(fbf: FreeBlockFile): Promise<ShrinkResult> 
     const data = readBlobDataFromParts(payloadParts);
     if (data.length === 0) continue;
 
+    // Decode FBC1 + ZST1 wrappers before parsing node JSON
+    const decodedFBC1Phase3 = fbf.decodePayload(data);
+    const nodeCompResultPhase3 = deserializeCompressionEnvelope(decodedFBC1Phase3, NODE_STORAGE_COMPRESSED_PAYLOAD_MAGIC);
+    const jsonBufPhase3 = nodeCompResultPhase3 !== null
+      ? nodeCompressionService.decompress(nodeCompResultPhase3)
+      : decodedFBC1Phase3;
+
     // Parse node JSON and apply relocations to block ID references
-    const node = JSON.parse(data.toString('utf-8')) as Record<string, unknown>;
+    const node = JSON.parse(jsonBufPhase3.toString('utf-8')) as Record<string, unknown>;
     let jsonChanged = false;
 
     if (node['type'] === 'internal') {

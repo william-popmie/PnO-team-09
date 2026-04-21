@@ -1148,7 +1148,13 @@ export class SimpleDBMS {
       rootId = root.blockId!;
     }
 
-    await this.catalogTree.insert(name, rootId);
+    const existingRootId = await this.catalogTree.search(name);
+    if (existingRootId !== rootId) {
+      if (existingRootId !== null) {
+        await this.catalogTree.delete(name);
+      }
+      await this.catalogTree.insert(name, rootId);
+    }
     await this.saveCatalogRoot();
   }
 

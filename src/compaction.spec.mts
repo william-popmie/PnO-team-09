@@ -88,13 +88,13 @@ describe('Database Compaction & Shrink', () => {
       let db = await SimpleDBMS.create(dbFile, walFile);
       const users = await db.getCollection('users');
 
-      // Insert many documents
-      for (let i = 0; i < 50; i++) {
+      // Insert many documents (>50 to exceed B+ tree order and force splits)
+      for (let i = 0; i < 55; i++) {
         await users.insert({ id: `user-${i}`, name: `User ${i}`, data: 'x'.repeat(100) });
       }
 
       // Delete most of them to create free space
-      for (let i = 10; i < 50; i++) {
+      for (let i = 10; i < 55; i++) {
         await users.delete(`user-${i}`);
       }
 
@@ -253,11 +253,11 @@ describe('Database Compaction & Shrink', () => {
       let db = await SimpleDBMS.create(dbFile, walFile);
       const users = await db.getCollection('users');
 
-      // Insert many documents then delete most
-      for (let i = 0; i < 50; i++) {
+      // Insert many documents then delete most (>50 to exceed B+ tree order and force splits)
+      for (let i = 0; i < 55; i++) {
         await users.insert({ id: `user-${i}`, name: `User ${i}`, data: 'x'.repeat(100) });
       }
-      for (let i = 5; i < 50; i++) {
+      for (let i = 5; i < 55; i++) {
         await users.delete(`user-${i}`);
       }
 
@@ -362,12 +362,13 @@ describe('Database Compaction & Shrink', () => {
       let db = await SimpleDBMS.create(dbFile, walFile);
       const users = await db.getCollection('users');
 
-      for (let i = 0; i < 30; i++) {
+      // Insert more than B+ tree order (50) to force splits
+      for (let i = 0; i < 55; i++) {
         await users.insert({ id: `user-${i}`, name: `User ${i}`, data: 'x'.repeat(50) });
       }
 
       // Delete most documents to create free space
-      for (let i = 10; i < 30; i++) {
+      for (let i = 10; i < 55; i++) {
         await users.delete(`user-${i}`);
       }
 

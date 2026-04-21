@@ -10,14 +10,14 @@ describe('CompressionService', () => {
     expect(service.getOptions()).toEqual({ algorithm: 'zstd' });
   });
 
-  it('compresses and decompresses with zstd', () => {
-    const service = new CompressionService({ algorithm: 'zstd' });
+  it('compresses and decompresses with gzip', () => {
+    const service = new CompressionService({ algorithm: 'gzip' });
     const original = Buffer.from('hello world hello world hello world hello world', 'utf-8');
 
     const compressed = service.compress(original);
     const decompressed = service.decompress(compressed);
 
-    expect(compressed.algorithm).toBe('zstd');
+    expect(compressed.algorithm).toBe('gzip');
     expect(decompressed.equals(original)).toBe(true);
   });
 
@@ -32,12 +32,12 @@ describe('CompressionService', () => {
     expect(decompressed.equals(original)).toBe(true);
   });
 
-  it('throws when trying to decompress invalid zstd payload', () => {
-    const service = new CompressionService({ algorithm: 'zstd' });
+  it('throws when trying to decompress invalid gzip payload', () => {
+    const service = new CompressionService({ algorithm: 'gzip' });
 
     expect(() =>
       service.decompress({
-        algorithm: 'zstd',
+        algorithm: 'gzip',
         originalSize: 1,
         compressedSize: 1,
         payload: Buffer.from([0]),
@@ -46,7 +46,7 @@ describe('CompressionService', () => {
   });
 
   it('throws when compressedSize does not match payload length', () => {
-    const service = new CompressionService({ algorithm: 'zstd' });
+    const service = new CompressionService({ algorithm: 'gzip' });
     const compressed = service.compress(Buffer.from('size-mismatch', 'utf-8'));
 
     expect(() =>

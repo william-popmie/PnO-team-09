@@ -509,10 +509,12 @@ export async function shrinkDatabase(fbf: FreeBlockFile): Promise<ShrinkResult> 
 
     // Decode FBC1 + ZST1 wrappers before parsing node JSON
     const decodedFBC1Phase3 = fbf.decodePayload(data);
-    const nodeCompResultPhase3 = deserializeCompressionEnvelope(decodedFBC1Phase3, NODE_STORAGE_COMPRESSED_PAYLOAD_MAGIC);
-    const jsonBufPhase3 = nodeCompResultPhase3 !== null
-      ? nodeCompressionService.decompress(nodeCompResultPhase3)
-      : decodedFBC1Phase3;
+    const nodeCompResultPhase3 = deserializeCompressionEnvelope(
+      decodedFBC1Phase3,
+      NODE_STORAGE_COMPRESSED_PAYLOAD_MAGIC,
+    );
+    const jsonBufPhase3 =
+      nodeCompResultPhase3 !== null ? nodeCompressionService.decompress(nodeCompResultPhase3) : decodedFBC1Phase3;
 
     // Parse node JSON and apply relocations to block ID references
     const node = JSON.parse(jsonBufPhase3.toString('utf-8')) as Record<string, unknown>;

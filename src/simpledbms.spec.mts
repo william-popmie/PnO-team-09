@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { SimpleDBMS } from './simpledbms.mjs';
 import { MockFile } from './file/mockfile.mjs';
 import {
-  COMPRESSION_ALGORITHM_ZSTD_ID,
+  COMPRESSION_ALGORITHM_GZIP_ID,
   COMPRESSION_ENVELOPE_HEADER_SIZE,
   CompressionService,
 } from './compression/compression.mjs';
@@ -110,7 +110,7 @@ describe('SimpleDBMS', () => {
 
   it('should persist and reopen with compressed db header', async () => {
     let db = await SimpleDBMS.create(dbFile, walFile);
-    const compressionService = new CompressionService({ algorithm: 'zstd' });
+    const compressionService = new CompressionService({ algorithm: 'gzip' });
 
     await db.getCollection('users');
 
@@ -125,7 +125,7 @@ describe('SimpleDBMS', () => {
         COMPRESSION_ENVELOPE_HEADER_SIZE + compressedSize,
       );
       const decoded = compressionService.decompress({
-        algorithm: 'zstd',
+        algorithm: 'gzip',
         originalSize: currentHeader.readUInt32LE(5),
         compressedSize,
         payload: Buffer.from(compressedPayload),
@@ -139,7 +139,7 @@ describe('SimpleDBMS', () => {
     const compressedHeader = compressionService.compress(headerJson);
     const metadata = Buffer.alloc(COMPRESSION_ENVELOPE_HEADER_SIZE);
     Buffer.from('DBH1', 'ascii').copy(metadata, 0);
-    metadata.writeUInt8(COMPRESSION_ALGORITHM_ZSTD_ID, 4);
+    metadata.writeUInt8(COMPRESSION_ALGORITHM_GZIP_ID, 4);
     metadata.writeUInt32LE(compressedHeader.originalSize, 5);
     metadata.writeUInt32LE(compressedHeader.compressedSize, 9);
 
@@ -173,9 +173,9 @@ describe('SimpleDBMS', () => {
         COMPRESSION_ENVELOPE_HEADER_SIZE,
         COMPRESSION_ENVELOPE_HEADER_SIZE + compressedSize,
       );
-      const service = new CompressionService({ algorithm: 'zstd' });
+      const service = new CompressionService({ algorithm: 'gzip' });
       const decoded = service.decompress({
-        algorithm: 'zstd',
+        algorithm: 'gzip',
         originalSize: header.readUInt32LE(5),
         compressedSize,
         payload: Buffer.from(payload),

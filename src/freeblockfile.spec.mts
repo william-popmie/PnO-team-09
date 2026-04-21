@@ -4,7 +4,7 @@ import { MockFile } from '../src/file/mockfile.mjs';
 import type { File as FileInterface } from '../src/file/file.mjs';
 import type { AtomicFile } from '../src/freeblockfile.mjs';
 import {
-  COMPRESSION_ALGORITHM_ZSTD_ID,
+  COMPRESSION_ALGORITHM_GZIP_ID,
   COMPRESSION_ENVELOPE_HEADER_SIZE,
   CompressionService,
   FREEBLOCK_COMPRESSED_PAYLOAD_MAGIC,
@@ -325,14 +325,14 @@ describe('FreeBlockFile', () => {
 
   it('reads legacy freeblock compressed envelope payload', async () => {
     const { fb } = await makeFreeBlockFile();
-    const service = new CompressionService({ algorithm: 'zstd' });
+    const service = new CompressionService({ algorithm: 'gzip' });
 
     const original = Buffer.from('legacy-freeblock-payload', 'utf-8');
     const compressed = service.compress(original);
 
     const metadata = Buffer.alloc(COMPRESSION_ENVELOPE_HEADER_SIZE);
     FREEBLOCK_COMPRESSED_PAYLOAD_MAGIC.copy(metadata, 0);
-    metadata.writeUInt8(COMPRESSION_ALGORITHM_ZSTD_ID, 4);
+    metadata.writeUInt8(COMPRESSION_ALGORITHM_GZIP_ID, 4);
     metadata.writeUInt32LE(compressed.originalSize, 5);
     metadata.writeUInt32LE(compressed.compressedSize, 9);
     const encoded = Buffer.concat([metadata, compressed.payload]);

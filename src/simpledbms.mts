@@ -276,6 +276,13 @@ export class Collection {
   }
 
   /**
+   * Iterates over all documents in the collection as key-value pairs.
+   */
+  async *entries(): AsyncGenerator<{ key: string; value: Document }, void, unknown> {
+    yield* this.primaryTree.entries();
+  }
+
+  /**
    * Gets the list of indexed fields.
    */
   getIndexedFields(): string[] {
@@ -968,6 +975,26 @@ export class SimpleDBMS {
   }
 
   /**
+   * Returns the names of all collections stored in the database.
+   */
+  async getCollectionNames(): Promise<string[]> {
+    const names: string[] = [];
+    for await (const { key } of this.catalogTree.entries()) {
+      names.push(key);
+    }
+    return names;
+  }
+
+  /**
+   * Returns the indexed field names for a collection from the header metadata.
+   */
+  getCollectionIndexInfo(name: string): string[] {
+    const meta = this.dbHeader.collections[name];
+    if (!meta?.indexes) return [];
+    return Object.keys(meta.indexes);
+  }
+
+  /**
    * Gets a collection.
    * @param {string} name The name of the collection.
    * @returns {Promise<Collection>} The collection.
@@ -1121,7 +1148,13 @@ export class SimpleDBMS {
       rootId = root.blockId!;
     }
 
-    await this.catalogTree.insert(name, rootId);
+    const existingRootId = await this.catalogTree.search(name);
+    if (existingRootId !== rootId) {
+      if (existingRootId !== null) {
+        await this.catalogTree.delete(name);
+      }
+      await this.catalogTree.insert(name, rootId);
+    }
     await this.saveCatalogRoot();
   }
 

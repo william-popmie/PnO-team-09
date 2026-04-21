@@ -25,17 +25,17 @@
   },
   "devDependencies": {
     "@eslint/js": "9.39.0",
-    "@types/react": "19.2.7",
-    "@types/react-dom": "19.2.3",
-    "@vitejs/plugin-react": "5.1.1",
     "@types/argon2": "0.14.1",
     "@types/cors": "2.8.19",
     "@types/express": "5.0.5",
     "@types/jsonwebtoken": "9.0.10",
     "@types/node": "24.10.0",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
     "@types/supertest": "6.0.3",
     "@types/swagger-jsdoc": "6.0.4",
     "@types/swagger-ui-express": "4.1.8",
+    "@vitejs/plugin-react": "5.1.1",
     "@vitest/coverage-v8": "4.0.6",
     "eslint": "9.39.0",
     "prettier": "3.6.2",
@@ -55,6 +55,7 @@
     "@grpc/proto-loader": "0.8.0",
     "@maboke123/raft-core": "0.2.0",
     "@maboke123/raft-grpc": "0.1.0",
+    "@mongodb-js/zstd": "7.0.0",
     "@types/bcryptjs": "2.4.6",
     "argon2": "0.44.0",
     "bcryptjs": "3.0.3",
@@ -65,6 +66,7 @@
     "jsonwebtoken": "9.0.2",
     "swagger-jsdoc": "6.2.8",
     "swagger-ui-express": "5.0.1",
+    "zstd-codec": "0.1.5",
     "zustand": "5.0.11"
   }
 }

@@ -386,7 +386,7 @@ export class FreeBlockFile {
     return this.decodePayload(payload);
   }
 
-  private encodePayload(data: Buffer): Buffer {
+  encodePayload(data: Buffer): Buffer {
     const compressed = this.compressionService.compress(data);
     if (compressed.compressedSize >= compressed.originalSize) {
       return Buffer.from(data);
@@ -395,7 +395,7 @@ export class FreeBlockFile {
     return serializeCompressionEnvelope(FREEBLOCK_COMPRESSED_PAYLOAD_MAGIC, compressed);
   }
 
-  private decodePayload(payload: Buffer): Buffer {
+  decodePayload(payload: Buffer): Buffer {
     const decoded = deserializeCompressionEnvelope(payload, FREEBLOCK_COMPRESSED_PAYLOAD_MAGIC);
     if (decoded === null) {
       return Buffer.from(payload);
@@ -408,7 +408,7 @@ export class FreeBlockFile {
     }
   }
 
-  private async readRawBlock(blockId: number): Promise<Buffer> {
+  async readRawBlock(blockId: number): Promise<Buffer> {
     if (this.stagedWrites.has(blockId)) {
       return Buffer.from(this.stagedWrites.get(blockId)!);
     }
@@ -549,5 +549,20 @@ export class FreeBlockFile {
    */
   async debug_getFreeListHead(): Promise<number> {
     return Promise.resolve(this.cachedFreeListHead);
+  }
+
+  /**
+   * Returns the total number of blocks in the file (including block 0).
+   */
+  async getTotalBlockCount(): Promise<number> {
+    const st = await this.file.stat();
+    return Math.floor(st.size / this.blockSize);
+  }
+
+  /**
+   * Returns the underlying file handle.
+   */
+  getFile(): File {
+    return this.file;
   }
 }

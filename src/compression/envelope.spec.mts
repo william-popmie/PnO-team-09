@@ -4,7 +4,7 @@ import { deserializeCompressionEnvelope, serializeCompressionEnvelope } from './
 
 describe('Compression Envelope', () => {
   it('serializes and deserializes v1 envelope correctly', () => {
-    const service = new CompressionService({ algorithm: 'zstd' });
+    const service = new CompressionService({ algorithm: 'gzip' });
     const original = Buffer.from('hello-envelope-v1', 'utf-8');
     const compressed = service.compress(original);
 
@@ -33,7 +33,7 @@ describe('Compression Envelope', () => {
   });
 
   it('returns null for truncated v1 envelope payload', () => {
-    const service = new CompressionService({ algorithm: 'zstd' });
+    const service = new CompressionService({ algorithm: 'gzip' });
     const original = Buffer.from('truncated-v1', 'utf-8');
     const compressed = service.compress(original);
 
@@ -46,7 +46,7 @@ describe('Compression Envelope', () => {
   });
 
   it('returns null for v1 envelope with trailing bytes', () => {
-    const service = new CompressionService({ algorithm: 'zstd' });
+    const service = new CompressionService({ algorithm: 'gzip' });
     const original = Buffer.from('trailing-v1', 'utf-8');
     const compressed = service.compress(original);
 
@@ -59,7 +59,7 @@ describe('Compression Envelope', () => {
   });
 
   it('returns null for unknown algorithm id in v1 envelope', () => {
-    const service = new CompressionService({ algorithm: 'zstd' });
+    const service = new CompressionService({ algorithm: 'gzip' });
     const original = Buffer.from('unknown-algo-id', 'utf-8');
     const compressed = service.compress(original);
 
@@ -73,7 +73,7 @@ describe('Compression Envelope', () => {
   });
 
   it('throws if magic is not 4 bytes', () => {
-    const service = new CompressionService({ algorithm: 'zstd' });
+    const service = new CompressionService({ algorithm: 'gzip' });
     const compressed = service.compress(Buffer.from('bad-magic', 'utf-8'));
 
     expect(() => serializeCompressionEnvelope(Buffer.from('BAD', 'ascii'), compressed)).toThrow(
